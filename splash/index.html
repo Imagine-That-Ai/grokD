@@ -1,0 +1,1702 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>grok"D" · Cinematic Splash</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@800;900&family=Inter:wght@800;900&display=swap" rel="stylesheet">
+  <style>
+    /* ==========================================
+       grokD Splash Design Tokens & Theme Engine
+       ========================================== */
+    :root {
+      --font-grok: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Display", "Helvetica Neue", sans-serif;
+      --font-mono: "SF Mono", Menlo, Monaco, Consolas, monospace;
+      --rainbow-grad: linear-gradient(135deg, #FF1E56 0%, #FF5E36 20%, #00F0FF 45%, #FFD000 68%, #7928CA 88%, #5800FF 100%);
+      
+      /* Dark Theme (Default) */
+      --bg-canvas: #050509;
+      --bg-stage-grad: radial-gradient(circle at 50% 45%, #141328 0%, #0a0914 50%, #020205 100%);
+      --bg-understage: radial-gradient(circle at 50% 50%, #141328 0%, #0a0914 60%, #020205 100%);
+      --text-main: #FFFFFF;
+      --text-sub: #94A3B8;
+      --mesh-opacity: 0.42;
+      --vignette-grad: radial-gradient(circle at 50% 50%, transparent 35%, rgba(0, 0, 0, 0.92) 100%);
+      
+      --chrome-fill: linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 45%, #CBD5E1 75%, #94A3B8 100%);
+      --chrome-glow: drop-shadow(0 20px 50px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 35px rgba(255, 255, 255, 0.35));
+    }
+
+    /* Light Theme */
+    @media (prefers-color-scheme: light) {
+      :root[data-theme="auto"] {
+        --bg-canvas: #F8FAFC;
+        --bg-stage-grad: radial-gradient(circle at 50% 45%, #FFFFFF 0%, #F1F5F9 55%, #E2E8F0 100%);
+        --bg-understage: radial-gradient(circle at 50% 50%, #FFFFFF 0%, #F8FAFC 60%, #E2E8F0 100%);
+        --text-main: #0F172A;
+        --text-sub: #64748B;
+        --mesh-opacity: 0.45;
+        --vignette-grad: radial-gradient(circle at 50% 50%, transparent 45%, rgba(203, 213, 225, 0.7) 100%);
+        
+        --chrome-fill: linear-gradient(180deg, #090D16 0%, #1E293B 55%, #334155 100%);
+        --chrome-glow: drop-shadow(0 14px 32px rgba(15, 23, 42, 0.3)) drop-shadow(0 2px 8px rgba(15, 23, 42, 0.15));
+      }
+    }
+
+    :root[data-theme="light"] {
+      --bg-canvas: #F8FAFC;
+      --bg-stage-grad: radial-gradient(circle at 50% 45%, #FFFFFF 0%, #F1F5F9 55%, #E2E8F0 100%);
+      --bg-understage: radial-gradient(circle at 50% 50%, #FFFFFF 0%, #F8FAFC 60%, #E2E8F0 100%);
+      --text-main: #0F172A;
+      --text-sub: #64748B;
+      --mesh-opacity: 0.45;
+      --vignette-grad: radial-gradient(circle at 50% 50%, transparent 45%, rgba(203, 213, 225, 0.7) 100%);
+      
+      --chrome-fill: linear-gradient(180deg, #090D16 0%, #1E293B 55%, #334155 100%);
+      --chrome-glow: drop-shadow(0 14px 32px rgba(15, 23, 42, 0.3)) drop-shadow(0 2px 8px rgba(15, 23, 42, 0.15));
+    }
+
+    :root[data-theme="dark"] {
+      --bg-canvas: #050509;
+      --bg-stage-grad: radial-gradient(circle at 50% 45%, #141328 0%, #0a0914 50%, #020205 100%);
+      --bg-understage: radial-gradient(circle at 50% 50%, #141328 0%, #0a0914 60%, #020205 100%);
+      --text-main: #FFFFFF;
+      --text-sub: #94A3B8;
+      --mesh-opacity: 0.42;
+      --vignette-grad: radial-gradient(circle at 50% 50%, transparent 35%, rgba(0, 0, 0, 0.92) 100%);
+      
+      --chrome-fill: linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 45%, #CBD5E1 75%, #94A3B8 100%);
+      --chrome-glow: drop-shadow(0 20px 50px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 35px rgba(255, 255, 255, 0.35));
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-canvas);
+      font-family: var(--font-grok);
+      color: var(--text-main);
+      user-select: none;
+      -webkit-user-select: none;
+      transition: background-color 0.4s ease, color 0.4s ease;
+    }
+
+    /* Under-stage workspace */
+    .under-stage {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-understage);
+      color: var(--text-sub);
+      z-index: 0;
+      gap: 18px;
+    }
+    .under-stage h1 {
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--text-main);
+      letter-spacing: -0.02em;
+    }
+
+    /* Splash Stage Container */
+    .grokd-splash-stage {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 999999;
+      background: var(--bg-stage-grad);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      perspective: 1400px;
+      transform-style: preserve-3d;
+      overflow: hidden;
+      opacity: 1;
+      cursor: pointer;
+      transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1), filter 0.65s ease;
+    }
+
+    .grokd-splash-stage.fading-out {
+      opacity: 0;
+      filter: blur(20px);
+      pointer-events: none;
+    }
+
+    /* Ambient dynamic background lighting aura */
+    .splash-ambient-mesh {
+      position: absolute;
+      inset: -25%;
+      width: 150%;
+      height: 150%;
+      background: 
+        radial-gradient(circle at 30% 30%, rgba(255, 30, 86, var(--mesh-opacity)) 0%, transparent 45%),
+        radial-gradient(circle at 70% 25%, rgba(0, 240, 255, var(--mesh-opacity)) 0%, transparent 45%),
+        radial-gradient(circle at 65% 75%, rgba(121, 40, 202, var(--mesh-opacity)) 0%, transparent 50%),
+        radial-gradient(circle at 25% 70%, rgba(255, 208, 0, var(--mesh-opacity)) 0%, transparent 45%);
+      filter: blur(80px);
+      pointer-events: none;
+      animation: meshDrift 18s ease-in-out infinite alternate;
+      z-index: 1;
+    }
+
+    @keyframes meshDrift {
+      0% { transform: scale(1) rotate(0deg); }
+      50% { transform: scale(1.12) rotate(4deg) translate(-2%, 2%); }
+      100% { transform: scale(1.04) rotate(-3deg) translate(2%, -1%); }
+    }
+
+    .splash-vignette {
+      position: absolute;
+      inset: 0;
+      background: var(--vignette-grad);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    /* Particle Canvas */
+    #particle-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 3;
+    }
+
+    /* ==========================================
+       Phase 1: Full-Window Edge-to-Edge Echo Swarm
+       ========================================== */
+    .echo-swarm-layer {
+      position: absolute;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 4;
+      transform-style: preserve-3d;
+      overflow: hidden;
+    }
+
+    .echo-clone {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: var(--size, 68px);
+      height: var(--size, 68px);
+      margin-top: calc(var(--size, 68px) * -0.5);
+      margin-left: calc(var(--size, 68px) * -0.5);
+      will-change: transform, opacity;
+      animation: echoBurst var(--duration, 1.4s) cubic-bezier(0.12, 0.85, 0.25, 1) both;
+      animation-delay: var(--delay, 0s);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: visible;
+      filter: drop-shadow(0 10px 25px rgba(0, 0, 0, 0.45));
+    }
+
+    .echo-clone svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    @keyframes echoBurst {
+      0% {
+        opacity: 0;
+        transform: translate3d(0, 0, -350px) scale(0.06) rotate(var(--rot-start, 0deg));
+        filter: brightness(2.6) blur(6px);
+      }
+      16% {
+        opacity: var(--peak-opacity, 0.95);
+        filter: brightness(1.2) blur(0px);
+      }
+      74% {
+        opacity: var(--peak-opacity, 0.95);
+        transform: translate3d(var(--tx, 100px), var(--ty, 100px), var(--tz, 0px)) scale(var(--target-scale, 1)) rotate(var(--rot-mid, 15deg));
+      }
+      88% {
+        opacity: 0.5;
+        transform: translate3d(calc(var(--tx, 100px) * 0.3), calc(var(--ty, 100px) * 0.3), 80px) scale(calc(var(--target-scale, 1) * 0.5)) rotate(var(--rot-end, 30deg));
+      }
+      100% {
+        opacity: 0;
+        transform: translate3d(0, 0, 180px) scale(0.04) rotate(calc(var(--rot-end, 30deg) + 45deg));
+        filter: brightness(3) blur(8px);
+      }
+    }
+
+    /* ==========================================
+       Phase 2: Hero Mascot (FREE FLOATING HEAD WITH SVG FACE TATTOOS)
+       ========================================== */
+    .hero-mascot-wrapper {
+      position: relative;
+      width: 175px;
+      height: 175px;
+      margin-bottom: 0px;
+      transform: scale(0);
+      opacity: 0;
+      transform-origin: 50% 90%;
+      will-change: transform, opacity;
+      z-index: 15;
+    }
+
+    .hero-mascot-wrapper.active,
+    .hero-mascot-wrapper.mascot-bowing,
+    .hero-mascot-wrapper.head-wobble {
+      opacity: 1 !important;
+    }
+
+    .hero-mascot-wrapper.active {
+      animation: heroArrive 0.95s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    }
+
+    @keyframes heroArrive {
+      0% {
+        opacity: 0;
+        transform: scale(0.1) rotate(-15deg) translateZ(-350px);
+        filter: brightness(2.8) blur(12px);
+      }
+      50% {
+        opacity: 1;
+        filter: brightness(1.2) blur(0px);
+      }
+      75% {
+        transform: scale(1.15) rotate(3deg) translateZ(40px);
+      }
+      90% {
+        transform: scale(0.96) rotate(-1deg) translateZ(0);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1) rotate(0deg) translateZ(0);
+        filter: brightness(1) blur(0px);
+      }
+    }
+
+    /* Elegant Theatrical Bow to Grok */
+    .hero-mascot-wrapper.mascot-bowing {
+      animation: mascotBowToGrok 1.1s cubic-bezier(0.35, 0, 0.25, 1) forwards;
+    }
+
+    @keyframes mascotBowToGrok {
+      0% {
+        transform: scale(1) rotate(0deg) translateY(0);
+      }
+      35% {
+        transform: scale(0.92) rotate(-18deg) translateY(24px) skewX(-10deg);
+      }
+      70% {
+        transform: scale(0.90) rotate(-20deg) translateY(28px) skewX(-12deg);
+      }
+      100% {
+        transform: scale(1) rotate(0deg) translateY(0);
+      }
+    }
+
+    .mascot-ambient-aura {
+      position: absolute;
+      inset: -20px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0, 240, 255, 0.45) 0%, rgba(255, 30, 86, 0.4) 45%, rgba(121, 40, 202, 0.4) 70%, transparent 100%);
+      filter: blur(28px);
+      opacity: 0.85;
+      animation: pulseAura 3s ease-in-out infinite alternate;
+      z-index: 1;
+    }
+
+    @keyframes pulseAura {
+      0% { opacity: 0.65; filter: blur(22px); transform: scale(0.95); }
+      100% { opacity: 0.98; filter: blur(36px); transform: scale(1.08); }
+    }
+
+    /* Mascot Character Head (No Squircle Box) */
+    .mascot-creature-head {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      transition: transform 0.3s cubic-bezier(0.2, 0, 0.2, 1);
+      filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.35));
+    }
+
+    .mascot-creature-head svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .hero-mascot-wrapper.head-wobble {
+      animation: mascotHeadWobble 0.85s ease-in-out;
+    }
+
+    @keyframes mascotHeadWobble {
+      0% { transform: scale(1) rotate(0deg); }
+      25% { transform: scale(1.06) rotate(-8deg) translateY(-10px); }
+      50% { transform: scale(1.03) rotate(6deg) translateY(-3px); }
+      75% { transform: scale(0.98) rotate(-2deg); }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+
+    /* Eye movements & Adorable Natural Wink */
+    .eye-group {
+      transform-origin: 260px 250px;
+      transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .eyes-look-left #left-eye-group, .eyes-look-left #right-eye-group {
+      transform: translate(-15px, -6px) rotate(-8deg);
+    }
+
+    .eyes-look-right #left-eye-group, .eyes-look-right #right-eye-group {
+      transform: translate(14px, 8px) rotate(10deg);
+    }
+
+    .eyes-cross #left-eye-group {
+      transform: translate(18px, 4px) scale(0.85) rotate(20deg);
+    }
+    .eyes-cross #right-eye-group {
+      transform: translate(-20px, 6px) scale(1.18) rotate(-22deg);
+    }
+
+    .eyes-wink #left-eye-open {
+      display: none;
+    }
+    .eyes-wink #left-eye-wink-arc {
+      display: block !important;
+      stroke-dasharray: 100;
+      animation: winkArcDraw 0.25s ease-out forwards;
+    }
+
+    @keyframes winkArcDraw {
+      0% { opacity: 0; stroke-dashoffset: 50; }
+      100% { opacity: 1; stroke-dashoffset: 0; }
+    }
+
+    .eyes-wink #right-eye-group {
+      transform: scale(1.24) rotate(6deg) translateY(-2px);
+    }
+
+    /* Wink Sparkle Star Pop */
+    .wink-star-sparkle {
+      position: absolute;
+      top: 30%;
+      left: 20%;
+      width: 58px;
+      height: 58px;
+      pointer-events: none;
+      z-index: 100;
+      opacity: 0;
+      transform: scale(0) rotate(0deg);
+    }
+
+    .wink-star-sparkle.pop {
+      animation: starBurst 0.7s cubic-bezier(0.15, 0.9, 0.34, 1.2) forwards;
+    }
+
+    @keyframes starBurst {
+      0% { opacity: 0; transform: scale(0.1) rotate(0deg); }
+      35% { opacity: 1; transform: scale(1.6) rotate(70deg); }
+      70% { opacity: 0.95; transform: scale(1.15) rotate(120deg); }
+      100% { opacity: 0; transform: scale(0.4) rotate(180deg); }
+    }
+
+    /* ==========================================
+       Phase 4 & 5: MASSIVE Authentic Typography Stage
+       (ZERO CLIPPING / FULL PADDING ON ALL EDGES)
+    /* ==========================================
+       Phase 3: MASSIVE AUTHENTIC TYPOGRAPHY
+       ========================================== */
+    .logo-typography-stage {
+      position: relative;
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      width: 98vw;
+      max-width: 1500px;
+      transform-style: preserve-3d;
+      overflow: visible;
+      z-index: 20;
+      padding: 40px 60px 80px 60px;
+      margin-top: -10px;
+    }
+
+    /* "grok" Typography Slam */
+    .grok-wordmark-wrapper {
+      position: relative;
+      display: inline-block;
+      opacity: 0;
+      transform: scale(3.6) translateY(-280px) rotate(-32deg) translateZ(200px);
+      will-change: transform, opacity;
+      overflow: visible;
+      padding: 20px 20px 40px 20px;
+    }
+
+    .grok-wordmark-wrapper.slammed {
+      animation: grokWordmarkSlam 0.6s cubic-bezier(0.12, 0.95, 0.25, 1) forwards;
+    }
+
+    @keyframes grokWordmarkSlam {
+      0% {
+        opacity: 0;
+        transform: scale(3.8) translateY(-320px) rotate(-30deg) translateZ(250px);
+        filter: blur(16px) brightness(2.5);
+      }
+      60% {
+        opacity: 1;
+        transform: scale(0.92) translateY(10px) rotate(-10deg) translateZ(0);
+        filter: blur(0px) brightness(1.25);
+      }
+      80% {
+        transform: scale(1.04) translateY(-4px) rotate(-8deg);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1) translateY(0) rotate(-9.5deg);
+        filter: blur(0px) brightness(1);
+      }
+    }
+
+    .grok-text {
+      font-family: var(--font-grok);
+      font-size: clamp(100px, 16vw, 220px);
+      font-weight: 900;
+      line-height: 1.2;
+      letter-spacing: -0.055em;
+      text-transform: lowercase;
+      background: var(--chrome-fill);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: var(--chrome-glow);
+      display: inline-block;
+      position: relative;
+      padding-bottom: 20px;
+    }
+
+    /* Raised "“D”" Hanging Typography */
+    .d-hang-wrapper {
+      position: relative;
+      display: inline-flex;
+      align-items: baseline;
+      margin-left: clamp(8px, 1.5vw, 24px);
+      margin-top: clamp(-45px, -5vw, -80px);
+      opacity: 0;
+      transform-origin: 28px 32px;
+      will-change: transform, opacity;
+      cursor: grab;
+      overflow: visible;
+      padding: 20px 30px 40px 10px;
+    }
+
+    .d-hang-wrapper:active {
+      cursor: grabbing;
+    }
+
+    .d-hang-wrapper.d-slammed,
+    .d-hang-wrapper.d-shivering,
+    .d-hang-wrapper.d-idle-hang {
+      opacity: 1 !important;
+    }
+
+    .d-hang-wrapper.d-slammed {
+      animation: dHangSlam 2.6s cubic-bezier(0.15, 0.85, 0.35, 1) forwards;
+    }
+
+    @keyframes dHangSlam {
+      0% {
+        opacity: 0;
+        transform: scale(4.5) translate3d(280px, -350px, 350px) rotate(48deg);
+        filter: blur(18px) brightness(3);
+      }
+      15% {
+        opacity: 1;
+        transform: scale(0.95) translate3d(0, 0, 0) rotate(5deg);
+        filter: blur(0px) brightness(1.6);
+      }
+      22% {
+        transform: translate3d(-6px, -4px, 0) rotate(-6deg) skewX(14deg);
+        filter: drop-shadow(-6px 0 0 rgba(255,255,255,0.7)) drop-shadow(6px 0 0 rgba(0,240,255,0.7));
+      }
+      28% {
+        transform: translate3d(6px, 5px, 0) rotate(16deg) skewX(-10deg);
+      }
+      34% {
+        transform: translate3d(-4px, 2px, 0) rotate(-2deg) skewX(4deg);
+      }
+      45% {
+        transform: rotate(44deg) translateY(6px);
+      }
+      58% {
+        transform: rotate(-24deg) translateY(4px);
+      }
+      70% {
+        transform: rotate(28deg) translateY(5px);
+      }
+      80% {
+        transform: rotate(-14deg) translateY(4px);
+      }
+      88% {
+        transform: rotate(18deg) translateY(5px);
+      }
+      94% {
+        transform: rotate(6deg) translateY(5px);
+      }
+      100% {
+        opacity: 1;
+        transform: rotate(15deg) translateY(5px);
+      }
+    }
+
+    /* VIOLENT SHIVER / TREMOR (FLINGS LOGOS OFF INTO ORBIT) */
+    .d-hang-wrapper.d-shivering {
+      animation: dViolentShiver 0.85s cubic-bezier(0.36, 0.07, 0.19, 0.97) both !important;
+    }
+
+    @keyframes dViolentShiver {
+      0%, 100% { transform: rotate(15deg) translateY(5px); }
+      8%  { transform: rotate(26deg) translate(14px, -10px) skewX(18deg) scale(1.12); filter: brightness(2) drop-shadow(0 0 24px #00F0FF); }
+      16% { transform: rotate(4deg) translate(-16px, 12px) skewX(-20deg) scale(0.92); filter: brightness(1.8) drop-shadow(0 0 24px #FF1E56); }
+      24% { transform: rotate(30deg) translate(18px, -12px) skewX(22deg) scale(1.15); filter: brightness(2.2) drop-shadow(0 0 28px #FFD000); }
+      32% { transform: rotate(2deg) translate(-18px, 14px) skewX(-22deg) scale(0.90); }
+      40% { transform: rotate(28deg) translate(16px, -10px) skewX(18deg) scale(1.10); filter: brightness(1.9); }
+      50% { transform: rotate(6deg) translate(-14px, 10px) skewX(-16deg); }
+      60% { transform: rotate(22deg) translate(12px, -8px) skewX(12deg); }
+      70% { transform: rotate(8deg) translate(-10px, 6px); }
+      80% { transform: rotate(19deg) translate(6px, -4px); }
+      90% { transform: rotate(13deg) translate(-2px, 2px); }
+    }
+
+    .d-hang-wrapper.d-idle-hang {
+      animation: dIdleBreeze 5s ease-in-out infinite alternate;
+    }
+
+    @keyframes dIdleBreeze {
+      0% { transform: rotate(15deg) translateY(5px); }
+      35% { transform: rotate(18.5deg) translateY(5.5px); }
+      48% { transform: rotate(19.5deg) translateY(5.5px) skewX(3deg); }
+      50% { transform: rotate(18deg) translateY(5px); }
+      75% { transform: rotate(11.5deg) translateY(4.5px); }
+      100% { transform: rotate(16deg) translateY(5px); }
+    }
+
+    .d-quote-glyph {
+      font-family: var(--font-grok);
+      font-size: clamp(80px, 12vw, 160px);
+      font-weight: 900;
+      line-height: 1;
+      background: var(--chrome-fill);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: var(--chrome-glow);
+      display: inline-block;
+      transform: translateY(-16px);
+      opacity: 0.92;
+    }
+
+    .d-glyph-container {
+      position: relative;
+      display: inline-block;
+    }
+
+    .d-glyph-text {
+      font-family: var(--font-grok);
+      font-size: clamp(110px, 18vw, 230px);
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: -0.04em;
+      background: var(--chrome-fill);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: var(--chrome-glow);
+      display: inline-block;
+      position: relative;
+    }
+
+    /* ==========================================
+       ULTRA-THIN HAIRLINE / WIREFRAME PROVIDER SVGs
+       (Razor-Thin Delicate Micro-Lines, No Chunky Fills)
+       ========================================== */
+    .naked-stud-svg {
+      position: absolute;
+      width: clamp(20px, 3.2vw, 34px);
+      height: clamp(20px, 3.2vw, 34px);
+      display: block;
+      z-index: 25;
+      pointer-events: none;
+      filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7));
+      transition: opacity 0.3s;
+    }
+
+    .naked-stud-svg path,
+    .naked-stud-svg circle,
+    .naked-stud-svg line {
+      stroke-width: 1.35px !important;
+      stroke-linecap: round !important;
+      stroke-linejoin: round !important;
+    }
+
+    /* Positioned delicately across the spine & curve of "D" */
+    .nstud-claude   { top: 12%; left: 16%; }
+    .nstud-openai   { top: 40%; left: 18%; }
+    .nstud-gemini   { top: 68%; left: 16%; }
+    .nstud-meta     { top: 18%; left: 54%; }
+    .nstud-deepseek { top: 46%; left: 66%; }
+    .nstud-kimi     { top: 72%; left: 52%; }
+
+    /* Fly-off trajectories */
+    .naked-stud-svg.flung-off-1 { animation: shiveredOff1 1.3s cubic-bezier(0.12, 0.9, 0.25, 1) forwards; }
+    .naked-stud-svg.flung-off-2 { animation: shiveredOff2 1.2s cubic-bezier(0.12, 0.9, 0.25, 1) forwards; }
+    .naked-stud-svg.flung-off-3 { animation: shiveredOff3 1.4s cubic-bezier(0.12, 0.9, 0.25, 1) forwards; }
+    .naked-stud-svg.flung-off-4 { animation: shiveredOff4 1.25s cubic-bezier(0.12, 0.9, 0.25, 1) forwards; }
+    .naked-stud-svg.flung-off-5 { animation: shiveredOff5 1.45s cubic-bezier(0.12, 0.9, 0.25, 1) forwards; }
+    .naked-stud-svg.flung-off-6 { animation: shiveredOff6 1.35s cubic-bezier(0.12, 0.9, 0.25, 1) forwards; }
+
+    @keyframes shiveredOff1 {
+      0% { transform: scale(1) translate(0, 0) rotate(0deg); opacity: 1; }
+      15% { transform: scale(1.5) translate(-40px, -60px) rotate(160deg); filter: brightness(2); }
+      100% { transform: scale(0.1) translate(-850px, -550px) rotate(1080deg); opacity: 0; filter: blur(12px); }
+    }
+    @keyframes shiveredOff2 {
+      0% { transform: scale(1) translate(0, 0) rotate(0deg); opacity: 1; }
+      15% { transform: scale(1.6) translate(-60px, 40px) rotate(-200deg); filter: brightness(2); }
+      100% { transform: scale(0.1) translate(-950px, 350px) rotate(-1260deg); opacity: 0; filter: blur(12px); }
+    }
+    @keyframes shiveredOff3 {
+      0% { transform: scale(1) translate(0, 0) rotate(0deg); opacity: 1; }
+      15% { transform: scale(1.4) translate(30px, 80px) rotate(240deg); filter: brightness(2); }
+      100% { transform: scale(0.1) translate(-450px, 750px) rotate(1440deg); opacity: 0; filter: blur(12px); }
+    }
+    @keyframes shiveredOff4 {
+      0% { transform: scale(1) translate(0, 0) rotate(0deg); opacity: 1; }
+      15% { transform: scale(1.7) translate(80px, -80px) rotate(-280deg); filter: brightness(2); }
+      100% { transform: scale(0.1) translate(1000px, -650px) rotate(-1620deg); opacity: 0; filter: blur(12px); }
+    }
+    @keyframes shiveredOff5 {
+      0% { transform: scale(1) translate(0, 0) rotate(0deg); opacity: 1; }
+      15% { transform: scale(1.6) translate(100px, 30px) rotate(320deg); filter: brightness(2); }
+      100% { transform: scale(0.1) translate(1100px, 200px) rotate(1800deg); opacity: 0; filter: blur(12px); }
+    }
+    @keyframes shiveredOff6 {
+      0% { transform: scale(1) translate(0, 0) rotate(0deg); opacity: 1; }
+      15% { transform: scale(1.5) translate(90px, 90px) rotate(-360deg); filter: brightness(2); }
+      100% { transform: scale(0.1) translate(1050px, 680px) rotate(-1980deg); opacity: 0; filter: blur(12px); }
+    }
+
+    .d-hinge-pin {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #FFFFFF 0%, #E2E8F0 50%, #94A3B8 100%);
+      box-shadow: 0 0 14px rgba(255, 255, 255, 0.95), 0 0 5px #FFFFFF;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 30;
+    }
+
+    .d-hang-wrapper.d-slammed .d-hinge-pin {
+      opacity: 0.98;
+    }
+
+    /* Screen Shakes */
+    .stage-shake { animation: screenShake 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+    @keyframes screenShake {
+      10%, 90% { transform: translate3d(-4px, 3px, 0); }
+      20%, 80% { transform: translate3d(5px, -4px, 0); }
+      30%, 50%, 70% { transform: translate3d(-7px, 5px, 0); }
+      40%, 60% { transform: translate3d(7px, -5px, 0); }
+    }
+
+    .stage-shake-heavy { animation: screenShakeHeavy 0.6s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+    @keyframes screenShakeHeavy {
+      10%, 90% { transform: translate3d(-8px, 6px, 0) scale(1.015); }
+      20%, 80% { transform: translate3d(10px, -8px, 0); }
+      30%, 50%, 70% { transform: translate3d(-14px, 10px, 0) scale(0.985); }
+      40%, 60% { transform: translate3d(12px, -10px, 0); }
+    }
+
+    /* Casino slot reel styling for the 2 live plasma orbs */
+    .plasma-casino-reel {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      pointer-events: none;
+      z-index: 10;
+      overflow: hidden;
+      border-radius: inherit;
+    }
+
+    .plasma-casino-track {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+    }
+
+    .plasma-casino-item {
+      width: 50px;
+      height: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .plasma-casino-item svg {
+      width: 22px;
+      height: 22px;
+      display: block;
+      filter: drop-shadow(0 0 6px rgba(255,255,255,0.8));
+    }
+
+    @media (max-width: 768px) {
+      .hero-mascot-wrapper { width: 130px; height: 130px; }
+      .grok-text { font-size: 80px; }
+      .d-glyph-text { font-size: 90px; }
+      .d-quote-glyph { font-size: 64px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="under-stage">
+    <h1>grok"D" Workspace</h1>
+  </div>
+
+  <!-- STAGE DOM CREATED DIRECTLY IN HTML (Auto-fades on finish, click anywhere to skip) -->
+  <div id="grokd-splash-stage" class="grokd-splash-stage">
+    <div class="splash-ambient-mesh"></div>
+    <div class="splash-vignette"></div>
+    <canvas id="particle-canvas"></canvas>
+    <div class="echo-swarm-layer" id="echo-layer"></div>
+
+    <!-- Hero Mascot Creature (FREELY FLOATING CHARACTER WITH AUTHENTIC FACE TATTOOS) -->
+    <div class="hero-mascot-wrapper" id="hero-mascot">
+      <div class="mascot-ambient-aura"></div>
+      <div class="mascot-creature-head" id="mascot-card">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+          <defs>
+            <!-- App Icon Boundary Clip -->
+            <clipPath id="squircleClip">
+              <rect x="0" y="0" width="512" height="512" rx="115" ry="115" />
+            </clipPath>
+
+            <!-- Dreamy Luminous Multi-Point Rainbow Mesh Gradients -->
+            <linearGradient id="dreamyRainbow" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#FF8777" />
+              <stop offset="24%" stop-color="#FFA07A" />
+              <stop offset="48%" stop-color="#70E6B6" />
+              <stop offset="72%" stop-color="#FDCB6E" />
+              <stop offset="88%" stop-color="#8065DF" />
+              <stop offset="100%" stop-color="#6C5CE7" />
+            </linearGradient>
+
+            <!-- Rainbow Mesh Glow Spots -->
+            <radialGradient id="cyanGlow" cx="65%" cy="15%" r="55%">
+              <stop offset="0%" stop-color="#55E6C1" stop-opacity="0.95" />
+              <stop offset="100%" stop-color="#55E6C1" stop-opacity="0" />
+            </radialGradient>
+
+            <radialGradient id="peachGlow" cx="15%" cy="20%" r="55%">
+              <stop offset="0%" stop-color="#FF6B8B" stop-opacity="0.95" />
+              <stop offset="100%" stop-color="#FF6B8B" stop-opacity="0" />
+            </radialGradient>
+
+            <radialGradient id="amberGlow" cx="92%" cy="35%" r="50%">
+              <stop offset="0%" stop-color="#FECA57" stop-opacity="0.95" />
+              <stop offset="100%" stop-color="#FECA57" stop-opacity="0" />
+            </radialGradient>
+
+            <radialGradient id="violetGlow" cx="80%" cy="85%" r="60%">
+              <stop offset="0%" stop-color="#7451EB" stop-opacity="0.98" />
+              <stop offset="100%" stop-color="#7451EB" stop-opacity="0" />
+            </radialGradient>
+
+            <radialGradient id="coralGlow" cx="25%" cy="90%" r="50%">
+              <stop offset="0%" stop-color="#FF5252" stop-opacity="0.9" />
+              <stop offset="100%" stop-color="#FF5252" stop-opacity="0" />
+            </radialGradient>
+
+            <!-- 3D Mascot Porcelain White Body -->
+            <linearGradient id="mascotGrad" x1="30%" y1="5%" x2="70%" y2="95%">
+              <stop offset="0%" stop-color="#FFFFFF" />
+              <stop offset="70%" stop-color="#FAFCFF" />
+              <stop offset="100%" stop-color="#E5EBF4" />
+            </linearGradient>
+
+            <radialGradient id="mascotHighlight" cx="35%" cy="15%" r="50%">
+              <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.98" />
+              <stop offset="65%" stop-color="#FFFFFF" stop-opacity="0" />
+            </radialGradient>
+
+            <!-- Pink Cheek Blush -->
+            <radialGradient id="blushPink" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#FF4757" stop-opacity="0.32" />
+              <stop offset="100%" stop-color="#FF4757" stop-opacity="0" />
+            </radialGradient>
+
+            <!-- Glossy Eye Gradient with Deep Violet Tone -->
+            <linearGradient id="eyeGrad" x1="25%" y1="0%" x2="75%" y2="100%">
+              <stop offset="0%" stop-color="#1E1D2D" />
+              <stop offset="60%" stop-color="#12131F" />
+              <stop offset="100%" stop-color="#2B1E38" />
+            </linearGradient>
+
+            <!-- AI Model Provider Brand Gradients -->
+            <linearGradient id="geminiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#2B7FFF" />
+              <stop offset="50%" stop-color="#635BFF" />
+              <stop offset="100%" stop-color="#C837AB" />
+            </linearGradient>
+
+            <linearGradient id="openaiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#10A37F" />
+              <stop offset="100%" stop-color="#086F55" />
+            </linearGradient>
+
+            <linearGradient id="claudeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#D97757" />
+              <stop offset="100%" stop-color="#BD4928" />
+            </linearGradient>
+
+            <linearGradient id="metaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#0081FB" />
+              <stop offset="100%" stop-color="#0064E0" />
+            </linearGradient>
+
+            <linearGradient id="deepseekGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#1D61E7" />
+              <stop offset="100%" stop-color="#0F44B0" />
+            </linearGradient>
+
+            <linearGradient id="xaiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#12131A" />
+              <stop offset="100%" stop-color="#2B2E3D" />
+            </linearGradient>
+
+            <!-- Subtle Inked Tattoo Skin Depth Filter -->
+            <filter id="tattooInk" x="-15%" y="-15%" width="130%" height="130%">
+              <feDropShadow dx="0.4" dy="0.7" stdDeviation="0.5" flood-color="#000000" flood-opacity="0.22" />
+            </filter>
+          </defs>
+
+          <g clip-path="url(#squircleClip)">
+            <!-- Dreamy Luminous Multi-Mesh Background -->
+            <rect width="512" height="512" fill="url(#dreamyRainbow)" />
+            <rect width="512" height="512" fill="url(#peachGlow)" />
+            <rect width="512" height="512" fill="url(#cyanGlow)" />
+            <rect width="512" height="512" fill="url(#amberGlow)" />
+            <rect width="512" height="512" fill="url(#violetGlow)" />
+            <rect width="512" height="512" fill="url(#coralGlow)" />
+
+            <!-- Luminous Dreamy Bokeh & Star Sparkles -->
+            <g fill="#FFFFFF" opacity="0.75">
+              <path d="M 82 82 Q 82 95 69 95 Q 82 95 82 108 Q 82 95 95 95 Q 82 95 82 82 Z" />
+              <path d="M 432 72 Q 432 83 421 83 Q 432 83 432 94 Q 432 83 443 83 Q 432 83 432 72 Z" opacity="0.9" />
+              <circle cx="105" cy="150" r="4" opacity="0.7" />
+              <circle cx="425" cy="165" r="4.5" opacity="0.8" />
+              <circle cx="68" cy="385" r="3.5" opacity="0.6" />
+              <circle cx="448" cy="365" r="4" opacity="0.7" />
+              <circle cx="240" cy="65" r="3" opacity="0.6" />
+            </g>
+
+            <!-- White Mascot Dome (Exact Authentic Grok Bot Geometry) -->
+            <path d="M 162 50 L 165 50 L 168 50 L 171 50 L 174 50 L 177 50 L 180 50 L 183 50 L 186 50 L 189 50 L 192 50 L 195 50 L 198 50 L 201 50 L 204 50 L 207 50 L 210 50 L 213 50 L 216 50 L 219 50 L 222 50 L 225 50 L 228 50 L 231 50 L 234 50 L 237 50 L 240 50 L 243 50 L 246 50 L 249 50 L 252 50 L 255 50 L 258 50 L 261 50 L 264 50 L 267 50 L 270 50 L 273 50 L 276 50 L 279 50 L 282 50 L 285 50 L 288 50 L 291 50 L 294 50 L 297 50 L 300 50 L 303 50 L 306 50 L 309 50 L 312 50 L 315 50 L 305 51 L 302 51 L 299 51 L 296 51 L 293 52 L 290 52 L 287 52 L 284 52 L 281 52 L 278 52 L 275 53 L 272 53 L 269 53 L 266 53 L 263 53 L 260 53 L 257 53 L 254 53 L 251 53 L 248 53 L 245 53 L 242 53 L 239 54 L 236 54 L 233 54 L 230 54 L 227 54 L 224 54 L 221 54 L 218 54 L 215 54 L 212 54 L 209 54 L 206 54 L 203 54 L 200 54 L 197 54 L 194 54 L 191 54 L 188 54 L 185 54 L 182 54 L 179 54 L 176 54 L 173 54 L 170 54 L 167 54 L 164 54 L 161 54 L 158 54 L 155 55 L 152 55 L 149 55 L 146 55 L 143 55 L 140 56 L 137 56 L 134 56 L 131 56 L 128 57 L 125 57 L 122 58 L 119 59 L 116 59 L 113 60 L 110 61 L 107 62 L 104 64 L 101 65 L 98 67 L 95 69 L 92 71 L 89 73 L 86 75 L 83 78 L 80 81 L 77 84 L 75 87 L 72 90 L 70 93 L 68 96 L 66 99 L 65 102 L 63 105 L 62 108 L 61 111 L 60 114 L 59 117 L 58 120 L 58 123 L 57 126 L 57 129 L 56 132 L 56 135 L 56 138 L 55 141 L 55 144 L 55 147 L 55 150 L 55 153 L 54 156 L 54 159 L 54 162 L 54 165 L 54 168 L 54 171 L 54 174 L 54 177 L 54 180 L 54 183 L 54 186 L 54 189 L 53 192 L 56 192 L 59 190 L 62 187 L 65 185 L 68 182 L 71 179 L 74 177 L 77 174 L 80 172 L 83 169 L 86 167 L 89 165 L 92 163 L 95 161 L 98 159 L 101 157 L 104 155 L 107 153 L 110 152 L 113 150 L 116 148 L 119 147 L 122 145 L 125 144 L 128 142 L 131 141 L 134 140 L 137 138 L 140 137 L 143 136 L 146 135 L 149 134 L 152 133 L 155 132 L 158 131 L 161 130 L 164 130 L 167 128 L 170 128 L 173 127 L 176 126 L 179 126 L 182 125 L 185 125 L 188 124 L 191 124 L 194 123 L 197 123 L 200 122 L 203 122 L 206 122 L 209 122 L 212 122 L 215 122 L 218 122 L 221 121 L 224 121 L 227 121 L 230 121 L 233 122 L 236 122 L 239 122 L 242 122 L 245 122 L 248 122 L 251 123 L 254 123 L 257 124 L 260 124 L 263 124 L 266 125 L 269 126 L 272 126 L 275 127 L 278 128 L 281 128 L 284 129 L 287 130 L 290 130 L 293 132 L 296 132 L 299 133 L 302 134 L 305 136 L 308 136 L 311 138 L 314 139 L 317 140 L 320 142 L 323 143 L 326 144 L 329 146 L 332 147 L 335 149 L 338 150 L 341 152 L 344 154 L 347 156 L 350 158 L 353 160 L 356 162 L 359 164 L 362 166 L 365 168 L 368 170 L 371 172 L 374 175 L 377 177 L 380 180 L 383 183 L 386 186 L 388 188 L 390 190 L 392 192 L 394 194 L 396 196 L 399 199 L 402 202 L 404 205 L 407 208 L 409 211 L 411 214 L 413 217 L 416 220 L 418 223 L 420 226 L 422 229 L 424 232 L 425 235 L 427 238 L 429 241 L 431 244 L 432 247 L 434 250 L 435 253 L 437 256 L 438 259 L 439 262 L 441 265 L 442 268 L 443 271 L 444 274 L 445 277 L 446 280 L 447 283 L 448 286 L 449 289 L 450 292 L 451 295 L 451 298 L 452 301 L 453 304 L 454 307 L 455 310 L 455 313 L 456 316 L 456 319 L 457 322 L 457 325 L 458 328 L 459 331 L 459 334 L 460 337 L 460 340 L 460 343 L 460 346 L 460 349 L 460 352 L 460 355 L 460 358 L 460 361 L 460 364 L 459 367 L 459 370 L 459 373 L 459 376 L 459 379 L 458 382 L 458 385 L 457 388 L 457 391 L 456 394 L 455 397 L 455 400 L 453 403 L 452 406 L 451 409 L 449 412 L 448 415 L 446 418 L 444 421 L 442 424 L 440 427 L 437 430 L 434 433 L 431 436 L 428 439 L 425 441 L 422 444 L 419 446 L 416 447 L 413 449 L 410 451 L 407 452 L 404 453 L 401 454 L 398 455 L 395 456 L 392 457 L 389 457 L 386 458 L 383 458 L 380 459 L 377 459 L 374 459 L 371 459 L 368 460 L 365 460 L 362 460 L 359 460 L 356 460 L 353 460 L 350 461 L 347 461 L 344 461 L 341 461 L 338 461 L 335 461 L 332 461 L 329 461 L 326 461 L 323 461 L 320 461 L 317 461 L 314 461 L 311 461 L 308 461 L 305 461 L 302 461 L 299 461 L 296 461 L 293 461 L 290 461 L 287 461 L 284 461 L 281 461 L 278 461 L 275 461 L 272 461 L 269 461 L 266 461 L 263 461 L 260 461 L 257 461 L 254 461 L 251 461 L 248 461 L 245 461 L 242 461 L 239 461 L 236 461 L 233 461 L 230 461 L 227 461 L 224 461 L 221 461 L 218 461 L 215 461 L 212 461 L 209 461 L 206 461 L 203 461 L 200 461 L 197 461 L 194 461 L 191 461 L 188 461 L 185 461 L 182 461 L 179 461 L 176 461 L 173 461 L 170 461 L 167 461 L 164 461 L 161 461 L 158 460 L 155 460 L 152 460 L 149 460 L 146 460 L 143 460 L 140 459 L 137 459 L 134 459 L 131 459 L 128 458 L 125 458 L 122 457 L 119 457 L 116 456 L 113 455 L 110 454 L 107 453 L 104 452 L 101 451 L 98 449 L 95 447 L 92 446 L 89 444 L 86 441 L 83 439 L 80 436 L 77 433 L 74 430 L 71 427 L 69 424 L 67 421 L 65 418 L 63 415 L 62 412 L 60 409 L 59 406 L 58 403 L 56 400 L 56 397 L 55 394 L 54 391 L 54 388 L 53 385 L 53 382 L 52 379 L 52 376 L 52 373 L 52 370 L 52 367 L 51 364 L 51 361 L 51 358 L 51 355 L 51 352 L 50 349 L 50 346 L 50 343 L 50 340 L 50 337 L 50 334 L 50 331 L 50 328 L 50 325 L 50 322 L 50 319 L 50 316 L 50 313 L 50 310 L 50 307 L 50 304 L 50 301 L 50 298 L 50 295 L 50 292 L 50 289 L 50 286 L 50 283 L 50 280 L 50 277 L 50 274 L 50 271 L 50 268 L 50 265 L 50 262 L 50 259 L 50 256 L 50 253 L 50 250 L 50 247 L 50 244 L 50 241 L 50 238 L 50 235 L 50 232 L 50 229 L 50 226 L 50 223 L 50 220 L 50 217 L 50 214 L 50 211 L 50 208 L 50 205 L 50 202 L 50 199 L 50 196 L 50 193 L 50 190 L 50 187 L 50 184 L 50 181 L 50 178 L 50 175 L 50 172 L 50 169 L 50 166 L 50 163 L 51 160 L 51 157 L 51 154 L 51 151 L 51 148 L 51 145 L 52 142 L 52 139 L 52 136 L 52 133 L 52 130 L 53 127 L 54 124 L 54 121 L 55 118 L 56 115 L 56 112 L 57 109 L 58 106 L 60 103 L 61 100 L 62 97 L 64 94 L 66 91 L 68 88 L 70 85 L 73 82 L 76 79 L 79 76 L 82 73 L 85 70 L 88 68 L 91 66 L 94 64 L 97 62 L 100 61 L 103 60 L 106 58 L 109 57 L 112 56 L 115 56 L 118 55 L 121 54 L 124 54 L 127 53 L 130 52 L 133 52 L 136 52 L 139 52 L 142 52 L 145 52 L 148 51 L 151 51 L 154 51 L 157 51 L 160 51 Z" fill="url(#mascotGrad)" />
+            <path d="M 162 50 L 165 50 L 168 50 L 171 50 L 174 50 L 177 50 L 180 50 L 183 50 L 186 50 L 189 50 L 192 50 L 195 50 L 198 50 L 201 50 L 204 50 L 207 50 L 210 50 L 213 50 L 216 50 L 219 50 L 222 50 L 225 50 L 228 50 L 231 50 L 234 50 L 237 50 L 240 50 L 243 50 L 246 50 L 249 50 L 252 50 L 255 50 L 258 50 L 261 50 L 264 50 L 267 50 L 270 50 L 273 50 L 276 50 L 279 50 L 282 50 L 285 50 L 288 50 L 291 50 L 294 50 L 297 50 L 300 50 L 303 50 L 306 50 L 309 50 L 312 50 L 315 50 L 305 51 L 302 51 L 299 51 L 296 51 L 293 52 L 290 52 L 287 52 L 284 52 L 281 52 L 278 52 L 275 53 L 272 53 L 269 53 L 266 53 L 263 53 L 260 53 L 257 53 L 254 53 L 251 53 L 248 53 L 245 53 L 242 53 L 239 54 L 236 54 L 233 54 L 230 54 L 227 54 L 224 54 L 221 54 L 218 54 L 215 54 L 212 54 L 209 54 L 206 54 L 203 54 L 200 54 L 197 54 L 194 54 L 191 54 L 188 54 L 185 54 L 182 54 L 179 54 L 176 54 L 173 54 L 170 54 L 167 54 L 164 54 L 161 54 L 158 54 L 155 55 L 152 55 L 149 55 L 146 55 L 143 55 L 140 56 L 137 56 L 134 56 L 131 56 L 128 57 L 125 57 L 122 58 L 119 59 L 116 59 L 113 60 L 110 61 L 107 62 L 104 64 L 101 65 L 98 67 L 95 69 L 92 71 L 89 73 L 86 75 L 83 78 L 80 81 L 77 84 L 75 87 L 72 90 L 70 93 L 68 96 L 66 99 L 65 102 L 63 105 L 62 108 L 61 111 L 60 114 L 59 117 L 58 120 L 58 123 L 57 126 L 57 129 L 56 132 L 56 135 L 56 138 L 55 141 L 55 144 L 55 147 L 55 150 L 55 153 L 54 156 L 54 159 L 54 162 L 54 165 L 54 168 L 54 171 L 54 174 L 54 177 L 54 180 L 54 183 L 54 186 L 54 189 L 53 192 L 56 192 L 59 190 L 62 187 L 65 185 L 68 182 L 71 179 L 74 177 L 77 174 L 80 172 L 83 169 L 86 167 L 89 165 L 92 163 L 95 161 L 98 159 L 101 157 L 104 155 L 107 153 L 110 152 L 113 150 L 116 148 L 119 147 L 122 145 L 125 144 L 128 142 L 131 141 L 134 140 L 137 138 L 140 137 L 143 136 L 146 135 L 149 134 L 152 133 L 155 132 L 158 131 L 161 130 L 164 130 L 167 128 L 170 128 L 173 127 L 176 126 L 179 126 L 182 125 L 185 125 L 188 124 L 191 124 L 194 123 L 197 123 L 200 122 L 203 122 L 206 122 L 209 122 L 212 122 L 215 122 L 218 122 L 221 121 L 224 121 L 227 121 L 230 121 L 233 122 L 236 122 L 239 122 L 242 122 L 245 122 L 248 122 L 251 123 L 254 123 L 257 124 L 260 124 L 263 124 L 266 125 L 269 126 L 272 126 L 275 127 L 278 128 L 281 128 L 284 129 L 287 130 L 290 130 L 293 132 L 296 132 L 299 133 L 302 134 L 305 136 L 308 136 L 311 138 L 314 139 L 317 140 L 320 142 L 323 143 L 326 144 L 329 146 L 332 147 L 335 149 L 338 150 L 341 152 L 344 154 L 347 156 L 350 158 L 353 160 L 356 162 L 359 164 L 362 166 L 365 168 L 368 170 L 371 172 L 374 175 L 377 177 L 380 180 L 383 183 L 386 186 L 388 188 L 390 190 L 392 192 L 394 194 L 396 196 L 399 199 L 402 202 L 404 205 L 407 208 L 409 211 L 411 214 L 413 217 L 416 220 L 418 223 L 420 226 L 422 229 L 424 232 L 425 235 L 427 238 L 429 241 L 431 244 L 432 247 L 434 250 L 435 253 L 437 256 L 438 259 L 439 262 L 441 265 L 442 268 L 443 271 L 444 274 L 445 277 L 446 280 L 447 283 L 448 286 L 449 289 L 450 292 L 451 295 L 451 298 L 452 301 L 453 304 L 454 307 L 455 310 L 455 313 L 456 316 L 456 319 L 457 322 L 457 325 L 458 328 L 459 331 L 459 334 L 460 337 L 460 340 L 460 343 L 460 346 L 460 349 L 460 352 L 460 355 L 460 358 L 460 361 L 460 364 L 459 367 L 459 370 L 459 373 L 459 376 L 459 379 L 458 382 L 458 385 L 457 388 L 457 391 L 456 394 L 455 397 L 455 400 L 453 403 L 452 406 L 451 409 L 449 412 L 448 415 L 446 418 L 444 421 L 442 424 L 440 427 L 437 430 L 434 433 L 431 436 L 428 439 L 425 441 L 422 444 L 419 446 L 416 447 L 413 449 L 410 451 L 407 452 L 404 453 L 401 454 L 398 455 L 395 456 L 392 457 L 389 457 L 386 458 L 383 458 L 380 459 L 377 459 L 374 459 L 371 459 L 368 460 L 365 460 L 362 460 L 359 460 L 356 460 L 353 460 L 350 461 L 347 461 L 344 461 L 341 461 L 338 461 L 335 461 L 332 461 L 329 461 L 326 461 L 323 461 L 320 461 L 317 461 L 314 461 L 311 461 L 308 461 L 305 461 L 302 461 L 299 461 L 296 461 L 293 461 L 290 461 L 287 461 L 284 461 L 281 461 L 278 461 L 275 461 L 272 461 L 269 461 L 266 461 L 263 461 L 260 461 L 257 461 L 254 461 L 251 461 L 248 461 L 245 461 L 242 461 L 239 461 L 236 461 L 233 461 L 230 461 L 227 461 L 224 461 L 221 461 L 218 461 L 215 461 L 212 461 L 209 461 L 206 461 L 203 461 L 200 461 L 197 461 L 194 461 L 191 461 L 188 461 L 185 461 L 182 461 L 179 461 L 176 461 L 173 461 L 170 461 L 167 461 L 164 461 L 161 461 L 158 460 L 155 460 L 152 460 L 149 460 L 146 460 L 143 460 L 140 459 L 137 459 L 134 459 L 131 459 L 128 458 L 125 458 L 122 457 L 119 457 L 116 456 L 113 455 L 110 454 L 107 453 L 104 452 L 101 451 L 98 449 L 95 447 L 92 446 L 89 444 L 86 441 L 83 439 L 80 436 L 77 433 L 74 430 L 71 427 L 69 424 L 67 421 L 65 418 L 63 415 L 62 412 L 60 409 L 59 406 L 58 403 L 56 400 L 56 397 L 55 394 L 54 391 L 54 388 L 53 385 L 53 382 L 52 379 L 52 376 L 52 373 L 52 370 L 52 367 L 51 364 L 51 361 L 51 358 L 51 355 L 51 352 L 50 349 L 50 346 L 50 343 L 50 340 L 50 337 L 50 334 L 50 331 L 50 328 L 50 325 L 50 322 L 50 319 L 50 316 L 50 313 L 50 310 L 50 307 L 50 304 L 50 301 L 50 298 L 50 295 L 50 292 L 50 289 L 50 286 L 50 283 L 50 280 L 50 277 L 50 274 L 50 271 L 50 268 L 50 265 L 50 262 L 50 259 L 50 256 L 50 253 L 50 250 L 50 247 L 50 244 L 50 241 L 50 238 L 50 235 L 50 232 L 50 229 L 50 226 L 50 223 L 50 220 L 50 217 L 50 214 L 50 211 L 50 208 L 50 205 L 50 202 L 50 199 L 50 196 L 50 193 L 50 190 L 50 187 L 50 184 L 50 181 L 50 178 L 50 175 L 50 172 L 50 169 L 50 166 L 50 163 L 51 160 L 51 157 L 51 154 L 51 151 L 51 148 L 51 145 L 52 142 L 52 139 L 52 136 L 52 133 L 52 130 L 53 127 L 54 124 L 54 121 L 55 118 L 56 115 L 56 112 L 57 109 L 58 106 L 60 103 L 61 100 L 62 97 L 64 94 L 66 91 L 68 88 L 70 85 L 73 82 L 76 79 L 79 76 L 82 73 L 85 70 L 88 68 L 91 66 L 94 64 L 97 62 L 100 61 L 103 60 L 106 58 L 109 57 L 112 56 L 115 56 L 118 55 L 121 54 L 124 54 L 127 53 L 130 52 L 133 52 L 136 52 L 139 52 L 142 52 L 145 52 L 148 51 L 151 51 L 154 51 L 157 51 L 160 51 Z" fill="url(#mascotHighlight)" />
+
+            <!-- Soft Cheek Blush -->
+            <ellipse cx="192" cy="346" rx="28" ry="16" fill="url(#blushPink)" />
+            <ellipse cx="368" cy="330" rx="26" ry="15" fill="url(#blushPink)" />
+
+            <!-- ============================================================== -->
+            <!-- MODEL PROVIDER FACE TATTOOS (OFFICIAL BRAND VECTORS)           -->
+            <!-- ============================================================== -->
+
+            <!-- 1. CLAUDE / ANTHROPIC: Terracotta Sunburst Asterisk (Upper Left Forehead) -->
+            <g transform="translate(132, 190) rotate(-10) scale(1.75)" fill="url(#claudeGrad)" filter="url(#tattooInk)">
+              <path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" />
+            </g>
+
+            <!-- 2. OPENAI: Official Emerald Spiral Rosette (Center-Left Forehead) -->
+            <g transform="translate(242, 126) rotate(-5) scale(0.165)" fill="url(#openaiGrad)" filter="url(#tattooInk)">
+              <path d="m297.06 130.97c7.26-21.79 4.76-45.66-6.85-65.48-17.46-30.4-52.56-46.04-86.84-38.68-15.25-17.18-37.16-26.95-60.13-26.81-35.04-.08-66.13 22.48-76.91 55.82-22.51 4.61-41.94 18.7-53.31 38.67-17.59 30.32-13.58 68.54 9.92 94.54-7.26 21.79-4.76 45.66 6.85 65.48 17.46 30.4 52.56 46.04 86.84 38.68 15.24 17.18 37.16 26.95 60.13 26.8 35.06.09 66.16-22.49 76.94-55.86 22.51-4.61 41.94-18.7 53.31-38.67 17.57-30.32 13.55-68.51-9.94-94.51zm-120.28 168.11c-14.03.02-27.62-4.89-38.39-13.88.49-.26 1.34-.73 1.89-1.07l63.72-36.8c3.26-1.85 5.26-5.32 5.24-9.07v-89.83l26.93 15.55c.29.14.48.42.52.74v74.39c-.04 33.08-26.83 59.9-59.91 59.97zm-128.84-55.03c-7.03-12.14-9.56-26.37-7.15-40.18.47.28 1.3.79 1.89 1.13l63.72 36.8c3.23 1.89 7.23 1.89 10.47 0l77.79-44.92v31.1c.02.32-.13.63-.38.83l-64.41 37.19c-28.69 16.52-65.33 6.7-81.92-21.95zm-16.77-139.09c7-12.16 18.05-21.46 31.21-26.29 0 .55-.03 1.52-.03 2.2v73.61c-.02 3.74 1.98 7.21 5.23 9.06l77.79 44.91-26.93 15.55c-.27.18-.61.21-.91.08l-64.42-37.22c-28.63-16.58-38.45-53.21-21.95-81.89zm221.26 51.49-77.79-44.92 26.93-15.54c.27-.18.61-.21.91-.08l64.42 37.19c28.68 16.57 38.51 53.26 21.94 81.94-7.01 12.14-18.05 21.44-31.2 26.28v-75.81c.03-3.74-1.96-7.2-5.2-9.06zm26.8-40.34c-.47-.29-1.3-.79-1.89-1.13l-63.72-36.8c-3.23-1.89-7.23-1.89-10.47 0l-77.79 44.92v-31.1c-.02-.32.13-.63.38-.83l64.41-37.16c28.69-16.55 65.37-6.7 81.91 22 6.99 12.12 9.52 26.31 7.15 40.1zm-168.51 55.43-26.94-15.55c-.29-.14-.48-.42-.52-.74v-74.39c.02-33.12 26.89-59.96 60.01-59.94 14.01 0 27.57 4.92 38.34 13.88-.49.26-1.33.73-1.89 1.07l-63.72 36.8c-3.26 1.85-5.26 5.31-5.24 9.06l-.04 89.79zm14.63-31.54 34.65-20.01 34.65 20v40.01l-34.65 20-34.65-20z" />
+            </g>
+
+            <!-- 3. GOOGLE GEMINI: Cosmic Gradient Stars Wrapped on Right Face Curve / Temple -->
+            <g transform="translate(408, 220) rotate(26) skewY(12) scale(1.65, 1.45)" fill="url(#geminiGrad)" filter="url(#tattooInk)">
+              <path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
+            </g>
+            <g transform="translate(418, 296) rotate(32) skewY(15) scale(1.1, 0.95)" fill="url(#geminiGrad)" filter="url(#tattooInk)" opacity="0.92">
+              <path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
+            </g>
+            <g transform="translate(366, 138) rotate(16) scale(0.85)" fill="url(#geminiGrad)" filter="url(#tattooInk)" opacity="0.85">
+              <path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
+            </g>
+
+            <!-- 4. META: Official Vivid Blue Infinity Ribbon (Lower Left Jaw Curve) -->
+            <g transform="translate(132, 334) rotate(-12) scale(1.65)" fill="url(#metaGrad)" filter="url(#tattooInk)">
+              <path d="M6.915 4.03c-1.968 0-3.683 1.28-4.871 3.113C.704 9.208 0 11.883 0 14.449c0 .706.07 1.369.21 1.973a6.624 6.624 0 0 0 .265.86 5.297 5.297 0 0 0 .371.761c.696 1.159 1.818 1.927 3.593 1.927 1.497 0 2.633-.671 3.965-2.444.76-1.012 1.144-1.626 2.663-4.32l.756-1.339.186-.325c.061.1.121.196.183.3l2.152 3.595c.724 1.21 1.665 2.556 2.47 3.314 1.046.987 1.992 1.22 3.06 1.22 1.075 0 1.876-.355 2.455-.843a3.743 3.743 0 0 0 .81-.973c.542-.939.861-2.127.861-3.745 0-2.72-.681-5.357-2.084-7.45-1.282-1.912-2.957-2.93-4.716-2.93-1.047 0-2.088.467-3.053 1.308-.652.57-1.257 1.29-1.82 2.05-.69-.875-1.335-1.547-1.958-2.056-1.182-.966-2.315-1.303-3.454-1.303zm10.16 2.053c1.147 0 2.188.758 2.992 1.999 1.132 1.748 1.647 4.195 1.647 6.4 0 1.548-.368 2.9-1.839 2.9-.58 0-1.027-.23-1.664-1.004-.496-.601-1.343-1.878-2.832-4.358l-.617-1.028a44.908 44.908 0 0 0-1.255-1.98c.07-.109.141-.224.211-.327 1.12-1.667 2.118-2.602 3.358-2.602zm-10.201.553c1.265 0 2.058.791 2.675 1.446.307.327.737.871 1.234 1.579l-1.02 1.566c-.757 1.163-1.882 3.017-2.837 4.338-1.191 1.649-1.81 1.817-2.486 1.817-.524 0-1.038-.237-1.383-.794-.263-.426-.464-1.13-.464-2.046 0-2.221.63-4.535 1.66-6.088.454-.687.964-1.226 1.533-1.533a2.264 2.264 0 0 1 1.088-.285z" />
+            </g>
+
+            <!-- 5. DEEPSEEK: Official Cobalt Whale (Bottom Chin / Lower Center) -->
+            <g transform="translate(250, 395) scale(1.75)" fill="url(#deepseekGrad)" filter="url(#tattooInk)">
+              <path d="M23.748 4.651c-.254-.124-.364.113-.512.233-.051.04-.094.09-.137.137-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.155-.708-.311-.955-.65-.172-.24-.219-.509-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.094.172.187.129.323-.082.28-.18.553-.266.833-.055.179-.137.218-.328.14a5.5 5.5 0 0 1-1.737-1.179c-.857-.828-1.631-1.743-2.597-2.46a12 12 0 0 0-.689-.47c-.985-.957.13-1.743.387-1.836.27-.098.094-.433-.778-.428-.872.003-1.67.295-2.687.685a3 3 0 0 1-.465.136 9.6 9.6 0 0 0-2.883-.101c-1.885.21-3.39 1.1-4.497 2.622C.082 8.776-.231 10.854.152 13.02c.403 2.284 1.568 4.175 3.36 5.653 1.857 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.132-.284 4.994-1.86.47.234.962.328 1.78.398.629.058 1.235-.031 1.705-.129.735-.155.684-.836.418-.961-2.155-1.004-1.682-.595-2.112-.926 1.095-1.295 2.768-3.598 3.284-6.733.05-.346.115-.834.108-1.114-.004-.171.035-.238.23-.257a4.2 4.2 0 0 0 1.545-.475c1.397-.763 1.96-2.016 2.093-3.517.02-.23-.004-.467-.247-.588M11.58 18.168c-2.088-1.642-3.101-2.183-3.52-2.16-.39.024-.32.472-.234.763.09.288.207.487.371.74.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.168-1.361-.801-2.5-1.86-3.301-3.306-.775-1.393-1.225-2.888-1.299-4.482-.02-.385.094-.522.477-.592a4.7 4.7 0 0 1 1.53-.038c2.131.311 3.946 1.264 5.467 2.774.868.86 1.525 1.887 2.202 2.89.72 1.066 1.494 2.082 2.48 2.915.348.291.626.513.892.677-.802.09-2.14.109-3.055-.615zm1.001-6.44a.306.306 0 0 1 .415-.287.3.3 0 0 1 .113.074.3.3 0 0 1 .086.214c0 .17-.136.307-.308.307a.303.303 0 0 1-.306-.307m3.11 1.596c-.2.081-.4.151-.591.16a1.25 1.25 0 0 1-.798-.254c-.274-.23-.47-.358-.551-.758a1.7 1.7 0 0 1 .015-.588c.07-.327-.007-.537-.238-.727-.188-.156-.426-.199-.689-.199a.6.6 0 0 1-.254-.078.253.253 0 0 1-.114-.358 1 1 0 0 1 .192-.21c.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.392.451.462.576.685.915.176.264.336.536.446.848.066.194-.02.353-.25.45" />
+            </g>
+
+            <!-- 6. xAI: OFFICIAL xAI GEOMETRIC MONOGRAM LOGO (Lower Right Face Tattoo) -->
+            <g transform="translate(350, 336) rotate(10) scale(1.55)" fill="url(#xaiGrad)" filter="url(#tattooInk)">
+              <path d="M6.469 8.776L16.512 23h-4.464L2.005 8.776H6.47zm-.004 7.9l2.233 3.164L6.467 23H2l4.465-6.324zM22 2.582V23h-3.659V7.764L22 2.582zM22 1l-9.952 14.095-2.233-3.163L17.533 1H22z" />
+            </g>
+
+            <!-- 7. ANTHROPIC 'A' MONOGRAM (Subtle Accent under Left Eye) -->
+            <g transform="translate(182, 288) rotate(-6) scale(1.25)" fill="url(#claudeGrad)" filter="url(#tattooInk)" opacity="0.9">
+              <path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z" />
+            </g>
+
+            <!-- LEFT EYE GROUP (ANIMATABLE) -->
+            <g id="left-eye-group" class="eye-group">
+              <g id="left-eye-open">
+                <path d="M 223 223 L 225 223 L 227 223 L 229 223 L 231 223 L 233 223 L 235 224 L 237 224 L 239 224 L 241 225 L 243 226 L 245 227 L 247 228 L 249 230 L 251 232 L 253 234 L 255 236 L 256 238 L 257 240 L 259 242 L 260 244 L 262 246 L 263 248 L 265 250 L 266 252 L 267 254 L 269 256 L 270 258 L 272 260 L 273 262 L 274 264 L 276 266 L 277 268 L 278 270 L 280 272 L 281 274 L 282 276 L 284 278 L 285 280 L 286 282 L 287 284 L 289 286 L 290 288 L 291 290 L 293 292 L 293 294 L 295 296 L 295 298 L 296 300 L 297 302 L 297 304 L 297 306 L 297 308 L 297 310 L 297 312 L 297 314 L 296 316 L 296 318 L 295 320 L 294 322 L 293 324 L 291 326 L 290 327 L 289 329 L 287 330 L 285 332 L 283 333 L 281 334 L 279 335 L 277 335 L 275 336 L 273 336 L 271 337 L 269 337 L 267 337 L 265 336 L 263 336 L 261 335 L 259 335 L 257 334 L 255 333 L 253 332 L 251 331 L 249 329 L 247 327 L 245 325 L 244 323 L 242 321 L 241 319 L 240 317 L 239 315 L 237 313 L 236 311 L 235 309 L 234 307 L 232 305 L 231 303 L 230 301 L 228 299 L 227 297 L 226 295 L 224 293 L 223 291 L 222 289 L 220 287 L 219 285 L 218 283 L 216 281 L 215 279 L 213 277 L 212 275 L 210 273 L 209 271 L 208 269 L 206 267 L 204 265 L 203 263 L 202 261 L 201 259 L 200 257 L 200 255 L 199 253 L 199 251 L 199 249 L 199 247 L 199 245 L 200 243 L 200 241 L 201 239 L 202 237 L 203 235 L 205 233 L 207 231 L 209 229 L 211 228 L 213 226 L 215 226 L 217 225 L 219 224 L 221 224 Z" fill="url(#eyeGrad)" />
+                <ellipse cx="238" cy="265" rx="5" ry="9" fill="#FFFFFF" opacity="0.85" transform="rotate(-35 238 265)" />
+                <circle cx="246" cy="292" r="2.8" fill="#FFFFFF" opacity="0.55" />
+              </g>
+              <!-- ADORABLE NATURAL WINK ARC -->
+              <path id="left-eye-wink-arc" d="M 196 264 C 218 296 266 296 296 262" fill="none" stroke="url(#eyeGrad)" stroke-width="13" stroke-linecap="round" style="display: none;" />
+            </g>
+
+            <!-- RIGHT EYE GROUP (ANIMATABLE) -->
+            <g id="right-eye-group" class="eye-group">
+              <path d="M 320 176 L 322 176 L 324 176 L 326 176 L 328 176 L 330 176 L 332 177 L 334 178 L 336 178 L 338 179 L 340 180 L 342 181 L 344 182 L 346 184 L 348 185 L 350 186 L 352 188 L 354 190 L 356 192 L 358 194 L 360 196 L 361 198 L 363 200 L 365 202 L 366 204 L 368 206 L 369 208 L 371 210 L 372 212 L 373 214 L 375 216 L 376 218 L 378 220 L 379 222 L 381 224 L 382 226 L 383 228 L 384 230 L 385 232 L 387 234 L 388 236 L 389 238 L 390 240 L 391 242 L 392 244 L 393 246 L 394 248 L 395 250 L 396 252 L 397 254 L 398 256 L 399 258 L 399 260 L 399 262 L 400 264 L 400 266 L 400 268 L 399 270 L 399 272 L 399 274 L 398 276 L 397 278 L 395 280 L 393 281 L 391 282 L 389 282 L 387 282 L 385 282 L 383 282 L 381 281 L 379 281 L 377 280 L 375 279 L 373 277 L 371 276 L 369 274 L 367 272 L 365 270 L 364 268 L 362 266 L 361 264 L 360 262 L 359 260 L 358 258 L 357 256 L 356 254 L 354 252 L 354 250 L 352 248 L 351 246 L 350 244 L 349 242 L 348 240 L 346 238 L 345 236 L 344 234 L 342 232 L 341 230 L 340 228 L 338 226 L 337 224 L 335 222 L 334 220 L 332 218 L 331 216 L 329 214 L 328 212 L 326 210 L 324 208 L 322 206 L 321 204 L 319 202 L 318 200 L 316 198 L 315 196 L 314 194 L 313 192 L 313 190 L 312 188 L 312 186 L 312 184 L 313 182 L 314 180 L 316 178 L 318 177 Z" fill="url(#eyeGrad)" />
+              <ellipse cx="348" cy="200" rx="5.5" ry="10" fill="#FFFFFF" opacity="0.85" transform="rotate(-35 348 200)" />
+              <circle cx="356" cy="228" r="3" fill="#FFFFFF" opacity="0.55" />
+            </g>
+          </g>
+        </svg>
+      </div>
+
+      <svg class="wink-star-sparkle" id="wink-sparkle" viewBox="0 0 100 100">
+        <path d="M50 0 Q50 50 0 50 Q50 50 50 100 Q50 50 100 50 Q50 50 50 0 Z" fill="#FFD000" />
+        <circle cx="50" cy="50" r="14" fill="#FFFFFF" />
+      </svg>
+    </div>
+
+    <!-- MASSIVE AUTHENTIC TYPOGRAPHY STAGE -->
+    <div class="logo-typography-stage">
+      <!-- "grok" Wordmark Wrapper -->
+      <div class="grok-wordmark-wrapper" id="grok-wrapper">
+        <span class="grok-text">grok</span>
+      </div>
+
+      <!-- Raised "“D”" Hanging Wrapper with Naked Provider Logos -->
+      <div class="d-hang-wrapper" id="d-wrapper">
+        <div class="d-hinge-pin"></div>
+        <span class="d-quote-glyph">“</span>
+        <div class="d-glyph-container">
+          <span class="d-glyph-text">D</span>
+
+          <!-- ULTRA-THIN HAIRLINE / WIREFRAME PROVIDER SVGs -->
+          <!-- 1. Anthropic Claude (Hairline Spark Star) -->
+          <svg class="naked-stud-svg nstud-claude" id="nstud-claude" viewBox="0 0 24 24" fill="none" stroke="#D97757">
+            <line x1="12" y1="2" x2="12" y2="22"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+            <line x1="19.07" y1="4.93" x2="4.93" y2="19.07"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+
+          <!-- 2. OpenAI (Hairline Geometric Vortex) -->
+          <svg class="naked-stud-svg nstud-openai" id="nstud-openai" viewBox="0 0 24 24" fill="none" stroke="#10B981">
+            <path d="M12 2a4 4 0 0 1 4 4v2.5a3.5 3.5 0 0 1 3.5 3.5 4 4 0 0 1-2 3.46v2.04a3.5 3.5 0 0 1-3.5 3.5 4 4 0 0 1-4-2.3V16.5a3.5 3.5 0 0 1-3.5-3.5 4 4 0 0 1 2-3.46V7.5A3.5 3.5 0 0 1 12 2z"/>
+            <circle cx="12" cy="12" r="2.5"/>
+          </svg>
+
+          <!-- 3. Google Gemini (Hairline 4-Point Star) -->
+          <svg class="naked-stud-svg nstud-gemini" id="nstud-gemini" viewBox="0 0 24 24" fill="none" stroke="#2B7FFF">
+            <path d="M12 2 C12 7.5 16.5 12 22 12 C16.5 12 12 16.5 12 22 C12 16.5 7.5 12 2 12 C7.5 12 12 7.5 12 2 Z"/>
+          </svg>
+
+          <!-- 4. Meta AI (Hairline Infinity Ribbon) -->
+          <svg class="naked-stud-svg nstud-meta" id="nstud-meta" viewBox="0 0 24 24" fill="none" stroke="#0081FB">
+            <path d="M18.18 8.04c-.87-1.12-2.12-1.84-3.58-1.84-1.6 0-3.08.88-4.6 2.52C8.48 7.08 7 6.2 5.4 6.2 3.08 6.2 1.2 8.08 1.2 10.4c0 3.32 2.68 6.6 5.4 6.6 1.6 0 3.08-.88 4.6-2.52 1.52 1.64 3 2.52 4.6 2.52 2.32 0 4.2-1.88 4.2-4.2 0-1.84-.76-3.48-1.82-4.76z"/>
+          </svg>
+
+          <!-- 5. DeepSeek (Hairline Waveform Crest) -->
+          <svg class="naked-stud-svg nstud-deepseek" id="nstud-deepseek" viewBox="0 0 24 24" fill="none" stroke="#1D61E7">
+            <path d="M2 14c3-6 7-6 10 0s7 6 10 0"/>
+            <path d="M6 10c2-3 5-3 7 0s5 3 7 0"/>
+            <circle cx="18" cy="8" r="1.5" fill="#1D61E7"/>
+          </svg>
+
+          <!-- 6. Moonshot Kimi (Hairline Delta Prism) -->
+          <svg class="naked-stud-svg nstud-kimi" id="nstud-kimi" viewBox="0 0 24 24" fill="none" stroke="#F43F5E">
+            <polygon points="12 2 2 22 22 22"/>
+            <polygon points="12 8 7 18 17 18"/>
+          </svg>
+        </div>
+        <span class="d-quote-glyph">”</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ==========================================
+       Web Audio Procedural Synthesizer
+       ========================================== */
+    class SplashAudio {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+      }
+      init() {
+        if (this.ctx) return;
+        try {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AC();
+          this.masterGain = this.ctx.createGain();
+          this.masterGain.gain.value = 0.55;
+          this.masterGain.connect(this.ctx.destination);
+        } catch (e) {}
+      }
+      resume() {
+        if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
+      }
+      playSlotSpinTick() {
+        if (!this.enabled || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        const click = this.ctx.createOscillator();
+        const cGain = this.ctx.createGain();
+        click.type = "sine";
+        click.frequency.setValueAtTime(800 + Math.random() * 400, t);
+        click.frequency.exponentialRampToValueAtTime(300, t + 0.02);
+        cGain.gain.setValueAtTime(0.08, t);
+        cGain.gain.exponentialRampToValueAtTime(0.001, t + 0.025);
+        click.connect(cGain);
+        cGain.connect(this.masterGain);
+        click.start(t);
+        click.stop(t + 0.03);
+      }
+      playJackpotChime() {
+        if (!this.enabled || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        const notes = [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98, 2093.0];
+        notes.forEach((f, i) => {
+          const osc = this.ctx.createOscillator();
+          const g = this.ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(f, t + i * 0.06);
+          g.gain.setValueAtTime(0.001, t + i * 0.06);
+          g.gain.linearRampToValueAtTime(0.12, t + i * 0.06 + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.06 + 0.4);
+          osc.connect(g);
+          g.connect(this.masterGain);
+          osc.start(t + i * 0.06);
+          osc.stop(t + i * 0.06 + 0.45);
+        });
+      }
+      playEchoWhoosh(index = 0, total = 30) {
+        if (!this.enabled || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const scale = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51, 1567.98];
+        const freq = scale[index % scale.length] * (1 + (index / total) * 0.4);
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq * 0.85, t);
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.25, t + 0.38);
+        gain.gain.setValueAtTime(0.001, t);
+        gain.gain.linearRampToValueAtTime(0.04, t + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(t);
+        osc.stop(t + 0.42);
+      }
+      playHeroRise() {
+        if (!this.enabled || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        const sub = this.ctx.createOscillator();
+        const subGain = this.ctx.createGain();
+        sub.type = "triangle";
+        sub.frequency.setValueAtTime(55, t);
+        sub.frequency.exponentialRampToValueAtTime(140, t + 0.7);
+        sub.frequency.exponentialRampToValueAtTime(65, t + 1.2);
+        subGain.gain.setValueAtTime(0.001, t);
+        subGain.gain.linearRampToValueAtTime(0.3, t + 0.45);
+        subGain.gain.exponentialRampToValueAtTime(0.001, t + 1.25);
+        sub.connect(subGain);
+        subGain.connect(this.masterGain);
+        sub.start(t);
+        sub.stop(t + 1.3);
+      }
+      playBowChime() {
+        if (!this.enabled || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(440, t);
+        osc.frequency.exponentialRampToValueAtTime(660, t + 0.4);
+        gain.gain.setValueAtTime(0.001, t);
+        gain.gain.linearRampToValueAtTime(0.16, t + 0.06);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(t);
+        osc.stop(t + 0.65);
+      }
+      playEyeDart() {
+        if (!this.enabled || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(320, t);
+        osc.frequency.exponentialRampToValueAtTime(680, t + 0.08);
+        osc.frequency.exponentialRampToValueAtTime(400, t + 0.16);
+        gain.gain.setValueAtTime(0.001, t);
+        gain.gain.linearRampToValueAtTime(0.12, t + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(t);
+        osc.stop(t + 0.2);
+      }
+      playWink() {
+        if (!this.enabled || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        const pop = this.ctx.createOscillator();
+        const popGain = this.ctx.createGain();
+        pop.type = "sine";
+        pop.frequency.setValueAtTime(520, t);
+        pop.frequency.exponentialRampToValueAtTime(1480, t + 0.1);
+        popGain.gain.setValueAtTime(0.001, t);
+        popGain.gain.linearRampToValueAtTime(0.25, t + 0.02);
+        popGain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+        pop.connect(popGain);
+        popGain.connect(this.masterGain);
+        pop.start(t);
+        pop.stop(t + 0.2);
+
+        [1760, 2217, 2637, 3520].forEach((freq, i) => {
+          const chime = this.ctx.createOscillator();
+          const cGain = this.ctx.createGain();
+          chime.type = "sine";
+          chime.frequency.setValueAtTime(freq, t + 0.05 + i * 0.03);
+          cGain.gain.setValueAtTime(0.001, t + 0.05 + i * 0.03);
+          cGain.gain.linearRampToValueAtTime(0.08, t + 0.07 + i * 0.03);
+          cGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35 + i * 0.03);
+          chime.connect(cGain);
+          cGain.connect(this.masterGain);
+          chime.start(t + 0.05 + i * 0.03);
+          chime.stop(t + 0.4 + i * 0.03);
+        });
+      }
+      playGrokSlam() {
+        if (!this.enabled || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        const kick = this.ctx.createOscillator();
+        const kickGain = this.ctx.createGain();
+        kick.type = "sine";
+        kick.frequency.setValueAtTime(190, t);
+        kick.frequency.exponentialRampToValueAtTime(32, t + 0.35);
+        kickGain.gain.setValueAtTime(0.9, t);
+        kickGain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+        kick.connect(kickGain);
+        kickGain.connect(this.masterGain);
+        kick.start(t);
+        kick.stop(t + 0.75);
+
+        const slap = this.ctx.createOscillator();
+        const slapGain = this.ctx.createGain();
+        slap.type = "sawtooth";
+        slap.frequency.setValueAtTime(860, t);
+        slap.frequency.exponentialRampToValueAtTime(140, t + 0.15);
+        slapGain.gain.setValueAtTime(0.3, t);
+        slapGain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+        slap.connect(slapGain);
+        slapGain.connect(this.masterGain);
+        slap.start(t);
+        slap.stop(t + 0.2);
+      }
+      playDSlamAndTweak() {
+        if (!this.enabled || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        const strike = this.ctx.createOscillator();
+        const sGain = this.ctx.createGain();
+        strike.type = "triangle";
+        strike.frequency.setValueAtTime(460, t);
+        strike.frequency.exponentialRampToValueAtTime(65, t + 0.25);
+        sGain.gain.setValueAtTime(0.75, t);
+        sGain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+        strike.connect(sGain);
+        sGain.connect(this.masterGain);
+        strike.start(t);
+        strike.stop(t + 0.55);
+      }
+      playShiverTremor() {
+        if (!this.enabled || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        for (let i = 0; i < 18; i++) {
+          const oscTime = t + i * 0.04;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = i % 3 === 0 ? "sawtooth" : "square";
+          osc.frequency.setValueAtTime(260 + (i * 55) + Math.random() * 90, oscTime);
+          osc.frequency.exponentialRampToValueAtTime(110, oscTime + 0.038);
+          gain.gain.setValueAtTime(0.18, oscTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, oscTime + 0.04);
+          osc.connect(gain);
+          gain.connect(this.masterGain);
+          osc.start(oscTime);
+          osc.stop(oscTime + 0.042);
+        }
+      }
+    }
+
+    /* ==========================================
+       grokD Cinematic Controller Engine
+       ========================================== */
+    class GrokDSplash {
+      constructor(options = {}) {
+        this.options = Object.assign({
+          autoStart: true,
+          onComplete: null,
+        }, options);
+
+        this.stage = document.getElementById("grokd-splash-stage");
+        this.audio = new SplashAudio();
+        this.timeouts = [];
+        this.animFrameId = null;
+        this.particles = [];
+        this.shockwaves = [];
+        this.isRunning = false;
+
+        this.canvas = document.getElementById("particle-canvas");
+        if (this.canvas) {
+          this.ctx = this.canvas.getContext("2d");
+          this.resizeCanvas();
+          window.addEventListener("resize", () => this.resizeCanvas());
+        }
+
+        this.bindEvents();
+        this.play();
+      }
+
+      isLightMode() {
+        return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+      }
+
+      resizeCanvas() {
+        if (!this.canvas) return;
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+      }
+
+      bindEvents() {
+        const unlockAudio = () => {
+          this.audio?.init();
+          this.audio?.resume();
+        };
+        window.addEventListener("pointerdown", unlockAudio, { passive: true });
+        window.addEventListener("keydown", unlockAudio, { passive: true });
+
+        // Click anywhere to dismiss immediately
+        if (this.stage) {
+          this.stage.addEventListener("click", () => this.dismiss());
+        }
+        window.addEventListener("keydown", (e) => {
+          if (e.code === "Escape" || e.code === "Space") this.dismiss();
+        });
+      }
+
+      schedule(fn, delayMs) {
+        const id = setTimeout(fn, delayMs);
+        this.timeouts.push(id);
+        return id;
+      }
+
+      clearTimeline() {
+        this.timeouts.forEach(clearTimeout);
+        this.timeouts = [];
+        if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
+      }
+
+      play() {
+        this.clearTimeline();
+        this.resetVisuals();
+        this.audio?.init();
+        this.startParticleLoop();
+
+        // 1. Edge-to-Edge Echo Swarm (0.0s - 1.0s)
+        this.spawnEchoSwarm(85);
+        for (let i = 0; i < 24; i++) {
+          this.schedule(() => this.audio?.playEchoWhoosh(i, 24), i * 35);
+        }
+
+        // Animate the TWO BEAUTIFUL LIVE PLASMA ORBS as Casino Slot Machine Reels!
+        this.schedule(() => this.animateTwoLiveOrbsCasino(), 600);
+
+        // 2. Hero Mascot Materializes (1000ms)
+        this.schedule(() => {
+          const hero = document.getElementById("hero-mascot");
+          if (hero) hero.classList.add("active");
+          this.audio?.playHeroRise();
+
+          const isLight = this.isLightMode();
+          const rect = hero.getBoundingClientRect();
+          this.spawnShockwave(rect.left + rect.width / 2, rect.top + rect.height / 2, isLight ? "#7928CA" : "#00F0FF");
+          this.spawnBurst(rect.left + rect.width / 2, rect.top + rect.height / 2, 45);
+        }, 1000);
+
+        // 3. Expressive Eyes & ADORABLE NATURAL WINK (1900ms - 2800ms)
+        this.schedule(() => {
+          const card = document.getElementById("mascot-card");
+          if (card) card.className = "mascot-creature-head eyes-look-left";
+          this.audio?.playEyeDart();
+        }, 1900);
+
+        this.schedule(() => {
+          const card = document.getElementById("mascot-card");
+          if (card) card.className = "mascot-creature-head eyes-look-right";
+          this.audio?.playEyeDart();
+        }, 2200);
+
+        this.schedule(() => {
+          const card = document.getElementById("mascot-card");
+          const hero = document.getElementById("hero-mascot");
+          if (card) card.className = "mascot-creature-head eyes-cross";
+          if (hero) hero.classList.add("head-wobble");
+          this.audio?.playEyeDart();
+        }, 2500);
+
+        this.schedule(() => {
+          const card = document.getElementById("mascot-card");
+          const sparkle = document.getElementById("wink-sparkle");
+          if (card) card.className = "mascot-creature-head eyes-wink";
+          if (sparkle) {
+            sparkle.setAttribute("class", "wink-star-sparkle pop");
+          }
+          this.audio?.playWink();
+
+          const cardRect = card.getBoundingClientRect();
+          this.spawnBurst(cardRect.left + cardRect.width * 0.35, cardRect.top + cardRect.height * 0.45, 35, "#FFD000");
+        }, 2800);
+
+        // 4. Theatrical Bow to Grok (3300ms)
+        this.schedule(() => {
+          const hero = document.getElementById("hero-mascot");
+          if (hero) {
+            hero.classList.remove("active", "head-wobble");
+            void hero.offsetWidth;
+            hero.classList.add("mascot-bowing");
+          }
+          this.audio?.playBowChime();
+        }, 3300);
+
+        // 5. Slap MASSIVE "grok" Wordmark Diagonally (4200ms)
+        this.schedule(() => {
+          const grokWrap = document.getElementById("grok-wrapper");
+          if (grokWrap) grokWrap.classList.add("slammed");
+          this.stage?.classList.add("stage-shake");
+          this.audio?.playGrokSlam();
+
+          const isLight = this.isLightMode();
+          const grokRect = grokWrap.getBoundingClientRect();
+          this.spawnShockwave(grokRect.left + grokRect.width / 2, grokRect.top + grokRect.height / 2, isLight ? "#0F172A" : "#FFFFFF");
+          this.spawnBurst(grokRect.left + grokRect.width / 2, grokRect.top + grokRect.height / 2, 55, "#FFFFFF");
+
+          setTimeout(() => this.stage?.classList.remove("stage-shake"), 450);
+        }, 4200);
+
+        // 6. Slap Raised Studded "D" (5200ms)
+        this.schedule(() => {
+          const dWrap = document.getElementById("d-wrapper");
+          if (dWrap) dWrap.classList.add("d-slammed");
+          this.stage?.classList.add("stage-shake-heavy");
+          this.audio?.playDSlamAndTweak();
+
+          const dRect = dWrap.getBoundingClientRect();
+          this.spawnShockwave(dRect.left + 30, dRect.top + 30, "#FFFFFF");
+          this.spawnBurst(dRect.left + 30, dRect.top + 30, 45, "#CBD5E1");
+
+          setTimeout(() => this.stage?.classList.remove("stage-shake-heavy"), 550);
+        }, 5200);
+
+        // 7. The "D" Trembles & VIOLENTLY SHIVERS the logos into orbit! (6400ms)
+        this.schedule(() => {
+          const dWrap = document.getElementById("d-wrapper");
+          const card = document.getElementById("mascot-card");
+
+          if (dWrap) {
+            dWrap.classList.remove("d-slammed", "d-idle-hang");
+            void dWrap.offsetWidth;
+            dWrap.classList.add("d-shivering");
+          }
+
+          if (card) {
+            card.className = "mascot-creature-head eyes-look-right";
+          }
+
+          this.audio?.playShiverTremor();
+
+          // Fling the hairline SVG logos off into orbit!
+          const studs = [
+            { id: "nstud-claude", cls: "flung-off-1" },
+            { id: "nstud-openai", cls: "flung-off-2" },
+            { id: "nstud-gemini", cls: "flung-off-3" },
+            { id: "nstud-meta", cls: "flung-off-4" },
+            { id: "nstud-deepseek", cls: "flung-off-5" },
+            { id: "nstud-kimi", cls: "flung-off-6" }
+          ];
+
+          studs.forEach((item, index) => {
+            this.schedule(() => {
+              const el = document.getElementById(item.id);
+              if (el) el.classList.add(item.cls);
+              const rect = el ? el.getBoundingClientRect() : { left: window.innerWidth * 0.6, top: window.innerHeight * 0.5 };
+              this.spawnBurst(rect.left + 15, rect.top + 15, 25, "#00F0FF");
+            }, 80 + index * 45);
+          });
+
+          // Settle and smoothly AUTO-DISMISS splash into real workspace!
+          this.schedule(() => {
+            if (dWrap) {
+              dWrap.classList.remove("d-shivering");
+              dWrap.classList.add("d-idle-hang");
+            }
+            if (card) card.className = "mascot-creature-head";
+            
+            // Auto dismiss cleanly after presentation completes
+            this.schedule(() => this.dismiss(), 1200);
+          }, 1100);
+
+        }, 6400);
+      }
+
+      animateTwoLiveOrbsCasino() {
+        if (typeof window.__grokBotCasinoSpin === "function") {
+          window.__grokBotCasinoSpin(this.audio);
+          return;
+        }
+      }
+
+      resetVisuals() {
+        const echoLayer = document.getElementById("echo-layer");
+        if (echoLayer) echoLayer.innerHTML = "";
+        const hero = document.getElementById("hero-mascot");
+        if (hero) hero.className = "hero-mascot-wrapper";
+        const card = document.getElementById("mascot-card");
+        if (card) card.className = "mascot-creature-head";
+        const sparkle = document.getElementById("wink-sparkle");
+        if (sparkle) sparkle.setAttribute("class", "wink-star-sparkle");
+        const grokWrap = document.getElementById("grok-wrapper");
+        if (grokWrap) grokWrap.className = "grok-wordmark-wrapper";
+        const dWrap = document.getElementById("d-wrapper");
+        if (dWrap) {
+          dWrap.className = "d-hang-wrapper";
+          dWrap.style.transform = "";
+        }
+
+        ["nstud-claude", "nstud-openai", "nstud-gemini", "nstud-meta", "nstud-deepseek", "nstud-kimi"].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.setAttribute("class", `naked-stud-svg ${id.replace("nstud-", "nstud-")}`);
+        });
+
+        this.particles = [];
+        this.shockwaves = [];
+      }
+
+      spawnEchoSwarm(count = 85) {
+        const layer = document.getElementById("echo-layer");
+        if (!layer) return;
+        layer.innerHTML = "";
+
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+
+        for (let i = 0; i < count; i++) {
+          const el = document.createElement("div");
+          el.className = "echo-clone";
+          
+          el.innerHTML = `
+            <svg viewBox="0 0 512 512">
+              <path d="M 162 50 L 315 50 L 275 53 L 215 54 L 155 55 L 101 65 L 65 102 L 54 162 L 68 182 L 128 142 L 215 122 L 305 136 L 383 183 L 434 250 L 456 316 L 458 385 L 401 454 L 308 461 L 209 461 L 110 454 L 52 373 L 50 286 L 50 184 L 68 88 L 127 53 Z" fill="#FFFFFF"/>
+              <ellipse cx="192" cy="346" rx="28" ry="16" fill="#FF1E56" opacity="0.6"/>
+              <ellipse cx="368" cy="330" rx="26" ry="15" fill="#FF1E56" opacity="0.6"/>
+              <path d="M 223 223 L 257 240 L 287 284 L 297 312 L 285 332 L 259 335 L 235 309 L 206 267 L 200 255 Z" fill="#1E1D2D"/>
+              <path d="M 320 176 L 356 192 L 389 238 L 400 266 L 389 282 L 365 270 L 334 220 L 312 186 Z" fill="#1E1D2D"/>
+            </svg>
+          `;
+
+          const angle = (i / count) * Math.PI * 2 + (Math.random() * 0.4 - 0.2);
+          const spreadFactor = 0.25 + 0.75 * Math.sqrt((i + 1) / count);
+          const maxDistX = (w * 0.48) * spreadFactor;
+          const maxDistY = (h * 0.48) * spreadFactor;
+
+          const tx = (Math.cos(angle) * maxDistX) + (Math.random() * 80 - 40);
+          const ty = (Math.sin(angle) * maxDistY) + (Math.random() * 80 - 40);
+          const tz = Math.floor(Math.random() * 320 - 160);
+
+          const sizePx = Math.floor(44 + Math.random() * 46);
+          const targetScale = 0.55 + Math.random() * 0.75;
+          const delay = (i * 0.01 + Math.random() * 0.06);
+          const duration = (1.2 + Math.random() * 0.4);
+          const peakOpacity = 0.88 + Math.random() * 0.12;
+
+          el.style.setProperty("--size", `${sizePx}px`);
+          el.style.setProperty("--tx", `${tx}px`);
+          el.style.setProperty("--ty", `${ty}px`);
+          el.style.setProperty("--tz", `${tz}px`);
+          el.style.setProperty("--target-scale", targetScale);
+          el.style.setProperty("--delay", `${delay}s`);
+          el.style.setProperty("--duration", `${duration}s`);
+          el.style.setProperty("--peak-opacity", peakOpacity);
+          el.style.setProperty("--rot-start", `${Math.random() * 80 - 40}deg`);
+          el.style.setProperty("--rot-mid", `${Math.random() * 50 - 25}deg`);
+          el.style.setProperty("--rot-end", `${Math.random() * 110 - 55}deg`);
+
+          layer.appendChild(el);
+        }
+      }
+
+      spawnShockwave(x, y, color = "#00F0FF") {
+        this.shockwaves.push({
+          x, y,
+          radius: 10,
+          maxRadius: Math.max(window.innerWidth, window.innerHeight) * 0.48,
+          opacity: 0.95,
+          color,
+          lineWidth: 7,
+          growth: 24,
+        });
+      }
+
+      spawnBurst(x, y, count = 35, color) {
+        const isLight = this.isLightMode();
+        const palette = isLight
+          ? ["#0F172A", "#1E293B", "#334155", "#00F0FF", "#FF1E56", "#FFD000"]
+          : ["#FFFFFF", "#E2E8F0", "#94A3B8", "#00F0FF", "#FF1E56", "#FFD000"];
+
+        for (let i = 0; i < count; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = (4 + Math.random() * 14);
+          this.particles.push({
+            x, y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            size: 3 + Math.random() * 6,
+            color: color || palette[Math.floor(Math.random() * palette.length)],
+            alpha: 1,
+            decay: 0.018 + Math.random() * 0.02,
+            gravity: 0.22,
+            friction: 0.96,
+          });
+        }
+      }
+
+      startParticleLoop() {
+        if (this.isRunning) return;
+        this.isRunning = true;
+
+        const loop = () => {
+          if (!this.isRunning || !this.ctx) return;
+          this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+          for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+            const sw = this.shockwaves[i];
+            sw.radius += sw.growth;
+            sw.opacity -= 0.032;
+            sw.lineWidth = Math.max(1, sw.lineWidth * 0.95);
+
+            if (sw.opacity <= 0 || sw.radius >= sw.maxRadius) {
+              this.shockwaves.splice(i, 1);
+              continue;
+            }
+
+            this.ctx.save();
+            this.ctx.beginPath();
+            this.ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
+            this.ctx.strokeStyle = sw.color;
+            this.ctx.lineWidth = sw.lineWidth;
+            this.ctx.globalAlpha = Math.max(0, sw.opacity);
+            this.ctx.shadowBlur = 20;
+            this.ctx.shadowColor = sw.color;
+            this.ctx.stroke();
+            this.ctx.restore();
+          }
+
+          for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += p.gravity;
+            p.vx *= p.friction;
+            p.vy *= p.friction;
+            p.alpha -= p.decay;
+
+            if (p.alpha <= 0) {
+              this.particles.splice(i, 1);
+              continue;
+            }
+
+            this.ctx.save();
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            this.ctx.fillStyle = p.color;
+            this.ctx.globalAlpha = Math.max(0, p.alpha);
+            this.ctx.shadowBlur = 12;
+            this.ctx.shadowColor = p.color;
+            this.ctx.fill();
+            this.ctx.restore();
+          }
+
+          this.animFrameId = requestAnimationFrame(loop);
+        };
+        loop();
+      }
+
+      dismiss() {
+        if (this.stage) {
+          this.stage.classList.add("fading-out");
+          setTimeout(() => {
+            this.clearTimeline();
+            this.isRunning = false;
+            try { this.stage.remove(); } catch(e) {}
+          }, 650);
+        }
+      }
+    }
+
+    // Auto-instantiate on load
+    let splashInstance = new GrokDSplash();
+  </script>
+</body>
+</html>

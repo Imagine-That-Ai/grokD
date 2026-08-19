@@ -1,0 +1,26 @@
+# Local identity, tokens, live seats
+browser-profiles/
+profile-data/
+local-d-secrets/
+runtime/
+active-env.json
+failover-config.json
+model-config.json
+onboarding.json
+profiles.json
+**/sand-secrets.json
+**/gateway-descriptor.json
+**/*-secrets.json
+
+# Packed app + extracted asar + scratch
+dist/
+hack/
+host/host-main.cjs
+proof/
+*.log
+*.tmp
+
+# Editor / OS
+.DS_Store
+node_modules/
+*.lock
