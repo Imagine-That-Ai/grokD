@@ -2,6 +2,8 @@
 
 D is the one app. A profile is **who you are** (local box or a Cursor identity) plus the bots that come with that seat.
 
+First-run **Seat in** can add **more than one** Cursor login (sign in again, or import another official Grok Bot). Each login is its own seat. Secrets stay in `profile-data/<id>/`.
+
 ## Built-in
 
 | Profile | Kind | What it opens |
@@ -15,6 +17,7 @@ D is the one app. A profile is **who you are** (local box or a Cursor identity) 
 ```bash
 node ~/.grok/grokbot-d/switch-profile.js list
 node ~/.grok/grokbot-d/switch-profile.js switch local-d
+node ~/.grok/grokbot-d/switch-profile.js switch local-d --takeover
 node ~/.grok/grokbot-d/switch-profile.js switch cursor-b
 node ~/.grok/grokbot-d/switch-profile.js add --name "My Cursor" --kind cursor
 node ~/.grok/grokbot-d/switch-profile.js add --name "Work" --kind cursor --from B
@@ -22,6 +25,10 @@ node ~/.grok/grokbot-d/switch-profile.js add --name "All on B" --kind cursor --f
 ```
 
 `--family 1` unions A+B+C chat lists onto one Cursor identity.
+
+Plain `switch local-d` restores the local box (bots, secrets, chats, `cliproxy` / `grok-4.6`). It also drops any leftover Cursor VM connection so the sidebar is the local roster.
+
+`--takeover` (seat menu: **Continue this chat on Local D**) keeps the open Cursor thread and settings, points the computer at `:1337`, and seeds a local agent that continues that thread on local models.
 
 Switching the same profile is a no-op (does not replay a stale snapshot over live box-data).
 

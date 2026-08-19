@@ -43,13 +43,48 @@
     return Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: "1" });
   }
 
-  function switchTo(id) {
-    const child = spawn(process.execPath, [SWITCH, "switch", id], {
+  function switchTo(id, opts) {
+    const args = [SWITCH, "switch", id];
+    if (opts && opts.takeover) args.push("--takeover");
+    const child = spawn(process.execPath, args, {
       detached: true,
       stdio: "ignore",
       env: nodeEnv(),
     });
     child.unref();
+  }
+
+  function captureChatHandoff() {
+    const excerpts = [];
+    const seen = new Set();
+    const nodes = document.querySelectorAll("p, li, [class*='message'], [class*='bubble']");
+    for (const n of nodes) {
+      if (n.querySelector && n.querySelector("p, li, [class*='message']")) continue;
+      const t = String(n.innerText || "").replace(/\s+/g, " ").trim();
+      if (t.length < 12 || t.length > 600) continue;
+      if (seen.has(t)) continue;
+      if (/^(Search|Today |Message from|Grok Bot can|Allow Grok)/i.test(t)) continue;
+      seen.add(t);
+      excerpts.push(t);
+      if (excerpts.length >= 16) break;
+    }
+    const id = activeId();
+    const prof = (load().profiles || []).find((p) => p.id === id);
+    const payload = {
+      from: id,
+      fromName: prof ? prof.name : id,
+      model: currentModelId(),
+      lastUser: "",
+      excerpts: excerpts.slice(-12),
+      at: Date.now(),
+    };
+    try { payload.lastUser = composerText(); } catch {}
+    try {
+      require(path.join(ROOT, "takeover-local.js")).writePayload(payload);
+    } catch (e) {
+      try { fs.writeFileSync(path.join(ROOT, "runtime", "takeover.json"), JSON.stringify(payload) + "\n"); } catch {}
+    }
+    return payload;
   }
 
   function pauseMod() {
@@ -122,6 +157,44 @@
     execFileSync(process.execPath, args, { timeout: 30000, env: nodeEnv() });
   }
 
+  // The grok mark is a monochrome SVG shipped as an <img> data URL, so no
+  // stylesheet can touch its fill. Rewrite the fill to a candy-red gradient and
+  // hand the element back its own src. Each <img> is its own document, so the
+  // gradient id cannot collide with the page.
+  const GROK_CANDY_DEFS =
+    '<defs><radialGradient id="gdCandy" cx="34%" cy="26%" r="88%">' +
+    '<stop offset="0" stop-color="#ff8a90"/>' +
+    '<stop offset="0.26" stop-color="#ff2436"/>' +
+    '<stop offset="0.62" stop-color="#cf0e21"/>' +
+    '<stop offset="1" stop-color="#7d0413"/></radialGradient></defs>';
+
+  function candyGrokMarks() {
+    const imgs = document.querySelectorAll('img[src^="data:image/svg"]:not([data-gd-grok])');
+    for (let i = 0; i < imgs.length; i++) {
+      const img = imgs[i];
+      let raw;
+      try {
+        raw = decodeURIComponent(String(img.getAttribute("src")).split(",").slice(1).join(","));
+      } catch (_) {
+        img.setAttribute("data-gd-grok", "skip");
+        continue;
+      }
+      if (raw.indexOf("<title>Grok</title>") < 0) {
+        img.setAttribute("data-gd-grok", "skip");
+        continue;
+      }
+      let out = raw.replace(/fill="(?!none)[^"]*"/g, 'fill="url(#gdCandy)"');
+      if (out.indexOf('fill="url(#gdCandy)"') < 0) {
+        out = out.replace(/<svg/, '<svg fill="url(#gdCandy)"');
+      }
+      out = out.replace(/<svg([^>]*)>/, "<svg$1>" + GROK_CANDY_DEFS);
+      img.setAttribute("data-gd-grok", "1");
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(out);
+      const host = img.closest && img.closest(".pure-standalone-proxy-icon");
+      if (host) host.classList.add("gd-grok-host");
+    }
+  }
+
   function el(tag, style, text) {
     const n = document.createElement(tag);
     if (style) n.style.cssText = style;
@@ -142,6 +215,7 @@
       n.id = "grok-d-toast";
       document.body.appendChild(n);
     }
+    window.__gdToast = toast;
     n.textContent = msg;
     n.style.opacity = "1";
     n.style.transform = "translateY(0)";
@@ -311,6 +385,139 @@
       .sand-grok-bot-mark.gd-bot-pearl { animation: gdPearlShift 5.6s ease-in-out infinite; }
       .sand-grok-bot-mark.gd-bot-blackhole {
         filter: drop-shadow(6px 11px 16px rgba(0,0,0,0.88)) drop-shadow(0 0 12px rgba(255,110,60,0.28));
+      }
+
+      /* Tesla candy red for the grok mark itself, wherever it renders: the
+         little one riding the model orb, the picker header, every model chip.
+         The mark ships as fill="currentColor" inside an <img> data URL, so CSS
+         cannot reach it; candyGrokMarks() rewrites the fill to a candy gradient
+         instead. The surrounding bubble then picks the red up on its own,
+         because the rim is painted from a copy of its own contents. */
+      img[data-gd-grok="1"] {
+        filter:
+          drop-shadow(0 0 3px rgba(255, 52, 72, 0.85))
+          drop-shadow(0 0 8px rgba(206, 12, 32, 0.5));
+      }
+      .pure-standalone-proxy-icon.gd-grok-host {
+        --proxy-glow: rgba(255, 42, 62, 0.95) !important;
+      }
+
+      /* Model chips read as flat grey slabs because their only light is a
+         backdrop blur of the dark panel behind them. Give them their own
+         highlight, a real rim and room to breathe so they are actually glass. */
+      /* The panel is an oval, so a tray that fills its full width pushes chips
+         out through the curve. Centre them and inset the run. */
+      .whimsical-model-tray {
+        gap: 8px !important;
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        justify-content: center !important;
+        align-items: center !important;
+        padding: 0 14px !important;
+        box-sizing: border-box !important;
+      }
+      .whimsical-model-item { flex: 0 0 auto !important; }
+      .whimsical-model-item {
+        border-radius: 999px !important;
+        padding: 7px 13px !important;
+        background: radial-gradient(150% 170% at 28% 8%,
+          rgba(255, 255, 255, 0.24) 0%,
+          rgba(255, 255, 255, 0.07) 36%,
+          rgba(16, 16, 28, 0.72) 100%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.45),
+          inset 0 -7px 14px rgba(0, 0, 0, 0.5),
+          0 4px 12px rgba(0, 0, 0, 0.5) !important;
+        backdrop-filter: blur(18px) saturate(190%) !important;
+        -webkit-backdrop-filter: blur(18px) saturate(190%) !important;
+      }
+      .whimsical-model-item:hover {
+        transform: translateY(-1.5px) scale(1.04) !important;
+        border-color: rgba(255, 255, 255, 0.44) !important;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.6),
+          inset 0 -7px 14px rgba(0, 0, 0, 0.45),
+          0 7px 18px rgba(0, 0, 0, 0.55) !important;
+      }
+      /* the active model wears the same candy red as the grok mark */
+      .whimsical-model-item.is-active-model {
+        background: radial-gradient(150% 170% at 28% 8%,
+          rgba(255, 120, 134, 0.3) 0%,
+          rgba(214, 12, 34, 0.16) 46%,
+          rgba(28, 6, 12, 0.8) 100%) !important;
+        border-color: rgba(255, 62, 82, 0.6) !important;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 190, 196, 0.55),
+          inset 0 -7px 14px rgba(0, 0, 0, 0.45),
+          0 0 16px rgba(255, 40, 60, 0.34) !important;
+      }
+      /* The picker is built in the packed preload with hardcoded dark-theme
+         colours: white labels on dark glass. In light mode the shell turns
+         white but the text stays white, so the whole picker goes unreadable.
+         Repaint the shell as light glass and force the inherited text dark;
+         accents that carry meaning are re-exempted below. */
+      @media (prefers-color-scheme: light) {
+        .ghostly-liquid-glass-bubble {
+          background: radial-gradient(135% 135% at 30% 8%,
+            rgba(255, 255, 255, 0.97) 0%,
+            rgba(250, 250, 253, 0.92) 38%,
+            rgba(234, 234, 242, 0.88) 78%,
+            rgba(223, 223, 233, 0.9) 100%) !important;
+          border-color: rgba(0, 0, 0, 0.1) !important;
+          box-shadow:
+            0 32px 80px rgba(0, 0, 0, 0.18),
+            inset 0 -8px 24px rgba(0, 0, 0, 0.05),
+            inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+        }
+        .ghostly-liquid-glass-bubble,
+        .ghostly-liquid-glass-bubble *:not([data-gd-rim]):not([data-gd-rim] *) {
+          color: #1b1b20 !important;
+        }
+        .liquid-orb-name-pill {
+          background: rgba(255, 255, 255, 0.94) !important;
+          border: 1px solid rgba(0, 0, 0, 0.12) !important;
+          color: #1b1b20 !important;
+          box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16) !important;
+        }
+        .liquid-glass-orb {
+          background: radial-gradient(circle at 45% 45%,
+            rgba(255, 255, 255, 0.98) 0%,
+            rgba(248, 248, 252, 0.9) 42%,
+            rgba(228, 228, 238, 0.88) 100%) !important;
+          border-color: rgba(0, 0, 0, 0.1) !important;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.95),
+            inset 0 -3px 7px rgba(0, 0, 0, 0.07),
+            0 5px 14px rgba(0, 0, 0, 0.14),
+            0 0 14px var(--glow-color, rgba(0, 0, 0, 0.12)) !important;
+        }
+        /* keep the meaning-carrying accents */
+        .ghostly-liquid-glass-bubble .gd-idpill.is-on,
+        .ghostly-liquid-glass-bubble .gd-idpill.is-on * { color: #047857 !important; }
+        .whimsical-model-item.is-active-model,
+        .whimsical-model-item.is-active-model * { color: #9f0f22 !important; }
+      }
+
+      @media (prefers-color-scheme: light) {
+        .whimsical-model-item {
+          background: radial-gradient(150% 170% at 28% 8%,
+            rgba(255, 255, 255, 0.98) 0%,
+            rgba(246, 246, 250, 0.9) 42%,
+            rgba(226, 226, 234, 0.82) 100%) !important;
+          border-color: rgba(0, 0, 0, 0.1) !important;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.95),
+            inset 0 -6px 12px rgba(0, 0, 0, 0.05),
+            0 3px 10px rgba(0, 0, 0, 0.12) !important;
+        }
+        .whimsical-model-item.is-active-model {
+          background: radial-gradient(150% 170% at 28% 8%,
+            rgba(255, 226, 228, 0.98) 0%,
+            rgba(255, 176, 184, 0.6) 52%,
+            rgba(236, 150, 160, 0.5) 100%) !important;
+          border-color: rgba(206, 12, 32, 0.42) !important;
+        }
       }
     `;
     document.head.appendChild(s);
@@ -1969,6 +2176,12 @@
         <div class="whimsical-model-tray no-scrollbar">
           ${swapButtonsHtml}
         </div>
+        ${(profile && profile.kind === "cursor") ? `
+        <button type="button" id="grok-continue-local" class="whimsical-model-item" title="Keep this chat and settings. Local models pick up here.">
+          <span style="font-size:11px;font-weight:700;color:#fff">Continue this chat on Local D</span>
+          <span style="font-size:9px;color:rgba(255,255,255,0.5);margin-left:auto">same thread</span>
+        </button>
+        ` : ""}
         <div class="gd-railacts" style="justify-content:center;border:none;padding:4px 0 8px;gap:8px">
           <button type="button" id="grok-menu-add-seat" class="gd-iconbtn is-primary" title="Add seat">${ICONS.plus}</button>
           <button type="button" id="grok-menu-clean-login" class="gd-iconbtn" title="Open Sign-In">${ICONS.browser}</button>
@@ -2089,6 +2302,16 @@
         }
       });
     });
+    const cont = menu.querySelector("#grok-continue-local");
+    if (cont) {
+      cont.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeSeatActionMenu();
+        toast("Continuing this chat on Local D…");
+        captureChatHandoff();
+        switchTo("local-d", { takeover: true });
+      });
+    }
     menu.querySelector("#grok-menu-reset-login").addEventListener("click", () => {
       closeSeatActionMenu();
       toast("Resetting browser profile for " + id + "…");
@@ -2616,7 +2839,10 @@
     // Real picker is the packed liquid-glass orbs. Do not draw a second bar.
     // Give those orbs a soap-bubble rim that reflects their own contents.
     try { require(path.join(ROOT, "bubble-rim.js")).start(); } catch (_) {}
+    try { require(path.join(ROOT, "glass-theme.js")).start(); } catch (_) {}
+    try { candyGrokMarks(); } catch (_) {}
     try { require(path.join(ROOT, "cursor-model-bubble.js")).start(); } catch (_) {}
+    try { require(path.join(ROOT, "create-bot-hook.js")).start(); } catch (_) {}
   }
 
   function onboardPath() {
@@ -2747,12 +2973,25 @@
     }
   }
 
+  function onboardPending() {
+    try {
+      const raw = fs.existsSync(onboardPath())
+        ? JSON.parse(fs.readFileSync(onboardPath(), "utf8"))
+        : null;
+      return !!(raw && raw.completed === false && raw.skipped !== true);
+    } catch {
+      return false;
+    }
+  }
+
   function injectSplash() {
     markExistingUserOnboarded();
     const leftover = document.getElementById("grokd-splash-stage");
     if (leftover) leftover.remove();
     if (recentlySwitched()) {
       window.__grokd_splash_done = true;
+      // Seat switch relaunches D. Keep Seat-in up so a second Cursor login can finish.
+      if (onboardPending()) startOnboarding(false);
       return;
     }
     if (window.__grokd_splash_done) return;

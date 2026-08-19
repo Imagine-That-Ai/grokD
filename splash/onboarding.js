@@ -22,6 +22,9 @@
         const store = (() => {
           try { return require(path.join(ROOT, "profile-store.js")); } catch (_) { return null; }
         })();
+        const accounts = (() => {
+          try { return require(path.join(ROOT, "onboard-accounts.js")); } catch (_) { return null; }
+        })();
         return {
           demo: false,
           readState() {
@@ -60,17 +63,32 @@
             spawn(process.execPath, [sw, "switch", id], { detached: true, stdio: "ignore" }).unref();
           },
           addSignIn() {
-            if (store) {
-              const existing = store.list().find((p) => p.kind === "cursor" && !p.identitySource && !p.sourceUserData);
-              if (existing) return existing.id;
+            if (store && accounts) {
+              const p = accounts.addSignInProfile(store);
+              return p.id;
             }
+            const name = accounts ? accounts.nextSignInName([]) : "My Cursor";
             const sw = path.join(ROOT, "switch-profile.js");
-            const out = execFileSync(process.execPath, [sw, "add", "--name", "My Cursor", "--kind", "cursor"], {
+            const out = execFileSync(process.execPath, [sw, "add", "--name", name, "--kind", "cursor"], {
               encoding: "utf8",
               timeout: 15000,
             });
             const j = JSON.parse(out.trim().split("\n").pop());
             return j.id;
+          },
+          snapshotCurrent() {
+            const sw = require(path.join(ROOT, "switch-profile.js"));
+            const p = store && store.getActive();
+            if (!p) return null;
+            return sw.snapshot(p);
+          },
+          renameProfile(id, name) {
+            if (store && store.rename) return store.rename(id, name);
+            return null;
+          },
+          listedCursor() {
+            if (!store) return [];
+            return store.list().filter((p) => p.kind === "cursor");
           },
           cursorStatus() {
             try {
@@ -102,7 +120,14 @@
       currentModel() { return { model: "grok-4.6", proxyTarget: "cliproxy" }; },
       seats() { return [{ id: "cursor-b", name: "Grok B", seat: "B" }]; },
       switchTo() {},
-      addSignIn() { return "my-cursor"; },
+      _signIns: 0,
+      addSignIn() {
+        this._signIns += 1;
+        return this._signIns === 1 ? "my-cursor" : "my-cursor-" + this._signIns;
+      },
+      snapshotCurrent() { return true; },
+      renameProfile() { return null; },
+      listedCursor() { return []; },
       cursorStatus() { return Promise.resolve({ kind: "logged-in", authId: "demo" }); },
     };
   }
@@ -118,6 +143,7 @@
       proxyTarget: null,
       model: null,
       cursorProfile: null,
+      cursorProfiles: [],
     };
   }
 
@@ -221,6 +247,44 @@
       return b;
     }
 
+    function acc() {
+      try {
+        if (typeof require === "function") {
+          const path = require("path");
+          const os = require("os");
+          const root = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
+          return require(path.join(root, "onboard-accounts.js"));
+        }
+      } catch (_) {}
+      return {
+        alreadyIds: (s) => {
+          const ids = [];
+          (s.cursorProfiles || []).forEach((x) => { if (x && x.id) ids.push(x.id); });
+          if (s.cursorProfile && ids.indexOf(s.cursorProfile) < 0) ids.push(s.cursorProfile);
+          return ids;
+        },
+        remember: (s, entry) => {
+          const list = (s.cursorProfiles || []).slice();
+          const i = list.findIndex((x) => x && x.id === entry.id);
+          if (i >= 0) list[i] = Object.assign({}, list[i], entry);
+          else list.push(entry);
+          return Object.assign({}, s, { cursorProfiles: list, cursorProfile: entry.id });
+        },
+        unusedImports: (detected, added) => {
+          const have = {};
+          (added || []).forEach((id) => { have[id] = true; });
+          return (detected || []).filter((s) => s && s.id && !have[s.id]);
+        },
+        displayName: (st, fb) => (st && (st.email || st.name)) || fb || "Cursor",
+      };
+    }
+
+    function keepAccount(entry) {
+      const next = acc().remember(state, entry);
+      state.cursorProfiles = next.cursorProfiles;
+      state.cursorProfile = next.cursorProfile;
+    }
+
     function probe() {
       const p = h.ports;
       return {
@@ -237,7 +301,7 @@
       setBead(0.08);
       root.querySelector("#gd-kicker").textContent = "After the slam";
       root.querySelector("#gd-title").textContent = "Who sits here?";
-      root.querySelector("#gd-lede").textContent = "Pick how this copy of Grok D talks. You can change it later with the orbs.";
+      root.querySelector("#gd-lede").textContent = "Pick how this copy of grok\"D\" talks. Cursor can take more than one login. You can change it later with the orbs.";
       const body = root.querySelector("#gd-body");
       body.innerHTML = "";
       const grid = el("div", "gd-choices");
@@ -252,7 +316,7 @@
       const cursor = el("button", "gd-seat");
       cursor.type = "button";
       cursor.dataset.kind = "cursor";
-      cursor.innerHTML = "<em>Cursor</em><span>Sign in with your account, or import a Grok Bot already on this Mac.</span>";
+      cursor.innerHTML = "<em>Cursor</em><span>Sign in with one or more Cursor accounts, or import a Grok Bot already on this Mac.</span>";
       cursor.addEventListener("click", () => {
         state.path = "cursor";
         go("cursor-source");
@@ -389,6 +453,10 @@
       root.querySelector("#gd-body").innerHTML = "";
       actions([
         btn("Enter D", "gd-go", finish),
+        btn("Add Cursor accounts", "gd-ghost", () => {
+          if (state.path === "local") state.path = "both";
+          go("cursor-source");
+        }),
         btn("Back", "gd-ghost", () => go("local-model")),
       ]);
       note(up.box ? "Composer should send without a reconnect banner." : "If send queues, tap Start this Mac again from the previous step.", up.box ? "good" : "");
@@ -396,42 +464,67 @@
 
     function renderCursorSource() {
       setBead(0.35);
-      root.querySelector("#gd-kicker").textContent = "Cursor · who";
-      root.querySelector("#gd-title").textContent = "Use whose Cursor?";
-      root.querySelector("#gd-lede").textContent = "Import a Grok Bot already signed in on this Mac, or sign in inside this app.";
+      const helpers = acc();
+      const added = helpers.alreadyIds(state);
+      const n = (state.cursorProfiles || []).length;
+      root.querySelector("#gd-kicker").textContent = n ? "Cursor · another" : "Cursor · who";
+      root.querySelector("#gd-title").textContent = n ? "Add another account" : "Use whose Cursor?";
+      root.querySelector("#gd-lede").textContent = n
+        ? n + " already in. Import another Grok Bot, or sign in with a different Cursor account."
+        : "Import a Grok Bot already signed in on this Mac, or sign in here. You can add more than one.";
       const body = root.querySelector("#gd-body");
       body.innerHTML = "";
       const list = el("div", "gd-list");
-      const seats = h.seats();
+      (state.cursorProfiles || []).forEach((p) => {
+        const row = el("div", "gd-row");
+        const left = document.createElement("div");
+        left.innerHTML = `<strong></strong><small></small>`;
+        left.querySelector("strong").textContent = p.name || p.id;
+        left.querySelector("small").textContent = p.source === "import" ? "Imported · kept" : "Signed in · kept";
+        row.appendChild(left);
+        row.appendChild(el("span", "gd-pill up", "in"));
+        list.appendChild(row);
+      });
+      const seats = helpers.unusedImports(h.seats(), added);
       seats.forEach((s) => {
         const row = el("div", "gd-row");
         const left = document.createElement("div");
         left.innerHTML = `<strong></strong><small></small>`;
         left.querySelector("strong").textContent = "Import " + s.name;
         left.querySelector("small").textContent = "Copies that login into D. Does not change the other app.";
-        const use = btn("Import", "gd-ghost", () => applyCursor(s.id));
+        const use = btn("Import", "gd-ghost", () => applyCursor(s.id, {
+          name: s.name,
+          source: "import",
+        }));
         row.appendChild(left);
         row.appendChild(use);
         list.appendChild(row);
       });
       const own = el("div", "gd-row");
-      own.innerHTML = "<div><strong>Sign in here</strong><small>No other Grok Bot required. Cursor will ask you to log in.</small></div>";
+      own.innerHTML = "<div><strong>Sign in with another account</strong><small>Opens a fresh Cursor login. Each account becomes its own seat.</small></div>";
       own.appendChild(btn("Sign in", "gd-ghost", () => {
         try {
           const id = h.addSignIn();
-          applyCursor(id);
+          applyCursor(id, { name: "New Cursor", source: "signin" });
         } catch (e) {
           note(String(e.message || e), "bad");
         }
       }));
       list.appendChild(own);
       body.appendChild(list);
-      actions([btn("Back", "gd-ghost", () => go("choose")), btn("Skip", "gd-skip", skip)]);
-      if (!seats.length) note("No other Grok Bot logins found. Sign in here.");
+      const back = n ? "cursor-ready" : (state.path === "both" ? "local-ready" : "choose");
+      const acts = [btn("Back", "gd-ghost", () => go(back)), btn("Skip", "gd-skip", skip)];
+      if (n) acts.unshift(btn("Done · " + n + " in", "gd-go", () => go("cursor-ready")));
+      actions(acts);
+      if (!seats.length && !n) note("No other Grok Bot logins found. Sign in here.");
     }
 
-    function applyCursor(id) {
-      state.cursorProfile = id;
+    function applyCursor(id, meta) {
+      keepAccount({
+        id,
+        name: (meta && meta.name) || id,
+        source: (meta && meta.source) || "signin",
+      });
       state.step = "cursor-login";
       save();
       note("Opening that seat…", "");
@@ -458,6 +551,15 @@
       note(manual ? "Checking…" : "Waiting for Cursor…");
       Promise.resolve(h.cursorStatus()).then((s) => {
         if (s && s.kind === "logged-in") {
+          try { if (h.snapshotCurrent) h.snapshotCurrent(); } catch (e) { note(String(e.message || e), "bad"); }
+          const label = acc().displayName(s, state.cursorProfile);
+          try { if (h.renameProfile && state.cursorProfile) h.renameProfile(state.cursorProfile, label); } catch (_) {}
+          keepAccount({
+            id: state.cursorProfile,
+            name: label,
+            source: ((state.cursorProfiles || []).find((x) => x.id === state.cursorProfile) || {}).source || "signin",
+            email: s.email || "",
+          });
           state.step = "cursor-ready";
           save();
           render();
@@ -469,11 +571,35 @@
 
     function renderCursorReady() {
       setBead(0.92);
+      const list = state.cursorProfiles || [];
+      const n = list.length || (state.cursorProfile ? 1 : 0);
       root.querySelector("#gd-kicker").textContent = "Cursor · ready";
-      root.querySelector("#gd-title").textContent = "You're in";
-      root.querySelector("#gd-lede").textContent = "This seat is using your Cursor login. If the app still says the account has no access, wait for the computer to come up, or import a Grok Bot that already has one.";
-      root.querySelector("#gd-body").innerHTML = "";
-      actions([btn("Enter D", "gd-go", finish)]);
+      root.querySelector("#gd-title").textContent = n > 1 ? n + " accounts are in" : "You're in";
+      root.querySelector("#gd-lede").textContent = n > 1
+        ? "Each login is its own seat. Add another, or enter D."
+        : "This seat is using your Cursor login. Add another account if you have one, or enter D.";
+      const body = root.querySelector("#gd-body");
+      body.innerHTML = "";
+      if (list.length) {
+        const wrap = el("div", "gd-list");
+        list.forEach((p) => {
+          const row = el("div", "gd-row");
+          const left = document.createElement("div");
+          left.innerHTML = `<strong></strong><small></small>`;
+          left.querySelector("strong").textContent = p.name || p.id;
+          left.querySelector("small").textContent = p.email
+            ? p.email
+            : (p.source === "import" ? "Imported" : "Signed in");
+          row.appendChild(left);
+          row.appendChild(el("span", "gd-pill up", "in"));
+          wrap.appendChild(row);
+        });
+        body.appendChild(wrap);
+      }
+      actions([
+        btn("Enter D", "gd-go", finish),
+        btn("Add another account", "gd-ghost", () => go("cursor-source")),
+      ]);
     }
 
     function render() {

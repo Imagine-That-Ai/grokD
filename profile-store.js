@@ -134,8 +134,33 @@ function add(opts) {
   };
   s.profiles.push(profile);
   save(s);
-  profileDataDir(id);
+  const dir = profileDataDir(id);
+  if (kind === "local") {
+    try {
+      const box = require("./box-state");
+      const localD = profileDataDir("local-d");
+      const cred = box.findLocalCredential([localD]);
+      if (cred) {
+        box.copyFile(cred, box.credentialPath(dir));
+        const conn = path.join(localD, "sand-data", "local-exec-daemon-connection.json");
+        if (require("fs").existsSync(conn)) {
+          box.copyFile(conn, path.join(dir, "sand-data", "local-exec-daemon-connection.json"));
+        }
+      }
+    } catch {}
+  }
   return profile;
+}
+
+function rename(id, name) {
+  const s = load();
+  const p = s.profiles.find((x) => x.id === id);
+  if (!p) throw new Error(`unknown profile ${id}`);
+  const next = String(name || "").trim().slice(0, 60);
+  if (!next) throw new Error("empty name");
+  p.name = next;
+  save(s);
+  return get(id);
 }
 
 function remove(id) {
@@ -175,7 +200,7 @@ function readActiveEnv() {
 
 module.exports = {
   ROOT, STORE, DATA, SEATS,
-  load, save, list, get, getActive, setActive, add, remove,
+  load, save, list, get, getActive, setActive, add, rename, remove,
   profileDataDir, writeActiveEnv, readActiveEnv, defaultState, ensureDirs,
   detectedCursorProfiles,
 };

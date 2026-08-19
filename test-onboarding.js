@@ -8,6 +8,7 @@ const ok = (name) => { n++; console.log("PASS ", name); };
 
 const s = api.blank();
 assert(s.step === "choose" && !s.completed && !s.skipped, "blank");
+assert(Array.isArray(s.cursorProfiles) && s.cursorProfiles.length === 0, "blank accounts");
 ok("blank");
 
 const mem = {

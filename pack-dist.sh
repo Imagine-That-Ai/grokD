@@ -19,11 +19,14 @@ mkdir -p "$RT"
 for f in \
   paths.js box-state.js profile-store.js switch-profile.js relaunch-d.js \
   profile-auth-preload.js profile-ui-inject.js seed-cursor-box.js \
-  bubble-rim.js provider-logos.js \
+  bubble-rim.js provider-logos.js glass-theme.js \
   account-identity.js browser-login.js patch-open-external.js \
   model-lib.js model-config.json command-client.js cdp-eval.js \
   runbox.js gateway-shim.js proxy2.js fakebox.js protoutil.js \
   bridge-lib.js local-mcp.js routine-guard.js \
+  onboard-accounts.js bot-pause.js failover.js failover-act.js \
+  failover-watch.js fallover-ui.js clone-bot.js handoff-pack.js \
+  seat-quota.js \
   ensure-local-box.sh install-runtime.sh pack-asar.sh patch-asar.sh patch-asar.js \
   sync-to-tmp.sh
  do
