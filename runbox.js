@@ -28,7 +28,7 @@ fs.writeFileSync(TOKEN_FILE, JSON.stringify({
   expiresAtMs: Date.now() + 1000 * 60 * 60 * 24 * 365, // 1 year
 }));
 
-const env = {
+const env = require("./node-deps").applyNodePath({
   ...process.env,
   SAND_DATA_ROOT: DATA_ROOT,
   SAND_DEV_INFERENCE_TOKEN_FILE: TOKEN_FILE,
@@ -38,7 +38,7 @@ const env = {
   SAND_HOST_PORT: process.env.SAND_HOST_PORT || "1338",
   SAND_GATEWAY_TOKEN: "fake-gateway-token",
   DEBUG: "",
-};
+});
 // Desktop gateway URL must not leak into the box — host would call itself via the shim and deadlock.
 delete env.SAND_HOST_GATEWAY_URL;
 delete env.SAND_HOST_GATEWAY_TOKEN;

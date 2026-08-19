@@ -52,7 +52,15 @@ const rebuilt = cloneAgent("cccccccc-cccc-cccc-cccc-cccccccccccc", {
 });
 assert(rebuilt.reconstructed === true, "reconstructed");
 assert(fs.existsSync(path.join(agents, rebuilt.destId, "memory", "log", "failover.md")), "seed memory");
-assert(/hover tip/.test(fs.readFileSync(path.join(agents, rebuilt.destId, "memory", "log", "failover.md"), "utf8")), "captured turn");
+const memo = fs.readFileSync(path.join(agents, rebuilt.destId, "memory", "log", "failover.md"), "utf8");
+assert(/hover tip/.test(memo), "captured turn");
+const withTurns = cloneAgent("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", {
+  agentsDir: agents,
+  destId: "ffffffff-ffff-ffff-ffff-ffffffffffff",
+  lastUser: "one",
+  excerpts: ["user: keep the hover", "assistant: on it"],
+});
+assert(/keep the hover/.test(fs.readFileSync(path.join(agents, withTurns.destId, "memory", "log", "failover.md"), "utf8")), "excerpts");
 ok("clone-reconstruct");
 
 const chief = pickChief([

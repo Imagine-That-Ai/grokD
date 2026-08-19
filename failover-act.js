@@ -78,14 +78,22 @@ async function act(decision, deps) {
       return { ok: true, action: "pin-account", to: decision.to };
     }
     if (decision.action === "cursor" || decision.action === "local-chief" || decision.action === "local-clone") {
-      const switchTo = deps.switchTo || ((id) => require("./switch-profile").switchTo(id, {
-        relaunch: deps.relaunch !== false,
-      }));
+      const sw = require("./switch-profile");
+      const switchTo = deps.switchTo || ((id, opts) => sw.switchTo(id, opts));
       const to = decision.to;
-      if (to && store.get(to) && store.getActive().id !== to) switchTo(to);
-      const extra = (decision.action === "local-chief" || decision.action === "local-clone")
-        ? landLocal(decision, deps)
-        : {};
+      const land = decision.action === "local-chief" || decision.action === "local-clone";
+      // Land clone/handoff on the restored local box before relaunch wipes the process.
+      if (to && store.get(to) && store.getActive().id !== to) {
+        switchTo(to, { relaunch: land ? false : deps.relaunch !== false });
+      }
+      const extra = land ? landLocal(decision, deps) : {};
+      if (land && extra.clone && extra.clone.destId && typeof deps.sendPrompt === "function") {
+        extra.continued = deps.sendPrompt(extra.clone.destId, extra.pack || deps.lastUser || "Continue.");
+      }
+      if (land && deps.relaunch !== false) {
+        if (typeof deps.relaunchD === "function") deps.relaunchD();
+        else if (!sw.isolatedRoot || !sw.isolatedRoot()) sw.relaunchD();
+      }
       markFire(decision);
       return Object.assign({ ok: true, action: decision.action, to }, extra);
     }

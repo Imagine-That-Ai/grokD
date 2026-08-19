@@ -13,7 +13,10 @@ const { newId } = require("./clone-bot");
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.GROK_SHIM_PORT || 1337);
 const TOKEN = "fake-gateway-token";
-const AGENTS_ROOT = process.env.GROKBOT_HACK ? path.join(process.env.GROKBOT_HACK, "box-data/agents") : "/tmp/grokbot-hack/box-data/agents";
+const paths = require("./paths");
+const AGENTS_ROOT = process.env.GROKBOT_HACK
+  ? path.join(process.env.GROKBOT_HACK, "box-data/agents")
+  : path.join(paths.existingHack(), "box-data", "agents");
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const AUTH = `Bearer ${TOKEN}`;
 
@@ -161,13 +164,27 @@ function getLocalAgents() {
   return list;
 }
 
+function sqliteRead(db, sql) {
+  try {
+    return execFileSync("sqlite3", ["-readonly", db, sql], {
+      encoding: "utf8", timeout: 4000,
+    });
+  } catch {
+    try {
+      return execFileSync("sqlite3", ["file:" + db + "?mode=ro", sql], {
+        encoding: "utf8", timeout: 4000,
+      });
+    } catch {
+      return "";
+    }
+  }
+}
+
 function readEntries(id) {
   const db = agentDbPath(id);
   if (!db || !fs.existsSync(db)) return "";
   try {
-    return execFileSync("sqlite3", [db, "SELECT entry FROM transcript_entries ORDER BY rowid DESC LIMIT 20;"], {
-      encoding: "utf8", timeout: 4000,
-    });
+    return sqliteRead(db, "SELECT entry FROM transcript_entries ORDER BY rowid DESC LIMIT 20;");
   } catch { return ""; }
 }
 
@@ -379,7 +396,7 @@ if (require.main === module) start();
 module.exports = {
   HOST, PORT, UP, TOKEN, AGENTS_ROOT,
   parseJson, isIdle, resolveTargets, broadcastOk, distinctiveToken, hayHasMessage,
-  agentDbPath, getLocalAgents, readEntries, transcriptHas, waitUntilIdle, waitTranscripts,
+  agentDbPath, getLocalAgents, readEntries, sqliteRead, transcriptHas, waitUntilIdle, waitTranscripts,
   broadcastMessage, postApi, handleSpecial, onRequest, start, offlineFallback,
   createLocalAgent, deleteLocalAgents, authorizationMatches, resolveUp,
 };

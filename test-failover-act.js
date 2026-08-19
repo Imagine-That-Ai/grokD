@@ -52,6 +52,7 @@ const ok = (name) => { n++; console.log("PASS ", name); };
   assert(r3.ok === true, "clone act");
   assert(clones[0] === "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "cloned source");
   assert(packs.length === 1, "pack built");
+  assert(r3.continued === true, "clone was prompted to continue");
   ok("local-clone-lands");
 
   fs.rmSync(tmp, { recursive: true, force: true });

@@ -110,4 +110,26 @@ ok("tickHoles");
 }
 ok("makeHole-declines");
 
-console.log(`\n${n}/5 space-hole checks passed`);
+{
+  // the point of the bands: a sky of two or three must not read as one hole
+  // drawn three times
+  let runs = 0;
+  let spread = 0;
+  let tempSpread = 0;
+  for (let i = 0; i < 60; i++) {
+    const sky = k.seedHoles();
+    if (sky.length < 2) continue;
+    runs++;
+    const rs = sky.map((h) => h.r0).sort((a, b) => a - b);
+    const ts = sky.map((h) => h.temp).sort((a, b) => a - b);
+    spread += rs[rs.length - 1] / rs[0];
+    tempSpread += ts[ts.length - 1] - ts[0];
+  }
+  assert(runs > 5, "some skies hold more than one hole: " + runs);
+  assert(spread / runs > 1.5, "sizes differ: " + (spread / runs).toFixed(2) + "x");
+  assert(tempSpread / runs > 0.25, "temperatures differ: " + (tempSpread / runs).toFixed(2));
+  assert(k.pickBand(k.SIZE_BANDS, [80], () => 0.5) < 50, "picks a band away from what is up");
+}
+ok("variety");
+
+console.log(`\n${n}/6 space-hole checks passed`);

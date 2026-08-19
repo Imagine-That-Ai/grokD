@@ -37,6 +37,24 @@ else
   fi
 fi
 
+ASAR="$DIR/../Resources/app.asar"
+if [ -f "$ASAR" ] && ! python3 - "$ASAR" "$HOME_DST" <<'PY'
+import sys, pathlib
+asar, root = sys.argv[1], sys.argv[2]
+ok = b"profile-ui-inject.js" in pathlib.Path(asar).read_bytes()
+pathlib.Path(root, "runtime").mkdir(parents=True, exist_ok=True)
+pathlib.Path(root, "runtime", "overlay-status.json").write_text(
+    ('{"ok": true, "hook": "present"}\n' if ok else '{"ok": false, "hook": "missing"}\n')
+)
+sys.exit(0 if ok else 1)
+PY
+then
+  echo "overlay hook missing from asar — run install.sh" >>"$HOME_DST/runtime/overlay-status.log" 2>/dev/null || true
+  if [ -x "$HOME_DST/repair-overlay.sh" ]; then
+    "$HOME_DST/repair-overlay.sh" "$DIR/../.." >>"$HOME_DST/runtime/overlay-repair.log" 2>&1 || true
+  fi
+fi
+
 EXTRA=()
 if [ "${GROK_D_CDP:-9224}" != "0" ]; then
   EXTRA+=(--remote-debugging-port="${GROK_D_CDP:-9224}")

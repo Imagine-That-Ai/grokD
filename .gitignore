@@ -29,3 +29,7 @@ node_modules/
 assets/spacex_xai_logo.svg
 assets/stock_grokbot_icon.png
 assets/ref_a_grokbot_icon.png
+
+# Oversized local-only meshes (keep thumbs; do not git these)
+assets/meshy_elon.glb
+assets/meshy_elon_textured.glb

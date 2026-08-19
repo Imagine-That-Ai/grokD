@@ -118,7 +118,10 @@ rsync -a \
   --exclude 'dist/' \
   --exclude 'hack/' \
   --exclude 'proof/' \
-  --exclude 'host/host-main.cjs' \
+  --exclude 'host/' \
+  --exclude 'assets/meshy_elon.glb' \
+  --exclude 'assets/meshy_elon_textured.glb' \
+  --exclude 'test-*.js' \
   --exclude 'active-env.json' \
   --exclude 'failover-config.json' \
   --exclude 'model-config.json' \
@@ -180,7 +183,15 @@ fi
 export GROK_PROFILE_ROOT="$ROOT"
 bash "$HERE/install-runtime.sh" "$RT"
 
+python3 - "$DEST/Contents/Resources/app.asar" <<'PY'
+import pathlib, sys
+data = pathlib.Path(sys.argv[1]).read_bytes()
+if b"profile-ui-inject.js" not in data:
+    raise SystemExit("install: overlay hook missing from app.asar")
+print("hook ok")
+PY
 codesign --force --deep --sign - "$DEST" >/tmp/grokD-install-codesign.out 2>&1 || true
+xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 xattr -cr "$DEST" 2>/dev/null || true
 
 echo "packed $DEST"

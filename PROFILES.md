@@ -58,7 +58,7 @@ Toggles in the same seat menu. Short labels; full mechanics on hover. All off un
 1. **Auto Failover** — master quota switch.
 2. **Next Account** — switch to a seat that still has quota.
 3. **Locally · Chief Handoff** — delegate to the local chief.
-4. **Locally · Exact Clone** — copy the bot onto this Mac when a local `store.db` exists. Official Cursor cloud bots have no portable disk, so D reconstructs a local agent from the last captured turn.
+4. **Locally · Continue** — copy the bot onto this Mac when a local `store.db` exists. Official Cursor chats cannot keep the same cloud thread; D seeds a local agent with the last captured turns and continues on this Mac.
 
 When the paying seat is spent, that seat is stopped first, then the first enabled path runs.
 

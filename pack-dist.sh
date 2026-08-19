@@ -28,8 +28,9 @@ for f in \
   failover-watch.js fallover-ui.js clone-bot.js handoff-pack.js \
   seat-quota.js create-bot-hook.js takeover-local.js bot-chatter.js \
   space-kernel.js space-field-gl.js liquid-metal-mark.js cursor-model-bubble.js \
-  
+  node-deps.js \
   ensure-local-box.sh install-runtime.sh pack-asar.sh patch-asar.sh patch-asar.js \
+  repair-overlay.sh \
   sync-to-tmp.sh
  do
   [ -e "$ROOT/$f" ] || continue

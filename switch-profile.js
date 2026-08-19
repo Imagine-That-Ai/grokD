@@ -425,4 +425,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { snapshot, applyLocal, applyCursor, switchTo, dPids, relaunchD, resolveId, SEAT4, BOX_AGENTS, box, writeRelaunchPlist };
+module.exports = { snapshot, applyLocal, applyCursor, switchTo, dPids, relaunchD, resolveId, isolatedRoot, SEAT4, BOX_AGENTS, box, writeRelaunchPlist };

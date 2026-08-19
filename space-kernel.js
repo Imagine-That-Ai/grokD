@@ -29,6 +29,20 @@ let t0 = 0;
 let last = 0;
 let mood = { id: "coral", hex: "#F45B69", glow: "rgba(244,91,105,0.62)", ring: "255,150,158" };
 let reduced = false;
+let schemeOverride = "";   // "light" | "dark" for previewing; "" follows the app
+
+// The app drives prefers-color-scheme through Electron's themeSource, so the
+// media query is the whole story: it flips with the app's theme setting.
+function isLight() {
+  if (schemeOverride) return schemeOverride === "light";
+  try { return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches); }
+  catch { return false; }
+}
+
+function setScheme(next) {
+  schemeOverride = next === "light" || next === "dark" ? next : "";
+  return { scheme: schemeOverride || "auto", light: isLight() };
+}
 
 function rng(seed) {
   let s = seed >>> 0;
@@ -174,9 +188,26 @@ function seedGalaxy() {
 // 900px reference. inc near edge-on so the far side of the disk lenses up over
 // the top. Nothing here is fixed: the sky carries between HOLE_MIN and HOLE_MAX
 // holes, each drifting, breathing and eventually giving its slot to a new one.
-const HOLE_MIN = 2;
-const HOLE_MAX = 4;              // must match MAXH in space-field-gl.js
-const HOLE_BUDGET = 196;         // total shadow radius; the march cost is area
+const HOLE_MIN = 1;
+const HOLE_MAX = 3;              // MAXH in space-field-gl.js is the ceiling
+const HOLE_BUDGET = 178;         // total shadow radius; the march cost is area
+
+// A sky of three same-sized gold holes reads as wallpaper. Each new hole takes
+// the size band and the disk temperature furthest from what is already up, so
+// a giant cool one and a small blue-hot one can share the frame.
+const SIZE_BANDS = [[58, 94], [30, 46], [15, 26]];
+const TEMP_BANDS = [[0.0, 0.14], [0.34, 0.56], [0.78, 1.0]];
+
+function pickBand(bands, used, rand) {
+  let best = bands[0];
+  let bestGap = -1;
+  for (const band of bands) {
+    const mid = (band[0] + band[1]) / 2;
+    const gap = used.length ? Math.min(...used.map((x) => Math.abs(x - mid))) : Infinity;
+    if (gap > bestGap) { bestGap = gap; best = band; }
+  }
+  return best[0] + rand() * (best[1] - best[0]);
+}
 const HOLE_CLEAR = { u0: 0.28, u1: 0.72, v0: 0.30, v1: 0.70 }; // the mark's box
 let holeWait = 0;
 
@@ -212,7 +243,7 @@ function makeHole(existing) {
   const room = HOLE_BUDGET - spent;
   if (room < 24) return null;
   const ref = refSize();
-  const r = Math.max(20, Math.min(room, 24 + rand() * 58));
+  const r = Math.max(14, Math.min(room, pickBand(SIZE_BANDS, others.map((x) => x.r0), rand)));
   let u = -1;
   let v = -1;
   for (let tries = 0; tries < 40; tries++) {
@@ -231,8 +262,7 @@ function makeHole(existing) {
   return {
     u0: u, v0: v, r0: r,
     u, v, r,
-    // most disks read gold; a hot blue-white one is the exception, so skew low
-    temp: Math.pow(rand(), 1.7),
+    temp: pickBand(TEMP_BANDS, others.map((x) => x.temp), rand),
     gain: 0.78 + rand() * 0.5,
     inc: 1.04 + rand() * 0.42,
     pa: rand() * Math.PI * 2,
@@ -266,7 +296,7 @@ function seedHoles() {
   }
   // the opening frame should already be a sky, not a fade-in
   out.forEach((hole) => { hole.life = hole.grow; hole.fade = 1; });
-  holeWait = 16 + Math.random() * 20;
+  holeWait = 20 + Math.random() * 26;
   return out;
 }
 
@@ -318,7 +348,7 @@ function tickHoles(list, dt, t) {
   }
   holeWait -= dt;
   if (holeWait <= 0) {
-    holeWait = 15 + Math.random() * 26;
+    holeWait = 22 + Math.random() * 34;
     if (list.length < HOLE_MAX) {
       const born = makeHole(list);
       if (born) list.push(born);
@@ -524,6 +554,8 @@ function resizeCanvases() {
 }
 
 function ringRgb() {
+  // by day the ring is ink on paper, not light on black
+  if (isLight()) return "58,66,84";
   return mood.ring || "255,170,176";
 }
 
@@ -623,7 +655,7 @@ function drawNebulas(ctx, w, h, t) {
 }
 
 function drawField(ctx, w, h, t, cx, cy) {
-  ctx.fillStyle = "#06060a";
+  ctx.fillStyle = isLight() ? "#f7f3ec" : "#06060a";
   ctx.fillRect(0, 0, w, h);
 
   for (let i = 0; i < galaxy.length; i++) {
@@ -659,7 +691,8 @@ function drawRings(ctx, cx, cy, pitch, yaw) {
         else ctx.lineTo(p.x, p.y);
       }
       ctx.closePath();
-      ctx.strokeStyle = "rgba(" + rgb + "," + (0.09 + b.dens * 0.1).toFixed(3) + ")";
+      const ink = isLight() ? 0.16 + b.dens * 0.16 : 0.09 + b.dens * 0.1;
+      ctx.strokeStyle = "rgba(" + rgb + "," + ink.toFixed(3) + ")";
       ctx.lineWidth = 1.2;
       ctx.stroke();
     }
@@ -671,7 +704,8 @@ function drawRings(ctx, cx, cy, pitch, yaw) {
     if (i === 0) ctx.moveTo(p.x, p.y);
     else ctx.lineTo(p.x, p.y);
   }
-  ctx.strokeStyle = "rgba(0,0,0,0.5)";
+  // the occluder hides ring lines behind the mark, so it has to be the sky
+  ctx.strokeStyle = isLight() ? "rgba(250,246,240,0.62)" : "rgba(0,0,0,0.5)";
   ctx.lineWidth = 4;
   ctx.stroke();
   ctx.restore();
@@ -807,7 +841,7 @@ function frame(now) {
   if (glApi) {
     try {
       const field = require(require("os").homedir() + "/.grok/grokbot-d/space-field-gl.js");
-      field.frame(glApi, t, holes, nebulas);
+      field.frame(glApi, t, holes, nebulas, isLight());
       if (!reduced && dt > 0) {
         frameMs = frameMs ? frameMs * 0.9 + dt * 100 : dt * 1000;
         field.retune(glApi, frameMs);
@@ -940,7 +974,8 @@ function isRunning() {
 }
 
 module.exports = {
-  start, stop, isRunning, setMood,
+  start, stop, isRunning, setMood, setScheme, isLight,
   seedHoles, makeHole, tickHoles, clearOfMark, refSize, makeNebula, tickNebulas,
+  pickBand, SIZE_BANDS, TEMP_BANDS,
   HOLE_MIN, HOLE_MAX, MARCH_R, DISK_R,
 };

@@ -100,7 +100,15 @@ function reconstructAgent(opts) {
     "## Last user",
     opts.lastUser || "(none captured)",
     "",
+    "## Recent turns",
   ];
+  const excerpts = Array.isArray(opts.excerpts) ? opts.excerpts : [];
+  if (!excerpts.length) lines.push("(none captured)");
+  for (const line of excerpts) {
+    lines.push("");
+    lines.push(String(line).slice(0, 4000));
+  }
+  lines.push("");
   fs.writeFileSync(path.join(dest, "memory", "log", "failover.md"), lines.join("\n"));
   return { ok: true, srcId: opts.srcId || null, destId, dest, name, parked: 0, reconstructed: true };
 }

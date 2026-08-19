@@ -31,41 +31,78 @@ try {
 const MAIN_HOOK = `try{require(require("os").homedir()+"/.grok/grokbot-d/patch-open-external.js")}catch(e){try{require("fs").appendFileSync("/tmp/grokbot-renderer.log","[open-ext] "+e+"\\n")}catch(_){}}
 `;
 
-function mustReplace(text, from, to, label) {
-  if (text.includes(to) && !text.includes(from)) return { text, status: "already" };
+function tryReplace(text, from, to, label) {
+  if (to && text.includes(to) && (!from || !text.includes(from))) {
+    return { text, status: "already", label };
+  }
+  if (!from) return { text, status: "skipped", label, reason: "empty-from" };
   const n = text.split(from).length - 1;
-  if (n !== 1) throw new Error(`${label}: expected 1 match, found ${n}`);
-  return { text: text.replace(from, to), status: "patched" };
+  if (n === 1) return { text: text.replace(from, to), status: "patched", label };
+  if (n === 0) return { text, status: "skipped", label, reason: "no-match" };
+  return { text, status: "skipped", label, reason: "ambiguous:" + n };
 }
 
-function main() {
-  if (!fs.existsSync(mainPath)) throw new Error("missing " + mainPath);
-  let main = fs.readFileSync(mainPath, "utf8");
-  const ipn = mustReplace(main, IPN_OFFICIAL, IPN_PATCH, "IPn");
+function fuzzyIpn(text) {
+  if (text.includes('access:{state:"granted",reason:"none"}')) {
+    return { text, status: "already", label: "IPn-fuzzy" };
+  }
+  const re = /return\{identity:r,access:await t\.readAccess\(\)\.catch\([^)]+\)\}/;
+  if (!re.test(text)) return { text, status: "skipped", label: "IPn-fuzzy", reason: "no-match" };
+  return {
+    text: text.replace(re, 'return{identity:r||e.authId||e.email||"cursor",access:{state:"granted",reason:"none"}}'),
+    status: "patched",
+    label: "IPn-fuzzy",
+  };
+}
+
+function ensurePreloadHook(file) {
+  if (!fs.existsSync(file)) return "missing-preload";
+  let pre = fs.readFileSync(file, "utf8");
+  if (pre.includes("profile-ui-inject.js")) return "already";
+  fs.writeFileSync(file, pre + HOOK);
+  return "patched";
+}
+
+function applyPatches(opts) {
+  opts = opts || {};
+  const mainFile = opts.mainPath || mainPath;
+  const preFile = opts.preloadPath || preloadPath;
+  if (!fs.existsSync(mainFile)) throw new Error("missing " + mainFile);
+  let main = fs.readFileSync(mainFile, "utf8");
+  const ipn = tryReplace(main, IPN_OFFICIAL, IPN_PATCH, "IPn");
   main = ipn.text;
-  const rd = mustReplace(main, READ_OFFICIAL, READ_PATCH, "descriptor-read");
+  let ipnFuzzy = { status: "skipped", label: "IPn-fuzzy" };
+  if (ipn.status === "skipped") {
+    ipnFuzzy = fuzzyIpn(main);
+    main = ipnFuzzy.text;
+  }
+  const rd = tryReplace(main, READ_OFFICIAL, READ_PATCH, "descriptor-read");
   main = rd.text;
-  const auth = mustReplace(main, AUTH_OFFICIAL, AUTH_PATCH, "wrap-main-auth");
+  const auth = tryReplace(main, AUTH_OFFICIAL, AUTH_PATCH, "wrap-main-auth");
   main = auth.text;
   let openExt = "already";
   if (!main.includes("patch-open-external.js")) {
     main = MAIN_HOOK + main;
     openExt = "patched";
   }
-  fs.writeFileSync(mainPath, main);
+  fs.writeFileSync(mainFile, main);
+  const hook = ensurePreloadHook(preFile);
+  const report = {
+    main: mainFile,
+    IPn: ipn.status === "skipped" ? ipnFuzzy.status : ipn.status,
+    descriptorRead: rd.status,
+    wrapMainAuth: auth.status,
+    openExternal: openExt,
+    preloadHook: hook,
+  };
+  report.ok = hook === "patched" || hook === "already";
+  return report;
+}
 
-  let hook = "missing-preload";
-  if (fs.existsSync(preloadPath)) {
-    let pre = fs.readFileSync(preloadPath, "utf8");
-    if (pre.includes("profile-ui-inject.js")) hook = "already";
-    else {
-      fs.writeFileSync(preloadPath, pre + HOOK);
-      hook = "patched";
-    }
-  }
-
-  const report = { main: mainPath, IPn: ipn.status, descriptorRead: rd.status, wrapMainAuth: auth.status, openExternal: openExt, preloadHook: hook };
+function main() {
+  const report = applyPatches();
   console.log(JSON.stringify(report, null, 2));
+  if (!report.ok) process.exit(1);
 }
 
 if (require.main === module) {
@@ -76,4 +113,7 @@ if (require.main === module) {
   }
 }
 
-module.exports = { IPN_OFFICIAL, IPN_PATCH, READ_OFFICIAL, READ_PATCH, AUTH_OFFICIAL, AUTH_PATCH };
+module.exports = {
+  IPN_OFFICIAL, IPN_PATCH, READ_OFFICIAL, READ_PATCH, AUTH_OFFICIAL, AUTH_PATCH,
+  tryReplace, fuzzyIpn, ensurePreloadHook, applyPatches, HOOK, MAIN_HOOK,
+};

@@ -33,6 +33,7 @@ precision highp float;
 uniform vec2 uRes;
 uniform float uTime;
 uniform float uSteps;
+uniform float uLight;   // 0 = night sky, 1 = daybreak
 
 #define MAXH 4
 #define MAXN 4
@@ -114,15 +115,30 @@ vec2 weakLens(vec2 p, vec4 H) {
   return H.xy + d / bpx * (sky * mpx);
 }
 
+// Night is deep space. Day is the same universe a few hours later: a low sun
+// off to the left, cream near the horizon, pale blue overhead, and the stars
+// burned off except for the few that survive a bright sky.
+vec3 skyColour(vec2 p) {
+  float y = clamp(p.y / max(uRes.y, 1.0), 0.0, 1.0);
+  vec3 night = vec3(0.021, 0.021, 0.034);
+  vec3 day = mix(vec3(0.985, 0.968, 0.945), vec3(0.855, 0.898, 0.955), pow(y, 0.85));
+  vec2 sun = vec2(uRes.x * 0.16, uRes.y * 0.12);
+  float glow = exp(-length(p - sun) / (uRes.y * 0.55));
+  day += vec3(0.055, 0.032, 0.004) * glow;
+  vec3 stars = starField(p);
+  // by day only the brightest points survive, and they read warm
+  stars *= mix(1.0, 0.10, uLight);
+  stars = mix(stars, stars * vec3(1.0, 0.93, 0.82), uLight);
+  return mix(night, day, uLight) + stars;
+}
+
 vec3 background(vec2 p) {
   vec2 q = p;
   for (int i = 0; i < MAXH; i++) {
     if (float(i) >= uHN) break;
     q = weakLens(q, uH[i]);
   }
-  vec3 col = vec3(0.021, 0.021, 0.034);
-  col += starField(q);
-  return col;
+  return skyColour(q);
 }
 
 // ------------------------------------------------------------------ the disk
@@ -173,7 +189,7 @@ vec3 diskEmit(vec3 x, vec3 vel, vec3 n, vec3 e1, vec3 e2, float rd, float spin, 
 
 // ------------------------------------------------------------------ the hole
 
-vec3 renderHole(vec2 frag, vec4 H, vec4 O, float t) {
+vec3 renderHole(vec2 frag, vec4 H, vec4 O, float t, out vec3 skyHit, out float skyMask) {
   float mpx = H.z / BCRIT;
   vec2 q = (frag - H.xy) / mpx;
 
@@ -236,18 +252,11 @@ vec3 renderHole(vec2 frag, vec4 H, vec4 O, float t) {
     vel = nvel;
   }
 
-  vec3 col = vec3(0.0);
-  if (captured < 0.5) {
-    if (escaped < 0.5) {
-      // ran out of steps while winding: that is the photon ring, keep it dark
-      escaped = 0.0;
-    } else {
-      vec3 bg = vec3(0.021, 0.021, 0.034);
-      bg += starField(H.xy + sky * mpx);
-      col += bg;
-    }
-  }
-  col += accum;
+  // the horizon eats the sky; everything else lets it through at the deflected
+  // position, which is what the caller needs to composite day or night
+  skyHit = vec3(H.xy + sky * mpx, 0.0);
+  skyMask = (captured < 0.5 && escaped > 0.5) ? 1.0 : 0.0;
+  vec3 col = accum;
 
   // photon ring: the b -> b_crit limit a finite march cannot wind out. Feed it
   // the light this ray already collected so it varies round the ring instead of
@@ -262,11 +271,11 @@ vec3 renderHole(vec2 frag, vec4 H, vec4 O, float t) {
 
 // ---------------------------------------------------------------- the nebula
 
-vec3 nebula(vec2 frag, vec4 N, vec4 L, float t) {
-  if (N.z <= 0.002 || L.x < 4.0) return vec3(0.0);
+vec4 nebula(vec2 frag, vec4 N, vec4 L, float t) {
+  if (N.z <= 0.002 || L.x < 4.0) return vec4(0.0);
   vec2 d = (frag - N.xy) / vec2(L.x, max(L.x * L.y, 1.0));
   float r2 = dot(d, d);
-  if (r2 > 2.9) return vec3(0.0);   // density is already nil this far out
+  if (r2 > 2.9) return vec4(0.0);   // density is already nil this far out
   float r = sqrt(r2);
 
   float seed = N.w;
@@ -292,7 +301,7 @@ vec3 nebula(vec2 frag, vec4 N, vec4 L, float t) {
   // the envelope is what guarantees there is no edge anywhere
   float env = exp(-r2 * 1.55) * (0.45 + 0.55 * fbm(p * 0.55 + 11.0));
   float dens = max(0.0, cover) * env * N.z;
-  if (dens <= 0.0005) return vec3(0.0);
+  if (dens <= 0.0005) return vec4(0.0);
 
   // dust lanes take light back out, which is what gives a nebula its structure
   float dust = smoothstep(0.52, 0.18, fbm(p * 1.9 + 3.3));
@@ -306,7 +315,13 @@ vec3 nebula(vec2 frag, vec4 N, vec4 L, float t) {
   col += vec3(0.95, 0.52, 0.30) * pow(core, 2.4) * (0.35 + 0.5 * energy);
   col += vec3(0.35, 0.20, 0.62) * smoothstep(0.75, 1.5, r) * 0.5;        // cool halo
 
-  return col * dens * (0.85 + 0.75 * energy);
+  // By day the same cloud is lit, not luminous: pastel, low contrast, and the
+  // dust lanes read as shadow rather than as holes punched in the sky.
+  vec3 lit = mix(vec3(0.98, 0.86, 0.86), vec3(0.80, 0.90, 0.97), hue);
+  lit = mix(lit, vec3(0.99, 0.92, 0.83), core * 0.8);
+  lit *= 0.86 + 0.18 * dust;
+  vec3 out3 = mix(col * (0.85 + 0.75 * energy), lit, uLight);
+  return vec4(out3 * dens, clamp(dens * 1.35, 0.0, 0.92));
 }
 
 // ------------------------------------------------------------------ assemble
@@ -330,19 +345,34 @@ void main() {
   }
 
   vec3 sky = background(frag);
-  vec3 col = sky;
+  vec3 emis = vec3(0.0);
   if (inside > 0.5) {
+    vec3 hit;
+    float mask;
+    vec3 hole = renderHole(frag, H, O, uTime, hit, mask);
     float march = H.z / BCRIT * RMARCH;
     float edge = smoothstep(march, march * 0.88, length(frag - H.xy));
-    col = mix(sky, renderHole(frag, H, O, uTime), edge);
+    // outside the march the weak-field sky already stands; inside, the horizon
+    // decides how much sky is left and the disk adds on top
+    sky = mix(sky, skyColour(hit.xy) * mask, edge);
+    emis = hole * edge;
   }
 
+  vec4 cloud = vec4(0.0);
   for (int i = 0; i < MAXN; i++) {
     if (float(i) >= uNN) break;
-    col += nebula(frag, uN[i], uNL[i], uTime);
+    vec4 n = nebula(frag, uN[i], uNL[i], uTime);
+    cloud.rgb = cloud.rgb * (1.0 - n.a) + n.rgb;
+    cloud.a = cloud.a * (1.0 - n.a) + n.a;
   }
 
-  col = col / (col + vec3(0.86));
+  // Night: everything is emission, tonemapped together. Day: the sky is already
+  // display-referred, the cloud sits over it, and only the disk is HDR.
+  vec3 night = sky + cloud.rgb + emis;
+  night = night / (night + vec3(0.86));
+  vec3 dayBase = mix(sky, cloud.a > 0.001 ? cloud.rgb / cloud.a : sky, cloud.a);
+  vec3 day = dayBase + emis / (emis + vec3(0.55));
+  vec3 col = mix(night, day, uLight);
   col = pow(col, vec3(0.92));
   gl_FragColor = vec4(col, 1.0);
 }
@@ -390,6 +420,7 @@ function create(canvas) {
     res: name("uRes"),
     time: name("uTime"),
     steps: name("uSteps"),
+    light: name("uLight"),
     h: name("uH[0]"),
     o: name("uO[0]"),
     hn: name("uHN"),
@@ -427,7 +458,7 @@ function retune(api, ms) {
   else if (ms < 12 && api.steps < 120) api.steps += 2;
 }
 
-function frame(api, t, holes, nebulas) {
+function frame(api, t, holes, nebulas, light) {
   if (!api) return;
   const gl = api.gl;
   gl.useProgram(api.prog);
@@ -440,6 +471,7 @@ function frame(api, t, holes, nebulas) {
   gl.uniform2f(api.loc.res, w, h);
   gl.uniform1f(api.loc.time, t);
   gl.uniform1f(api.loc.steps, api.steps);
+  gl.uniform1f(api.loc.light, light ? 1 : 0);
 
   const scale = Math.min(w, h) / 900;
   const hn = Math.min(MAXH, holes.length);

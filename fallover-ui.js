@@ -32,9 +32,9 @@ const ROWS = [
   },
   {
     key: "localClone",
-    label: "Locally · Exact Clone",
-    sub: "Mirror bot onto Mac",
-    tip: "Local Mirror: Copies the bot onto this Mac when a local store.db exists. Official Cursor cloud bots have no portable disk — then D reconstructs a local agent from the last captured turn and continues on local or proxied models.",
+    label: "Locally · Continue",
+    sub: "Keep going on this Mac",
+    tip: "Continue here: Copies the bot when a local store.db exists. Official Cursor chats cannot keep the same cloud thread — D seeds a local agent with the last captured turns and continues on local or proxied models.",
     icon: "clone",
   },
 ];
@@ -43,7 +43,7 @@ const TOAST = {
   enabled: "Auto Failover",
   nextCursor: "Next Account",
   localChief: "Locally · Chief Handoff",
-  localClone: "Locally · Exact Clone",
+  localClone: "Locally · Continue",
 };
 
 function rowHtml(cfg, switchHtml) {

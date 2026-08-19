@@ -4,6 +4,8 @@ One custom Grok Bot. **Local** bots on this Mac, or **your** Cursor login. Other
 
 See `INSTALL.md` to pack and hand it over. Do not zip `profile-data/` or `GrokBotSeat4`.
 
+Strangers should **clone and run `./install.sh`**. That builds D on their Mac (Gatekeeper allows a local build). Do not ship a downloaded `.app` until it is notarized. If an xAI update replaces `app.asar`, launch repairs the overlay hook when possible (`repair-overlay.sh`). Official Cursor fall-over cannot keep the same cloud thread; **Locally · Continue** seeds a local agent with the last turns.
+
 # Local box
 
 Local mode talks to this machine, not to a signed-in cloud box.
