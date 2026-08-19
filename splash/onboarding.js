@@ -501,7 +501,9 @@
         list.appendChild(row);
       });
       const own = el("div", "gd-row");
-      own.innerHTML = "<div><strong>Sign in with another account</strong><small>Opens a fresh Cursor login. Each account becomes its own seat.</small></div>";
+      own.innerHTML = n
+        ? "<div><strong>Sign in with another account</strong><small>Opens a fresh Cursor login. Each account becomes its own seat.</small></div>"
+        : "<div><strong>Sign in here</strong><small>No other Grok Bot required. Cursor will ask you to log in. You can add more after.</small></div>";
       own.appendChild(btn("Sign in", "gd-ghost", () => {
         try {
           const id = h.addSignIn();
