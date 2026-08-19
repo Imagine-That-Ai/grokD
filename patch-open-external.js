@@ -66,7 +66,16 @@ try {
       }
       let env = {};
       try { env = JSON.parse(fs.readFileSync(path.join(ROOT, "active-env.json"), "utf8")); } catch {}
-      if (env.mode === "local") return;
+      if (env.mode === "local") {
+        try {
+          const auth = require(path.join(ROOT, "profile-auth-preload.js"));
+          auth.seedEncryptedDescriptor({ allowLocal: true });
+          log("seeded-local-descriptor");
+        } catch (e) {
+          log("seed-local-err " + e);
+        }
+        return;
+      }
       const extras = [];
       const store = (() => { try { return require(path.join(ROOT, "profile-store.js")); } catch { return null; } })();
       const active = store && store.getActive && store.getActive();

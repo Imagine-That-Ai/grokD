@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 // Fast, no-network unit tests for bridge parsers. This is the door check.
+const os = require("os");
+const path = require("path");
 const assert = (c, m) => { if (!c) throw new Error(m); };
 const {
   allowedHackPath, safeRunCmd, resolveTeammate, parseHandoffs, parseFileOps,
 } = require("./bridge-lib");
+
+const DEV = path.join(os.homedir(), "Documents", "Developer");
+const DEV_JOB = path.join(DEV, ".grokbot-exec", "job.js");
 
 const roster = [
   { id: "aaa-111", name: "lol" },
@@ -43,19 +48,26 @@ ok("resolveTeammate");
   ok("parseHandoffs");
 }
 
-// path jail
+// work roots: real project folders, not just /tmp/grokbot-hack
 {
   assert(allowedHackPath("/tmp/grokbot-hack/foo.js"), "hack file");
   assert(allowedHackPath("/tmp/grokbot-hack"), "hack root");
+  assert(allowedHackPath(path.join(DEV, "foo.js")), "developer file");
+  assert(allowedHackPath(DEV), "developer root");
   assert(!allowedHackPath("/tmp/grokbot-hack-evil/x"), "prefix sibling");
   assert(!allowedHackPath("/etc/passwd"), "etc");
-  assert(!allowedHackPath("/Users/albertonunez/.ssh/id_rsa"), "ssh");
+  assert(!allowedHackPath(path.join(os.homedir(), ".ssh", "id_rsa")), "ssh");
+  assert(!allowedHackPath(path.join(os.homedir(), ".aws", "credentials")), "aws");
+  assert(!allowedHackPath(path.join(os.homedir(), "Library", "Keychains", "login.keychain-db")), "keychain");
   assert(!allowedHackPath("/tmp/other.js"), "other tmp");
   assert(safeRunCmd("node /tmp/grokbot-hack/suite-exec/hello.js"), "node hello");
-  assert(!safeRunCmd("rm -rf /Users/albertonunez"), "rm users");
+  assert(safeRunCmd(`node ${DEV_JOB}`), "node developer");
+  assert(safeRunCmd("echo hi"), "no path shell");
+  assert(safeRunCmd("git --version"), "git version");
+  assert(!safeRunCmd("rm -rf " + os.homedir()), "rm users");
   assert(!safeRunCmd("node /etc/passwd"), "node etc");
-  assert(!safeRunCmd("echo hi"), "no path");
-  ok("path-jail");
+  assert(!safeRunCmd("cat ~/.ssh/id_rsa"), "cat ssh");
+  ok("work-paths");
 }
 
 // parseFileOps
@@ -80,6 +92,9 @@ ok("resolveTeammate");
   const alt = parseFileOps("create a file at /tmp/grokbot-hack/x.js with: console.log(1);\nExecute: node /tmp/grokbot-hack/x.js");
   assert(alt.writes.length === 1 && alt.writes[0].path.endsWith("/x.js"), alt.writes);
   assert(alt.runs.length === 1 && alt.runs[0].startsWith("node "), alt.runs);
+  const dev = parseFileOps(`Write a file at ${DEV_JOB} containing exactly: console.log(1);\nRun: node ${DEV_JOB}`);
+  assert(dev.writes.length === 1 && dev.writes[0].path === path.resolve(DEV_JOB), JSON.stringify(dev.writes));
+  assert(dev.runs.length === 1 && dev.runs[0].includes(DEV_JOB), dev.runs);
   ok("parseFileOps");
 }
 

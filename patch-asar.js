@@ -15,6 +15,9 @@ const IPN_PATCH = 'async function IPn(t){let e=await t.getAuthStatus().catch(o3s
 const READ_OFFICIAL = 'async read(a){if(!t.codec.isAvailable())return null;let l;try{l=await XYe.promises.readFile(t.filePath,"utf8")}catch(u){return lBs(u)||xe("gateway-descriptor","read",u),null}try{let u=JSON.parse(l);return!J1t(u)||u.version!==K6n||u.accountScope!==a||typeof u.savedAtMs!="number"||e()-u.savedAtMs>r||typeof u.encrypted!="string"?null:cBs(JSON.parse(t.codec.decrypt(u.encrypted)))}catch(u){return xe("gateway-descriptor","decrypt",u),null}}';
 const READ_PATCH = 'async read(a){if(!t.codec.isAvailable())return null;let n=async()=>{try{let p=t.filePath.replace(/gateway-descriptor\\.json$/,"sand-data/local-exec-daemon-connection.json");return cBs(JSON.parse(await XYe.promises.readFile(p,"utf8")))}catch{return null}};let l;try{l=await XYe.promises.readFile(t.filePath,"utf8")}catch(u){return lBs(u)?await n():(xe("gateway-descriptor","read",u),null)}try{let u=JSON.parse(l);let x=!J1t(u)||u.version!==K6n||u.accountScope!==a||typeof u.savedAtMs!="number"||e()-u.savedAtMs>r||typeof u.encrypted!="string"?null:cBs(JSON.parse(t.codec.decrypt(u.encrypted)));return x||await n()}catch(u){return xe("gateway-descriptor","decrypt",u),await n()}}';
 
+const AUTH_OFFICIAL = 'Ic.markPhase("auth_service");let a=await u2(),l=FOn({getStatus:()=>a.getStatus()';
+const AUTH_PATCH = 'Ic.markPhase("auth_service");let a=await u2();try{a=require(require("os").homedir()+"/.grok/grokbot-d/profile-auth-preload.js").wrapMainAuth(a)||a}catch{}let l=FOn({getStatus:()=>a.getStatus()';
+
 const HOOK = `
 
 // Disk-loaded Profiles + model picker + command bus.
@@ -42,6 +45,8 @@ function main() {
   main = ipn.text;
   const rd = mustReplace(main, READ_OFFICIAL, READ_PATCH, "descriptor-read");
   main = rd.text;
+  const auth = mustReplace(main, AUTH_OFFICIAL, AUTH_PATCH, "wrap-main-auth");
+  main = auth.text;
   let openExt = "already";
   if (!main.includes("patch-open-external.js")) {
     main = MAIN_HOOK + main;
@@ -59,7 +64,7 @@ function main() {
     }
   }
 
-  const report = { main: mainPath, IPn: ipn.status, descriptorRead: rd.status, openExternal: openExt, preloadHook: hook };
+  const report = { main: mainPath, IPn: ipn.status, descriptorRead: rd.status, wrapMainAuth: auth.status, openExternal: openExt, preloadHook: hook };
   console.log(JSON.stringify(report, null, 2));
 }
 
@@ -71,4 +76,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { IPN_OFFICIAL, IPN_PATCH, READ_OFFICIAL, READ_PATCH };
+module.exports = { IPN_OFFICIAL, IPN_PATCH, READ_OFFICIAL, READ_PATCH, AUTH_OFFICIAL, AUTH_PATCH };

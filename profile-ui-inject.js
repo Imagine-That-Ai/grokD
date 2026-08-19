@@ -87,11 +87,24 @@
     return payload;
   }
 
+  // A silent catch here is why a broken Stop looked like a working one for so
+  // long: the button reported "bot-pause missing" no matter what actually threw.
+  let pauseModErr = null;
   function pauseMod() {
     const p = path.join(ROOT, "bot-pause.js");
     try { delete require.cache[require.resolve(p)]; } catch {}
-    try { return require(p); }
-    catch { return null; }
+    try {
+      const m = require(p);
+      pauseModErr = null;
+      return m;
+    } catch (e) {
+      pauseModErr = e;
+      try {
+        fs.appendFileSync("/tmp/grokbot-renderer.log",
+          "[bot-pause] require failed: " + (e && e.stack ? e.stack : e) + "\n");
+      } catch (_) {}
+      return null;
+    }
   }
 
   function botsPaused(id) {
@@ -101,7 +114,7 @@
 
   async function setBotsPaused(want, seatId) {
     const m = pauseMod();
-    if (!m) throw new Error("bot-pause missing");
+    if (!m) throw new Error("bot-pause failed to load: " + (pauseModErr && pauseModErr.message ? pauseModErr.message : "unknown"));
     const seats = seatId ? [seatId] : undefined;
     return want ? m.pause({ seats, waitRemote: false }) : m.resume({ seats });
   }
@@ -2182,6 +2195,9 @@
           <span style="font-size:9px;color:rgba(255,255,255,0.5);margin-left:auto">same thread</span>
         </button>
         ` : ""}
+        <button type="button" id="grok-menu-new-bot" class="whimsical-model-item" title="Create a bot on this computer">
+          <span style="font-size:11px;font-weight:700;color:#fff">Create new Bot</span>
+        </button>
         <div class="gd-railacts" style="justify-content:center;border:none;padding:4px 0 8px;gap:8px">
           <button type="button" id="grok-menu-add-seat" class="gd-iconbtn is-primary" title="Add seat">${ICONS.plus}</button>
           <button type="button" id="grok-menu-clean-login" class="gd-iconbtn" title="Open Sign-In">${ICONS.browser}</button>
@@ -2329,6 +2345,20 @@
       closeSeatActionMenu();
       openSheet();
     });
+    const newBot = menu.querySelector("#grok-menu-new-bot");
+    if (newBot) {
+      newBot.addEventListener("click", () => {
+        closeSeatActionMenu();
+        try {
+          const r = require(path.join(ROOT, "create-bot-hook.js")).createViaBox("New Bot");
+          const nm = (r && r.agent && r.agent.name) || "New Bot";
+          toast("Created " + nm);
+          try { pageCall("return await window.desktop.forceGatewayReconnect()"); } catch {}
+        } catch (e) {
+          toast("Create bot failed: " + (e.message || e));
+        }
+      });
+    }
   }
 
   function ensureChipCss() {
@@ -2816,6 +2846,9 @@
           out.reply = await waitForReply(cmd.token || text.slice(0, 12), cmd.timeoutMs || 90000);
           out.ok = !!(out.reply && out.reply.includes(cmd.token || text.slice(0, 12)));
         }
+      } else if (cmd.op === "chatter") {
+        out.chatter = require(path.join(ROOT, "bot-chatter.js")).preview(cmd.mode);
+        out.ok = !!out.chatter;
       } else {
         throw new Error("unknown op " + cmd.op);
       }
@@ -2843,6 +2876,7 @@
     try { candyGrokMarks(); } catch (_) {}
     try { require(path.join(ROOT, "cursor-model-bubble.js")).start(); } catch (_) {}
     try { require(path.join(ROOT, "create-bot-hook.js")).start(); } catch (_) {}
+    try { require(path.join(ROOT, "bot-chatter.js")).start(); } catch (_) {}
   }
 
   function onboardPath() {
@@ -3019,6 +3053,18 @@
 
   function onBoot() {
     try { writeReady(); } catch (e) { try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[inject-boot] " + e + "\n"); } catch {} }
+    // A stopped bot stays stopped across restarts unless the policy opts out.
+    try {
+      const m = pauseMod();
+      if (m && m.applyStartupPolicy) {
+        m.applyStartupPolicy().then((r) => {
+          try {
+            fs.appendFileSync("/tmp/grokbot-renderer.log",
+              "[bot-pause] startup " + JSON.stringify(r) + "\n");
+          } catch (_) {}
+        }).catch(() => {});
+      }
+    } catch (_) {}
     syncTitle();
     injectSplash();
     inject();

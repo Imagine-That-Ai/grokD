@@ -5,7 +5,7 @@ const assert = (c, m) => { if (!c) throw new Error(m); };
 const {
   isIdle, resolveTargets, broadcastOk, distinctiveToken, hayHasMessage,
   agentDbPath, parseJson, waitUntilIdle, waitTranscripts, handleSpecial,
-  AGENTS_ROOT, broadcastMessage,
+  AGENTS_ROOT, broadcastMessage, createLocalAgent, deleteLocalAgents,
 } = require("./gateway-shim");
 
 let n = 0;
@@ -64,6 +64,27 @@ assert(!broadcastOk(null), "null ok");
 assert(broadcastMessage({ message: "m", prompt: "p" }) === "m", "msg first");
 assert(broadcastMessage({ prompt: "p" }) === "p", "prompt fallback");
 ok("parse-broadcast");
+
+// create / delete a bot on disk (no host)
+{
+  const fs = require("fs");
+  const os = require("os");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "grok-create-"));
+  const created = createLocalAgent({ name: "Suite Newbie", description: "born in unit test", origin: "user" }, tmp);
+  assert(created && created.id && created.name === "Suite Newbie", JSON.stringify(created));
+  assert(created.agent && created.agent.id === created.id, "agent wrapper");
+  const prof = JSON.parse(fs.readFileSync(path.join(tmp, created.id, "profile.json"), "utf8"));
+  assert(prof.name === "Suite Newbie" && prof.origin === "user", JSON.stringify(prof));
+  assert(fs.existsSync(path.join(tmp, created.id, "store.db")), "store.db");
+  let threw = false;
+  try { createLocalAgent({ name: "   " }, tmp); } catch { threw = true; }
+  assert(threw, "empty name");
+  const gone = deleteLocalAgents([created.id], tmp);
+  assert(gone.deleted === 1, JSON.stringify(gone));
+  assert(!fs.existsSync(path.join(tmp, created.id)), "removed");
+  fs.rmSync(tmp, { recursive: true, force: true });
+  ok("create-local-agent");
+}
 
 (async () => {
   // waitUntilIdle

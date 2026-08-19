@@ -1,4 +1,7 @@
-#!/usr/bin/env node
+// No shebang: Electron's renderer wraps module source in an extra function,
+// so a line-1 '#!' is no longer at offset 0 and Node's shebang stripping does
+// not apply — require() throws SyntaxError in the app while working under
+// plain node. Run this as `node failover-act.js <cmd>`.
 // Perform one fall-over decision. Always pause bots before switching.
 // Does nothing unless evaluate() returned an action. Never kills Grok Bot B.
 "use strict";

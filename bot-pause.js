@@ -1,4 +1,7 @@
-#!/usr/bin/env node
+// No shebang: Electron's renderer wraps module source in an extra function,
+// so a line-1 '#!' is no longer at offset 0 and Node's shebang stripping does
+// not apply — require() throws SyntaxError in the app while working under
+// plain node. Run this as `node bot-pause.js <cmd>`.
 // Stop / resume Grok bots: park automations, interrupt running turns.
 // Local files + official computers. Does not kill Grok Bot B.
 "use strict";
@@ -14,6 +17,7 @@ const HACK = process.env.GROKBOT_HACK || path.join(ROOT, "hack");
 const TMP_HACK = "/tmp/grokbot-hack";
 const SEAT4 = process.env.GROK_SEAT4 || path.join(os.homedir(), "Library/Application Support/GrokBotSeat4");
 const STATE = path.join(ROOT, "runtime", "paused.json");
+const POLICY = path.join(ROOT, "runtime", "pause-policy.json");
 
 function readJson(p, fallback) {
   try { return JSON.parse(fs.readFileSync(p, "utf8")); }
@@ -419,7 +423,38 @@ function status() {
   return { paused: Object.keys(seats).length > 0, seats };
 }
 
+// A stop should outlive a restart — that is the whole point of stopping a bot
+// that bills by the week. Persistence is therefore the default and lives in
+// paused.json. resumeOnStart is the opt-out for anyone who wants a stop to last
+// only for the current run of the app.
+function getPolicy() {
+  const raw = readJson(POLICY, null);
+  return { resumeOnStart: !!(raw && raw.resumeOnStart) };
+}
+
+function setPolicy(patch) {
+  const next = Object.assign(getPolicy(), patch || {});
+  writeJson(POLICY, next);
+  return next;
+}
+
+// Called once when the app boots. Default policy does nothing at all, so a
+// paused seat stays paused.
+async function applyStartupPolicy() {
+  const pol = getPolicy();
+  const st = status();
+  if (!pol.resumeOnStart) {
+    return { policy: pol, action: "kept", paused: !!st.paused };
+  }
+  if (!st.paused) return { policy: pol, action: "none", paused: false };
+  const out = await resume({});
+  return { policy: pol, action: "resumed", result: out };
+}
+
 module.exports = {
+  getPolicy,
+  setPolicy,
+  applyStartupPolicy,
   ROOT, STATE,
   isPaused, pausedAt, pausedSeats, shouldFireAutomation, loadState, saveState,
   pause, resume, setSeatPaused, status,
@@ -436,9 +471,17 @@ if (require.main === module) {
     } else if (cmd === "resume" || cmd === "start") {
       console.log(JSON.stringify(await resume(seats.length ? { seats } : {}), null, 2));
     } else if (cmd === "status") {
-      console.log(JSON.stringify(status(), null, 2));
+      console.log(JSON.stringify(Object.assign({ policy: getPolicy() }, status()), null, 2));
+    } else if (cmd === "policy") {
+      const key = process.argv[3];
+      if (!key) console.log(JSON.stringify(getPolicy(), null, 2));
+      else if (key === "resume-on-start") {
+        const v = String(process.argv[4] || "").toLowerCase();
+        if (v !== "on" && v !== "off") { console.error("usage: policy resume-on-start on|off"); process.exit(2); }
+        console.log(JSON.stringify(setPolicy({ resumeOnStart: v === "on" }), null, 2));
+      } else { console.error("unknown policy key: " + key); process.exit(2); }
     } else {
-      console.error("usage: bot-pause.js pause|resume|status [local-d|cursor-a|cursor-b|cursor-c]");
+      console.error("usage: bot-pause.js pause|resume|status|policy [seat...]");
       process.exit(2);
     }
   })().catch((e) => {

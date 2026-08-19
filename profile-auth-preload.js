@@ -18,19 +18,24 @@ function log(msg) {
   } catch (e) {}
 }
 
-function seedEncryptedDescriptor() {
+function seedEncryptedDescriptor(opts) {
   try {
     const fs = require("fs");
     const path = require("path");
     const os = require("os");
     const crypto = require("crypto");
     const { safeStorage } = require("electron");
-    if (!safeStorage || !safeStorage.isEncryptionAvailable()) return;
+    if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
+      log("seed-skip no-safeStorage");
+      return;
+    }
     const seat4 = path.join(os.homedir(), "Library/Application Support/GrokBotSeat4");
     const connPath = path.join(seat4, "sand-data", "local-exec-daemon-connection.json");
     if (!fs.existsSync(connPath)) return;
     const conn = JSON.parse(fs.readFileSync(connPath, "utf8"));
-    if (!conn.baseUrl || /127\.0\.0\.1|localhost/.test(conn.baseUrl)) return;
+    if (!conn.baseUrl) return;
+    const isLoop = /127\.0\.0\.1|localhost/.test(conn.baseUrl);
+    if (isLoop && !(opts && opts.allowLocal)) return;
     let scope = null;
     try {
       const secrets = JSON.parse(fs.readFileSync(path.join(seat4, "sand-secrets.json"), "utf8"));
@@ -45,6 +50,13 @@ function seedEncryptedDescriptor() {
         scope = existing.accountScope || null;
       } catch (e) {}
     }
+    if (!scope) {
+      try {
+        const settings = JSON.parse(fs.readFileSync(path.join(seat4, "sand-data", "settings.json"), "utf8"));
+        scope = settings.mcpCustomInstructionsAccountScope || settings.hasSeenOnboardingAccountScope || null;
+      } catch (e) {}
+    }
+    if (!scope) scope = crypto.createHash("sha256").update("local-d").digest("hex");
     if (!scope) return;
     const encrypted = safeStorage.encryptString(JSON.stringify(conn)).toString("base64");
     fs.writeFileSync(path.join(seat4, "gateway-descriptor.json"), JSON.stringify({
@@ -58,6 +70,14 @@ function seedEncryptedDescriptor() {
     log("seed-descriptor-err " + e);
   }
 }
+
+const LOCAL_STATUS = {
+  kind: "logged-in",
+  authId: "google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7",
+  email: "alberto@local",
+  name: "Alberto",
+  isAnysphereUser: false,
+};
 
 function applyAuthPolicy(Q) {
   const mode = readMode();
@@ -141,20 +161,13 @@ function applyAuthPolicy(Q) {
   }
 
   Q.cursorAccount = Object.assign({}, Q.cursorAccount, {
-    getStatus: async function () {
-      return {
-        kind: "logged-in",
-        authId: "google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7",
-        email: "alberto@local",
-        name: "Alberto",
-        isAnysphereUser: false,
-      };
-    },
+    getStatus: async function () { return LOCAL_STATUS; },
+    getAuthStatus: async function () { return LOCAL_STATUS; },
     getSandAccess: async function () {
       return { kind: "allowed", tier: "pro", isTrial: false };
     },
     getSandAccessFresh: async function () {
-      return { kind: "allowed", tier: "pro", isTrial: false };
+      return { state: "granted", reason: "none" };
     },
     getAvatar: async function () { return null; },
     getWeeklyUsage: async function () { return null; },
@@ -165,7 +178,42 @@ function applyAuthPolicy(Q) {
     getSeen: async function () { return true; },
     setSeen: async function () {},
   });
+  try { seedEncryptedDescriptor({ allowLocal: true }); } catch (e) { log("seed-local " + e); }
   return Q;
 }
 
-module.exports = { applyAuthPolicy };
+function isLocalMode() {
+  try {
+    const env = JSON.parse(require("fs").readFileSync(
+      require("path").join(require("os").homedir(), ".grok", "grokbot-d", "active-env.json"),
+      "utf8"
+    ));
+    return env && env.mode === "local";
+  } catch (e) {
+    return false;
+  }
+}
+
+// Main-process auth. Official E3.start(logged-out) leaves the coordinator
+// inactive, so Create/list in the official UI no-op. Keep the local seat
+// looking signed-in for as long as Dipshit/Local is active.
+function wrapMainAuth(svc) {
+  if (!svc || typeof svc.getStatus !== "function") return svc;
+  const origGet = svc.getStatus.bind(svc);
+  svc.getStatus = async function () {
+    if (isLocalMode()) return Object.assign({}, LOCAL_STATUS);
+    return origGet();
+  };
+  if (typeof svc.subscribe === "function") {
+    const origSub = svc.subscribe.bind(svc);
+    svc.subscribe = function (fn) {
+      return origSub(function (status) {
+        fn(isLocalMode() ? Object.assign({}, LOCAL_STATUS) : status);
+      });
+    };
+  }
+  log("wrap-main-auth local=" + isLocalMode());
+  return svc;
+}
+
+module.exports = { applyAuthPolicy, seedEncryptedDescriptor, wrapMainAuth, LOCAL_STATUS, isLocalMode };

@@ -2,22 +2,63 @@
 // Pure helpers for the local Grok Bot D bridge. No I/O, no network.
 // Used by proxy2.js and by test-unit.js so parser behavior is pinned.
 
+const os = require("os");
 const path = require("path");
 
 const HACK_ROOT = "/tmp/grokbot-hack";
+const WORK_ROOTS = [
+  HACK_ROOT,
+  path.join(os.homedir(), ".grok", "grokbot-d", "hack"),
+  path.join(os.homedir(), "Documents", "Developer"),
+];
+const DENY_SEGMENTS = new Set([".ssh", ".aws", ".gnupg", ".netrc", "Keychains"]);
+
+function expandUser(p) {
+  const s = String(p || "");
+  if (s === "~") return os.homedir();
+  if (s.startsWith("~/")) return path.join(os.homedir(), s.slice(2));
+  return s;
+}
+
+function deniedPath(abs) {
+  if (abs === "/etc" || abs.startsWith("/etc/")) return true;
+  if (abs === "/private/etc" || abs.startsWith("/private/etc/")) return true;
+  return abs.split(path.sep).some((seg) => DENY_SEGMENTS.has(seg));
+}
+
+function underRoot(abs, root) {
+  const r = path.resolve(root);
+  return abs === r || abs.startsWith(`${r}${path.sep}`);
+}
 
 function allowedHackPath(p) {
   try {
-    const abs = path.resolve(String(p || ""));
-    return abs === HACK_ROOT || abs.startsWith(`${HACK_ROOT}/`);
+    const abs = path.resolve(expandUser(p));
+    if (deniedPath(abs)) return false;
+    return WORK_ROOTS.some((root) => underRoot(abs, root));
   } catch {
     return false;
   }
 }
 
+function cmdLooksDenied(cmd) {
+  const s = String(cmd || "");
+  if (/(?:^|[\/\s'"`~])(?:\.ssh|\.aws|\.gnupg|\.netrc)(?:\/|$|[\s'"`])/.test(s)) return true;
+  if (/Keychains/.test(s)) return true;
+  if (/(?:^|[\s'"`])\/(?:private\/)?etc(?:\/|$|[\s'"`])/.test(s)) return true;
+  return false;
+}
+
+function extractPaths(cmd) {
+  return String(cmd || "").match(/(?:~|\/)[^\s'"]+/g) || [];
+}
+
 function safeRunCmd(cmd) {
-  const paths = String(cmd).match(/\/(?:tmp|Users)[^\s'"]+/g) || [];
-  if (!paths.length) return false;
+  const s = String(cmd || "");
+  if (!s.trim()) return false;
+  if (cmdLooksDenied(s)) return false;
+  const paths = extractPaths(s);
+  if (!paths.length) return true;
   return paths.every(allowedHackPath);
 }
 

@@ -16,9 +16,13 @@ function repair() {
   const report = { id: profile && profile.id, kind: profile && profile.kind, action: "none" };
   if (!profile) return report;
   if (profile.kind === "local") {
+    box.clearCursorHost(SEAT4);
+    const dir = store.profileDataDir(profile.id);
+    box.installLocalCredential(SEAT4, [dir, store.profileDataDir("local-d")]);
     box.writeLocalHost(SEAT4);
     report.action = "local-host";
     report.baseUrl = "http://127.0.0.1:1337";
+    report.credential = fs.existsSync(box.credentialPath(SEAT4));
     return report;
   }
   const dir = store.profileDataDir(profile.id);

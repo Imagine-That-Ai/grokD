@@ -7,6 +7,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
+const { newId } = require("./clone-bot");
 
 const HOST = "127.0.0.1";
 const PORT = 1337;
@@ -60,6 +61,39 @@ function agentDbPath(id) {
   const raw = String(id || "");
   if (!UUID_RE.test(raw)) return null;
   return path.join(AGENTS_ROOT, raw, "store.db");
+}
+
+function createLocalAgent(body, root = AGENTS_ROOT) {
+  const name = String(body && body.name || "").trim() || "New Bot";
+  const id = newId();
+  const dir = path.join(root, id);
+  fs.mkdirSync(dir, { recursive: true });
+  const prof = {
+    name,
+    description: String((body && body.description) || ""),
+    title: String((body && body.title) || ""),
+    origin: String((body && body.origin) || "user"),
+    createdAt: Date.now(),
+  };
+  fs.writeFileSync(path.join(dir, "profile.json"), JSON.stringify(prof, null, 2) + "\n");
+  try {
+    execFileSync("sqlite3", [path.join(dir, "store.db"), "CREATE TABLE IF NOT EXISTS transcript_entries (id TEXT, entry TEXT);"], { timeout: 4000 });
+  } catch {}
+  const agent = { id, ...prof, isRunning: false, isComposingMessage: false };
+  return { id, name, agent };
+}
+
+function deleteLocalAgents(ids, root = AGENTS_ROOT) {
+  const list = Array.isArray(ids) ? ids : [];
+  let deleted = 0;
+  for (const id of list) {
+    if (!UUID_RE.test(String(id || ""))) continue;
+    const dir = path.join(root, id);
+    if (!fs.existsSync(dir)) continue;
+    fs.rmSync(dir, { recursive: true, force: true });
+    deleted += 1;
+  }
+  return { ok: true, deleted };
 }
 
 function getLocalAgents() {
@@ -140,8 +174,17 @@ function broadcastMessage(body) {
   return body && typeof body === "object" ? String(body.message || body.prompt || "") : "";
 }
 
+function normalizeCreateAgent(raw) {
+  const parsed = parseJson(raw) || {};
+  if (parsed.description == null) parsed.description = "";
+  if (!String(parsed.name || "").trim()) parsed.name = "New Bot";
+  if (!parsed.origin) parsed.origin = "user";
+  return JSON.stringify(parsed);
+}
+
 async function postApi(method, body) {
-  const raw = Buffer.isBuffer(body) || typeof body === "string" ? body : JSON.stringify(body ?? {});
+  let raw = Buffer.isBuffer(body) || typeof body === "string" ? body : JSON.stringify(body ?? {});
+  if (method === "createAgent") raw = normalizeCreateAgent(raw);
   try {
     const r = await fetch(`${UP}/api/${method}`, {
       method: "POST",
@@ -183,6 +226,19 @@ async function postApi(method, body) {
       const agents = getLocalAgents();
       const res = { ok: true, scheduled: agents.length, total: agents.length };
       return { status: 200, text: JSON.stringify(res), json: res, type: "application/json" };
+    }
+    if (method === "createAgent") {
+      try {
+        const created = createLocalAgent(parsedBody);
+        return { status: 200, text: JSON.stringify(created), json: created, type: "application/json" };
+      } catch (err) {
+        const fail = { error: String(err.message || err) };
+        return { status: 400, text: JSON.stringify(fail), json: fail, type: "application/json" };
+      }
+    }
+    if (method === "deleteAgents") {
+      const deleted = deleteLocalAgents(parsedBody.ids);
+      return { status: 200, text: JSON.stringify(deleted), json: deleted, type: "application/json" };
     }
     const err = { error: String(e.message || e) };
     return { status: 502, text: JSON.stringify(err), json: err, type: "application/json" };
@@ -289,4 +345,5 @@ module.exports = {
   parseJson, isIdle, resolveTargets, broadcastOk, distinctiveToken, hayHasMessage,
   agentDbPath, getLocalAgents, readEntries, transcriptHas, waitUntilIdle, waitTranscripts,
   broadcastMessage, postApi, handleSpecial, onRequest, start,
+  createLocalAgent, deleteLocalAgents,
 };

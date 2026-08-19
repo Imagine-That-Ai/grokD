@@ -162,8 +162,12 @@ print("asar hash", h)
 PY
 
 mkdir -p "$ROOT/host"
-if [ -f "$ASAR_SRC/dist/host/host-main.cjs" ]; then
-  cp "$ASAR_SRC/dist/host/host-main.cjs" "$ROOT/host/host-main.cjs"
+if [ -d "$ASAR_SRC/dist/host" ]; then
+  rsync -a "$ASAR_SRC/dist/host/" "$ROOT/host/"
+fi
+if [ -d "$ASAR_SRC/dist/host" ]; then
+  mkdir -p "$RT/host"
+  rsync -a "$ASAR_SRC/dist/host/" "$RT/host/"
 fi
 
 export GROK_PROFILE_ROOT="$ROOT"

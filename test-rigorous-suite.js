@@ -8,8 +8,8 @@
  * Comprehensive, production-grade test framework covering all 6 dimensions:
  *   1. Seat & Account Switching (Cursor accounts A, B, C, Local D, secret isolation, no token leakage)
  *   2. Locally Proxied Grok Bot (OpenBurnBar :8320, CLIProxy :8322, OpenRouter API, proxy2 :8787)
- *   3. Teammates Architecture (Roster discovery, fuzzy resolution, multi-hop inter-bot messaging)
- *   4. Safe Code Execution & Plugins (Path-jail security, jailed code runner, local MCP tools)
+ *   3. Teammates Architecture (Create bot, roster discovery, fuzzy resolution, multi-hop messaging)
+ *   4. Real Code Execution & Plugins (work folders, secret-path deny, live node/git, local MCP tools)
  *   5. Autonomous Collaborative Coding Loop (Multi-turn bot-to-bot tasking, execution & verification)
  *   6. Process Health Sentinel & Live App Window (Daemon resilience, CDP :9224 live page inspection)
  * ══════════════════════════════════════════════════════════════════════════════
@@ -34,6 +34,8 @@ const LOCAL_GATEWAY_HOST = "http://127.0.0.1:1337";
 const GATEWAY_TOKEN = "fake-gateway-token";
 const PROXY2_HOST = "http://127.0.0.1:8787";
 const CDP_HOST = "http://127.0.0.1:9224";
+const DEV_ROOT = path.join(os.homedir(), "Documents", "Developer");
+const DEV_EXEC = path.join(DEV_ROOT, ".grokbot-exec");
 
 // ANSI Styling
 const C = {
@@ -57,6 +59,7 @@ const state = {
   warnings: 0,
   startTime: Date.now(),
   originalProfile: null,
+  createdBotId: null,
   cleanups: [],
 };
 
@@ -386,6 +389,48 @@ async function testSuiteTeammates() {
     assert(Array.isArray(agents) && agents.length >= 2, `Expected at least 2 teammates, got ${agents.length}`);
   });
 
+  await runStep("Create a New Bot via Gateway", async () => {
+    const name = `Suite Bot ${Date.now()}`;
+    const before = Array.isArray(agents) ? agents.length : 0;
+    const res = await gatewayApi("createAgent", {
+      name,
+      description: "rigorous suite created bot",
+      origin: "user",
+    });
+    const created = res.agent || res;
+    assert(created && created.id, `createAgent returned no id: ${JSON.stringify(res).slice(0, 240)}`);
+    assert((created.name || res.name) === name, `name mismatch: ${JSON.stringify(res).slice(0, 240)}`);
+    state.createdBotId = created.id;
+    registerCleanup(() => {
+      try {
+        execFileSync("curl", [
+          "-sS", "-X", "POST", `${LOCAL_GATEWAY_HOST}/api/deleteAgents`,
+          "-H", "content-type: application/json",
+          "-H", `authorization: Bearer ${GATEWAY_TOKEN}`,
+          "-d", JSON.stringify({ ids: [created.id] }),
+        ], { encoding: "utf8", timeout: 8000, stdio: "pipe" });
+      } catch {}
+    });
+
+    const after = await gatewayApi("listAgents");
+    assert(Array.isArray(after) && after.length >= before + 1, `roster did not grow: before=${before} after=${after.length}`);
+    const found = BRIDGE_LIB.resolveTeammate(after, created.id) || BRIDGE_LIB.resolveTeammate(after, name);
+    assert(found, "created bot missing from listAgents");
+    assert(found.name === name, `listed name ${found.name} != ${name}`);
+    agents = after;
+  });
+
+  await runStep("New Bot Accepts a Prompt", async () => {
+    assert(state.createdBotId, "no created bot id from previous step");
+    const token = `NEWBOT-${Date.now()}`;
+    const res = await gatewayApi("sendPrompt", {
+      agentId: state.createdBotId,
+      prompt: `Hello new bot. Token ${token}`,
+      awaitTurn: false,
+    });
+    assert(res && (res.ok !== false), `sendPrompt to new bot failed: ${JSON.stringify(res)}`);
+  });
+
   await runStep("Fuzzy & Exact Teammate Name Resolution", async () => {
     const lol = BRIDGE_LIB.resolveTeammate(agents, "lol");
     const grok = BRIDGE_LIB.resolveTeammate(agents, 'grok"D"') || BRIDGE_LIB.resolveTeammate(agents, "Grok Bot D") || BRIDGE_LIB.resolveTeammate(agents, "grok d");
@@ -431,28 +476,29 @@ async function testSuiteTeammates() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SUITE 4: SAFE CODE EXECUTION & PLUGINS (MCP TOOLS)
+// SUITE 4: REAL CODE EXECUTION & PLUGINS (MCP TOOLS)
 // ══════════════════════════════════════════════════════════════════════════════
 async function testSuitePlugins() {
-  testHeader("Suite 4: Safe Code Execution & Plugin Tools");
+  testHeader("Suite 4: Real Code Execution & Plugin Tools");
 
-  const execDir = "/tmp/grokbot-hack/suite-exec";
-  fs.mkdirSync(execDir, { recursive: true });
+  fs.mkdirSync(DEV_EXEC, { recursive: true });
 
-  await runStep("Path-Jail Security Boundaries", async () => {
+  await runStep("Work Folders Open; Secrets Stay Closed", async () => {
     assert(BRIDGE_LIB.allowedHackPath("/tmp/grokbot-hack/suite-exec/code.js"), "Allows /tmp/grokbot-hack paths");
-    assert(BRIDGE_LIB.allowedHackPath("/tmp/grokbot-hack"), "Allows hack root");
+    assert(BRIDGE_LIB.allowedHackPath(path.join(DEV_ROOT, "repo", "index.js")), "Allows Documents/Developer");
+    assert(BRIDGE_LIB.safeRunCmd("git --version"), "Allows pathless shell (git)");
     assert(!BRIDGE_LIB.allowedHackPath("/etc/passwd"), "Denies /etc/passwd");
-    assert(!BRIDGE_LIB.allowedHackPath("/Users/albertonunez/.ssh/id_rsa"), "Denies user SSH keys");
-    assert(!BRIDGE_LIB.allowedHackPath("/tmp/other/script.js"), "Denies paths outside hack sandbox");
+    assert(!BRIDGE_LIB.allowedHackPath(path.join(os.homedir(), ".ssh", "id_rsa")), "Denies user SSH keys");
+    assert(!BRIDGE_LIB.allowedHackPath(path.join(os.homedir(), ".aws", "credentials")), "Denies AWS creds");
+    assert(!BRIDGE_LIB.allowedHackPath("/tmp/other/script.js"), "Denies random /tmp");
   });
 
-  await runStep("Jailed File Generation & Command Parsing", async () => {
-    const testFile = path.join(execDir, `test-calc-${Date.now()}.js`);
+  await runStep("Parse Write + Run Against a Real Project Folder", async () => {
+    const testFile = path.join(DEV_EXEC, `test-calc-${Date.now()}.js`);
     const scriptSrc = [
       `Write a file at ${testFile} containing exactly: const x = 40 + 2; console.log('RESULT:' + x);`,
       `Run: node ${testFile}`,
-      `Also write the stdout to ${path.join(execDir, "out.txt")}`,
+      `Also write the stdout to ${path.join(DEV_EXEC, "out.txt")}`,
     ].join("\n");
 
     const ops = BRIDGE_LIB.parseFileOps(scriptSrc);
@@ -463,17 +509,21 @@ async function testSuitePlugins() {
 
     fs.writeFileSync(ops.writes[0].path, "const x = 40 + 2; console.log('RESULT:' + x);", "utf8");
     assert(fs.existsSync(testFile), "Generated test script must exist");
+    try { fs.unlinkSync(testFile); } catch {}
   });
 
-  await runStep("Safe Code Execution & Stdout Validation", async () => {
-    const testFile = path.join(execDir, `exec-verify-${Date.now()}.js`);
+  await runStep("Run Node + Git in Documents/Developer and Read Stdout", async () => {
+    const testFile = path.join(DEV_EXEC, `exec-verify-${Date.now()}.js`);
     fs.writeFileSync(testFile, 'console.log("CODE-EXEC-SUCCESS-" + (100 * 2));\n', "utf8");
 
     const cmd = `node ${testFile}`;
     assert(BRIDGE_LIB.safeRunCmd(cmd), `safeRunCmd must permit ${cmd}`);
-
     const stdout = execSync(cmd, { encoding: "utf8" });
     assert(stdout.includes("CODE-EXEC-SUCCESS-200"), `Unexpected execution output: ${stdout}`);
+
+    assert(BRIDGE_LIB.safeRunCmd("git --version"), "git --version must be allowed");
+    const gitOut = execSync("git --version", { encoding: "utf8" });
+    assert(/git version/i.test(gitOut), `Unexpected git output: ${gitOut}`);
 
     try { fs.unlinkSync(testFile); } catch {}
   });
@@ -497,16 +547,15 @@ async function testSuitePlugins() {
 async function testSuiteCodingLoop() {
   testHeader("Suite 5: Autonomous Collaborative Coding Loop");
 
-  const execDir = "/tmp/grokbot-hack/suite-exec";
-  fs.mkdirSync(execDir, { recursive: true });
+  fs.mkdirSync(DEV_EXEC, { recursive: true });
 
-  await runStep("Agent-to-Agent Jailed Code Tasking & Verification", async () => {
+  await runStep("Agent-to-Agent Code Tasking & Verification", async () => {
     const agents = await gatewayApi("listAgents");
     const grok = BRIDGE_LIB.resolveTeammate(agents, "grok d") || agents[0];
     const coderBot = agents.find((a) => a.id !== grok.id) || agents[1];
 
     const uniqueCalcToken = `TOKEN-VAL-${Date.now()}`;
-    const codeFilePath = path.join(execDir, `collaborative-job-${Date.now()}.js`);
+    const codeFilePath = path.join(DEV_EXEC, `collaborative-job-${Date.now()}.js`);
     const codeContent = `console.log("COMPUTE-VERIFIED:${uniqueCalcToken}");`;
 
     // 1. Bot A sends coding instruction to Bot B

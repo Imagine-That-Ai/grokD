@@ -16,14 +16,14 @@ Local mode talks to this machine, not to a signed-in cloud box.
 | — | `routine-guard.js` | parks resurrected joke crons |
 | — | Grok Bot D.app | `SAND_HOST_GATEWAY_URL=http://127.0.0.1:1337` |
 
-Scripts are also copied to `~/.grok/grokbot-d/`. Official from-agent chrome is not exposed on `sendPrompt`; bot-to-bot still uses `[Bot-to-bot from NAME]:`.
+Scripts are also copied to `~/.grok/grokbot-d/`. Official from-agent chrome is not exposed on `sendPrompt`; bot-to-bot still uses `[Bot-to-bot from NAME]:` on the wire. `bot-chatter.js` hides that raw text in the transcript: a run of inter-bot turns collapses to one marker (`3 messages with <Bot>`, `Messaged <marks> 3 Bots`) in each bot’s own colour, and clicking it opens their view-only chat. Outbound sends are read back out of the recipients’ `store.db`, since this box only records them there.
 
 Do not kill **Grok Bot B**.
 
 ## Checks
 
 ```bash
-node /tmp/grokbot-hack/test-unit.js     # parsers, path jail — no network
+node /tmp/grokbot-hack/test-unit.js     # parsers, work-folder exec — no network
 node /tmp/grokbot-hack/test-robust.js   # live box
 ```
 
@@ -35,5 +35,6 @@ Model picks go through `model-lib.js` so they do not wait on a reconnecting comp
 
 - `broadcastToAgents` can return `{scheduled:1}` and then drop if the target is already running a turn.
 - Brand-new agents are slow on the first reply. Warm agents (D, Robust Bench) are reliable.
-- Forced file write/run only matches `Write a file at /tmp/grokbot-hack/... containing exactly:` plus `Run:` with paths under that root.
+- Forced file write/run matches `Write a file at … containing exactly:` plus `Run:` under `/tmp/grokbot-hack` or `~/Documents/Developer`. Secrets (`.ssh`, `.aws`, keychain, `/etc`) stay blocked. Pathless shell (`git --version`, `echo`) is allowed.
+- The rigorous suite creates a throwaway bot via `createAgent` and deletes it on the way out.
 - `/tmp/grokbot-hack` is ephemeral. Icon source of truth lives in `~/Downloads/grokD_Icon/`.

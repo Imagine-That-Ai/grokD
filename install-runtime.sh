@@ -72,13 +72,35 @@ elif [ -d /tmp/grokbot-hack ] && [ ! -L /tmp/grokbot-hack ]; then
   rsync -a /tmp/grokbot-hack/ "$HOME_DST/hack/" 2>/dev/null || true
 fi
 
-# Extract host-main once so the local box does not depend on /tmp/grokbot-asar.
-HOST_DST="$HOME_DST/host/host-main.cjs"
-if [ ! -f "$HOST_DST" ]; then
-  if [ -f /tmp/grokbot-asar/dist/host/host-main.cjs ]; then
-    cp /tmp/grokbot-asar/dist/host/host-main.cjs "$HOST_DST"
-  fi
-fi
+# Official host-main spawns sibling workers (agent-store-worker, etc).
+# Copy the whole host tree — host-main alone makes "Bot failed to respond".
+sync_host_tree() {
+  local src dest="$HOME_DST/host"
+  mkdir -p "$dest"
+  for src in "$APP_SRC/host" "/tmp/grokbot-asar/dist/host"; do
+    if [ -f "$src/host-main.cjs" ] && [ -f "$src/agent-isolation/agent-store-worker.cjs" ]; then
+      rsync -a "$src/" "$dest/"
+      return 0
+    fi
+  done
+  local asar=""
+  for asar in \
+    "$HOME/Applications/Grok Bot D.app/Contents/Resources/app.asar" \
+    "/Applications/Grok Bot D.app/Contents/Resources/app.asar"
+  do
+    [ -f "$asar" ] || continue
+    if command -v npx >/dev/null 2>&1; then
+      mkdir -p "$dest/agent-isolation" "$dest/extensions/box-store-sync" "$dest/extensions/content-search"
+      [ -f "$dest/host-main.cjs" ] || npx --yes asar extract-file "$asar" dist/host/host-main.cjs "$dest/host-main.cjs" 2>/dev/null || true
+      npx --yes asar extract-file "$asar" dist/host/agent-isolation/agent-store-worker.cjs "$dest/agent-isolation/agent-store-worker.cjs" 2>/dev/null || true
+      npx --yes asar extract-file "$asar" dist/host/agent-isolation/transcript-mirror-worker.cjs "$dest/agent-isolation/transcript-mirror-worker.cjs" 2>/dev/null || true
+      npx --yes asar extract-file "$asar" dist/host/extensions/box-store-sync/box-store-vacuum-worker.cjs "$dest/extensions/box-store-sync/box-store-vacuum-worker.cjs" 2>/dev/null || true
+      npx --yes asar extract-file "$asar" dist/host/extensions/content-search/search-index-worker.cjs "$dest/extensions/content-search/search-index-worker.cjs" 2>/dev/null || true
+    fi
+    break
+  done
+}
+sync_host_tree
 
 chmod +x "$HOME_DST"/*.sh 2>/dev/null || true
 echo "runtime ready $HOME_DST"

@@ -26,7 +26,8 @@ for f in \
   bridge-lib.js local-mcp.js routine-guard.js \
   onboard-accounts.js bot-pause.js failover.js failover-act.js \
   failover-watch.js fallover-ui.js clone-bot.js handoff-pack.js \
-  seat-quota.js \
+  seat-quota.js create-bot-hook.js takeover-local.js bot-chatter.js \
+  
   ensure-local-box.sh install-runtime.sh pack-asar.sh patch-asar.sh patch-asar.js \
   sync-to-tmp.sh
  do
@@ -35,6 +36,10 @@ for f in \
 done
 mkdir -p "$RT/splash"
 [ -d "$ROOT/splash" ] && cp -R "$ROOT/splash/." "$RT/splash/"
+if [ -d "$ROOT/host/agent-isolation" ]; then
+  mkdir -p "$RT/host"
+  rsync -a --exclude 'host-main.cjs' "$ROOT/host/" "$RT/host/"
+fi
 
 # Starter files only — never ship this machine's profiles or secrets.
 cat > "$RT/profiles.starter.json" <<'JSON'

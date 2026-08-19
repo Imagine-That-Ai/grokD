@@ -64,11 +64,46 @@ function ensureLocalSecretBackup() {
   }
 }
 
-function applyLocal(profile) {
+function applyContinueModel(dir) {
+  let live = {};
+  try { live = JSON.parse(fs.readFileSync(path.join(store.ROOT, "model-config.json"), "utf8")); }
+  catch { live = {}; }
+  const saved = path.join(dir, "model-config.json");
+  let local = {};
+  try { if (fs.existsSync(saved)) local = JSON.parse(fs.readFileSync(saved, "utf8")); } catch {}
+  const next = {
+    proxyTarget: "cliproxy",
+    apiKey: "local-cliproxy",
+    model: live.model || local.model || "grok-4.6",
+    cursorAccount: local.cursorAccount || live.cursorAccount || "Primary Cursor Account",
+  };
+  const text = JSON.stringify(next, null, 2) + "\n";
+  try { fs.writeFileSync(path.join(store.ROOT, "model-config.json"), text); } catch {}
+  if (!isolatedRoot()) {
+    try { require("./model-lib").writeConfig(next); } catch {}
+  }
+}
+
+function applyLocal(profile, opts) {
+  opts = opts || {};
+  const takeover = !!opts.takeover;
   const dir = store.profileDataDir(profile.id);
   const persist = path.join(dir, "persistence");
   const agents = path.join(dir, "box-data", "agents");
-  if (fs.existsSync(persist) && fs.readdirSync(persist).length) {
+
+  // Drop the previous Cursor VM or leftover gateway. Otherwise the official
+  // app keeps that computer and the sidebar never becomes the local box.
+  box.clearCursorHost(SEAT4);
+
+  const sand = path.join(dir, "sand-data");
+  if (fs.existsSync(sand)) {
+    copyFile(path.join(sand, "local-exec-daemon-credential.json"), path.join(SEAT4, "sand-data", "local-exec-daemon-credential.json"));
+    copyFile(path.join(sand, "settings.json"), path.join(SEAT4, "sand-data", "settings.json"));
+  }
+  box.installLocalCredential(SEAT4, [dir, path.join(store.ROOT, "profile-data", "local-d")]);
+  box.writeLocalHost(SEAT4);
+
+  if (!takeover && fs.existsSync(persist) && fs.readdirSync(persist).length) {
     copyTree(persist, path.join(SEAT4, "sand-client-persistence"));
   }
   if (fs.existsSync(agents) && fs.readdirSync(agents).length) {
@@ -78,13 +113,10 @@ function applyLocal(profile) {
   if (fs.existsSync(sec)) copyFile(sec, path.join(SEAT4, "sand-secrets.json"));
   else if (fs.existsSync(path.join(LOCAL_SECRETS_BAK, "sand-secrets.json"))) {
     copyFile(path.join(LOCAL_SECRETS_BAK, "sand-secrets.json"), path.join(SEAT4, "sand-secrets.json"));
-    copyFile(path.join(LOCAL_SECRETS_BAK, "gateway-descriptor.json"), path.join(SEAT4, "gateway-descriptor.json"));
   }
-  const gd = path.join(dir, "secrets", "gateway-descriptor.json");
-  if (fs.existsSync(gd)) copyFile(gd, path.join(SEAT4, "gateway-descriptor.json"));
-  box.writeLocalHost(SEAT4);
-  applyModel(dir);
   store.writeActiveEnv(profile);
+  if (takeover) applyContinueModel(dir);
+  else applyModel(dir);
 }
 
 function applyCursor(profile) {
@@ -231,6 +263,7 @@ function markOrbActive(profile) {
 }
 
 function fulfillDesiredBots(profile) {
+  if (isolatedRoot()) return;
   const want = Number(profile.desiredBots);
   if (!Number.isFinite(want) || want < 1 || want > 20) return;
   try {
@@ -255,7 +288,12 @@ function fulfillDesiredBots(profile) {
   }
 }
 
+function isolatedRoot() {
+  return store.ROOT !== path.join(os.homedir(), ".grok", "grokbot-d");
+}
+
 function ensureLocalBox() {
+  if (isolatedRoot()) return;
   const sh = path.join(store.ROOT, "ensure-local-box.sh");
   const fallback = "/tmp/grokbot-hack/ensure-local-box.sh";
   const script = fs.existsSync(sh) ? sh : fallback;
@@ -277,30 +315,50 @@ function resolveId(id) {
   return ALIASES[id] || id;
 }
 
-function switchTo(id, { relaunch = true } = {}) {
+function switchTo(id, opts) {
+  opts = opts || {};
+  const relaunch = opts.relaunch !== false;
   const next = store.get(resolveId(id));
   if (!next) throw new Error(`unknown profile ${id}`);
   const prev = store.getActive();
-  if (prev && prev.id === next.id) {
+  const takeover = !!(opts.takeover && prev && prev.kind === "cursor" && next.kind === "local");
+  if (prev && prev.id === next.id && !takeover) {
     store.writeActiveEnv(next);
     markOrbActive(next);
     return { ok: true, from: next.id, to: next.id, kind: next.kind, noop: true };
   }
   ensureLocalSecretBackup();
-  if (prev) snapshot(prev);
+  if (prev && prev.id !== next.id) snapshot(prev);
   if (next.kind === "local") {
-    applyLocal(next);
+    applyLocal(next, { takeover });
     ensureLocalBox();
-    fulfillDesiredBots(next);
+    if (takeover) {
+      try {
+        require("./takeover-local").seed({
+          from: prev && prev.id,
+          fromName: prev && prev.name,
+        });
+      } catch (e) {
+        console.error("takeover:", e.message);
+      }
+    } else {
+      fulfillDesiredBots(next);
+    }
   } else {
     applyCursor(next);
   }
   store.setActive(next.id);
   markOrbActive(next);
   noteSwitch(prev && prev.id, next.id, next.kind);
+  try {
+    const p = path.join(store.ROOT, "runtime", "last-switch.json");
+    const j = JSON.parse(fs.readFileSync(p, "utf8"));
+    j.takeover = takeover;
+    fs.writeFileSync(p, JSON.stringify(j) + "\n");
+  } catch {}
   try { require("./repair-active-box").repair(); } catch {}
   if (relaunch) relaunchD();
-  return { ok: true, from: prev && prev.id, to: next.id, kind: next.kind };
+  return { ok: true, from: prev && prev.id, to: next.id, kind: next.kind, takeover };
 }
 
 function parseArgs(argv) {
@@ -309,6 +367,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === "--no-relaunch") out.flags.relaunch = false;
     else if (a === "--relaunch") out.flags.relaunch = true;
+    else if (a === "--takeover" || a === "--continue") out.flags.takeover = true;
     else if (a.startsWith("--") && argv[i + 1] && !argv[i + 1].startsWith("--")) {
       out.flags[a.slice(2)] = argv[++i];
     } else out.rest.push(a);
@@ -343,7 +402,7 @@ if (require.main === module) {
       console.log(JSON.stringify({ ok: true }));
     } else if (cmd === "switch" || cmd === "apply") {
       const id = rest[0] || flags.id;
-      const r = switchTo(id, { relaunch: flags.relaunch !== false });
+      const r = switchTo(id, { relaunch: flags.relaunch !== false, takeover: !!flags.takeover });
       console.log(JSON.stringify(r));
     } else if (cmd === "active") {
       console.log(JSON.stringify(store.getActive()));

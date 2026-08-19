@@ -15,7 +15,7 @@ profiles.json
 # Packed app + extracted asar + scratch
 dist/
 hack/
-host/host-main.cjs
+host/
 proof/
 *.log
 *.tmp
@@ -24,3 +24,8 @@ proof/
 .DS_Store
 node_modules/
 *.lock
+
+# Third-party marks — do not ship
+assets/spacex_xai_logo.svg
+assets/stock_grokbot_icon.png
+assets/ref_a_grokbot_icon.png

@@ -1583,6 +1583,26 @@ const server = http.createServer((req, res) => {
       return res.end(out);
     }
 
+    // Host asks AiService/AvailableModels before StreamUnified. The catch-all
+    // empty-ok used to return 0 bytes, so the box cached "no models" and never
+    // called inference. Advertise the configured local model.
+    if (req.url.includes("AvailableModels")) {
+      const model = String((getModelConfig().model || "grok-4.6"));
+      const modelMsg = Buffer.concat([
+        pbStr(1, model),
+        Buffer.from([0x10, 0x01]), // default_on = true
+      ]);
+      const out = Buffer.concat([
+        pbStr(1, model),
+        Buffer.concat([encodeVarint((2 << 3) | 2), encodeVarint(modelMsg.length), modelMsg]),
+      ]);
+      entry.status = 200; entry.resBytes = out.length; entry.mutated = "SYNTHETIC-available-models";
+      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      console.log(`[${id}] SYNTHETIC AvailableModels -> ${model}`);
+      res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
+      return res.end(out);
+    }
+
     // Sand automation persistence: the host re-creates routines forever if
     // Create echoes no workflow and List returns empty. Store them and answer
     // with real payloads.

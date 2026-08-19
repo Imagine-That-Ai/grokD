@@ -59,6 +59,36 @@ function writeLocalHost(seat4) {
   }));
 }
 
+function credentialPath(root) {
+  return path.join(root, "sand-data", "local-exec-daemon-credential.json");
+}
+
+function findLocalCredential(extraRoots) {
+  const roots = Array.isArray(extraRoots) ? extraRoots.slice() : [];
+  const home = require("os").homedir();
+  roots.push(
+    path.join(home, ".grok", "grokbot-d", "profile-data", "local-d"),
+    path.join(home, ".grok", "grokbot-d", "local-d-secrets"),
+  );
+  for (const root of roots) {
+    if (!root) continue;
+    const p = credentialPath(root);
+    if (fs.existsSync(p)) {
+      try {
+        const j = JSON.parse(fs.readFileSync(p, "utf8"));
+        if (j && j.credential) return p;
+      } catch {}
+    }
+  }
+  return null;
+}
+
+function installLocalCredential(seat4, extraRoots) {
+  const src = findLocalCredential(extraRoots);
+  if (!src) return false;
+  return copyFile(src, credentialPath(seat4));
+}
+
 function pickRemoteConnection(roots) {
   for (const root of roots) {
     if (!root) continue;
@@ -180,6 +210,9 @@ module.exports = {
   connectionPath,
   clearCursorHost,
   writeLocalHost,
+  credentialPath,
+  findLocalCredential,
+  installLocalCredential,
   pickRemoteConnection,
   installConnection,
   snapshotHost,
