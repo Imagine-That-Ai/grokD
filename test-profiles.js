@@ -41,6 +41,18 @@ assert(own.kind === "cursor", "sign-in kind");
 assert(!own.identitySource && !own.sourceUserData, "sign-in has no seat path");
 ok("add-cursor-signin");
 
+const fakeA = path.join(tmp, "Grok Bot");
+fs.mkdirSync(fakeA, { recursive: true });
+fs.writeFileSync(path.join(fakeA, "sand-secrets.json"), "{}\n");
+store.SEATS.A = fakeA;
+const imported = store.importDetected("cursor-a");
+assert(imported.id === "cursor-a", imported.id);
+assert(store.importDetected("cursor-a").id === "cursor-a", "idempotent");
+let unknown = false;
+try { store.importDetected("cursor-z"); } catch { unknown = true; }
+assert(unknown, "unknown import fails closed");
+ok("import-detected");
+
 store.setActive("cursor-b");
 assert(store.getActive().id === "cursor-b", "active b");
 const envC = store.writeActiveEnv(store.get("cursor-b"));

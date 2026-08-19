@@ -34,7 +34,7 @@ const ROWS = [
     key: "localClone",
     label: "Locally · Exact Clone",
     sub: "Mirror bot onto Mac",
-    tip: "Local Mirror: Spawns an identical clone of the current agent directly onto this Mac, continuing execution via local or proxied models.",
+    tip: "Local Mirror: Copies the bot onto this Mac when a local store.db exists. Official Cursor cloud bots have no portable disk — then D reconstructs a local agent from the last captured turn and continues on local or proxied models.",
     icon: "clone",
   },
 ];

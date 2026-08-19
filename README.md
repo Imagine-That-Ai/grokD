@@ -18,13 +18,20 @@ Local mode talks to this machine, not to a signed-in cloud box.
 
 Scripts are also copied to `~/.grok/grokbot-d/`. Official from-agent chrome is not exposed on `sendPrompt`; bot-to-bot still uses `[Bot-to-bot from NAME]:` on the wire. `bot-chatter.js` hides that raw text in the transcript: a run of inter-bot turns collapses to one marker (`3 messages with <Bot>`, `Messaged <marks> 3 Bots`) in each bot’s own colour, and clicking it opens their view-only chat. Outbound sends are read back out of the recipients’ `store.db`, since this box only records them there.
 
+The seat cover draws its own sky: `space-field-gl.js` back-traces the holes (up to
+four at once, each with its own disk temperature) and the curtains, while
+`space-kernel.js` decides how many there are, drifts and breathes them, and
+retires one to make room for the next — so no two covers look alike.
+
 Do not kill **Grok Bot B**.
 
 ## Checks
 
 ```bash
-node /tmp/grokbot-hack/test-unit.js     # parsers, work-folder exec — no network
-node /tmp/grokbot-hack/test-robust.js   # live box
+node /tmp/grokbot-hack/test-unit.js         # parsers, work-folder exec — no network
+node /tmp/grokbot-hack/test-robust.js       # live box
+node ~/.grok/grokbot-d/test-bot-chatter.js  # inter-bot markers, no DOM
+node ~/.grok/grokbot-d/test-space-holes.js  # cover sky invariants, no DOM
 ```
 
 `bridge-lib.js` is the shared parser module. `proxy2.js` must require it.

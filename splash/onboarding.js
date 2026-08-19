@@ -90,6 +90,10 @@
             if (!store) return [];
             return store.list().filter((p) => p.kind === "cursor");
           },
+          importSeat(id) {
+            if (store && store.importDetected) return store.importDetected(id).id;
+            return id;
+          },
           cursorStatus() {
             try {
               if (typeof window !== "undefined" && window.desktop && window.desktop.cursorAccount) {
@@ -128,6 +132,7 @@
       snapshotCurrent() { return true; },
       renameProfile() { return null; },
       listedCursor() { return []; },
+      importSeat(id) { return id; },
       cursorStatus() { return Promise.resolve({ kind: "logged-in", authId: "demo" }); },
     };
   }
@@ -522,6 +527,12 @@
     }
 
     function applyCursor(id, meta) {
+      try {
+        if (meta && meta.source === "import" && h.importSeat) id = h.importSeat(id);
+      } catch (e) {
+        note(String(e.message || e), "bad");
+        return;
+      }
       keepAccount({
         id,
         name: (meta && meta.name) || id,

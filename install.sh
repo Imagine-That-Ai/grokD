@@ -66,6 +66,13 @@ esac
 if [ -e "$DEST" ] && [ "$REPLACE" -ne 1 ]; then
   die "dest already exists: $DEST  (pass --replace to overwrite, or pick another --dest)"
 fi
+if pgrep -f "Grok Bot D.app/Contents/MacOS/Grok Bot.real --user-data-dir" >/dev/null 2>&1; then
+  case "$DEST" in
+    "$HOME/Applications/Grok Bot D.app"|/Applications/"Grok Bot D.app")
+      die "Grok Bot D is running. Quit it first, or pass a different --dest."
+      ;;
+  esac
+fi
 
 echo "src    $SRC"
 echo "dest   $DEST"

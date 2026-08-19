@@ -6,6 +6,7 @@ const {
   isIdle, resolveTargets, broadcastOk, distinctiveToken, hayHasMessage,
   agentDbPath, parseJson, waitUntilIdle, waitTranscripts, handleSpecial,
   AGENTS_ROOT, broadcastMessage, createLocalAgent, deleteLocalAgents,
+  offlineFallback, authorizationMatches, resolveUp,
 } = require("./gateway-shim");
 
 let n = 0;
@@ -65,6 +66,25 @@ assert(broadcastMessage({ message: "m", prompt: "p" }) === "m", "msg first");
 assert(broadcastMessage({ prompt: "p" }) === "p", "prompt fallback");
 ok("parse-broadcast");
 
+{
+  const secret = "secret-token-do-not-echo";
+  const out = offlineFallback("sendPrompt", { agentId: uuid, prompt: secret }, new Error("ECONNREFUSED"));
+  if (out.status !== 502) throw new Error(`status ${out.status}`);
+  if (out.json.ok !== false) throw new Error(JSON.stringify(out.json));
+  if (out.json.scheduled != null) throw new Error("scheduled");
+  if (String(out.text).includes(secret)) throw new Error("echoed");
+  const listed = offlineFallback("listAgents", {}, new Error("ECONNREFUSED"));
+  if (listed.status !== 200) throw new Error("list");
+  const bc = offlineFallback("broadcastToAgents", { targets: ["aaa"] }, new Error("ECONNREFUSED"));
+  if (bc.status !== 502 || bc.json.ok !== false) throw new Error("broadcast");
+  if (!authorizationMatches("Bearer fake-gateway-token")) throw new Error("auth ok");
+  if (authorizationMatches("")) throw new Error("empty auth");
+  if (authorizationMatches("Bearer other")) throw new Error("wrong auth");
+  if (resolveUp("http://127.0.0.1:19338") !== "http://127.0.0.1:19338") throw new Error("loopback up");
+  if (resolveUp("http://example.com:80") !== "http://127.0.0.1:1338") throw new Error("reject off-loopback");
+  ok("offline-auth-up");
+}
+
 // create / delete a bot on disk (no host)
 {
   const fs = require("fs");
@@ -76,9 +96,8 @@ ok("parse-broadcast");
   const prof = JSON.parse(fs.readFileSync(path.join(tmp, created.id, "profile.json"), "utf8"));
   assert(prof.name === "Suite Newbie" && prof.origin === "user", JSON.stringify(prof));
   assert(fs.existsSync(path.join(tmp, created.id, "store.db")), "store.db");
-  let threw = false;
-  try { createLocalAgent({ name: "   " }, tmp); } catch { threw = true; }
-  assert(threw, "empty name");
+  const blank = createLocalAgent({ name: "   " }, tmp);
+  assert(blank.name === "New Bot", "empty name defaults");
   const gone = deleteLocalAgents([created.id], tmp);
   assert(gone.deleted === 1, JSON.stringify(gone));
   assert(!fs.existsSync(path.join(tmp, created.id)), "removed");
@@ -234,6 +253,32 @@ ok("parse-broadcast");
     assert(methods.join() === "broadcastToAgents", methods.join());
   }
   ok("handle-broadcast-not-scheduled");
+
+  // sendPrompt while :1338 is down must not claim scheduled and must not INSERT.
+  {
+    const secret = "secret-token-do-not-echo";
+    const out = offlineFallback("sendPrompt", { agentId: uuid, prompt: secret }, new Error("ECONNREFUSED"));
+    assert(out.status === 502, `status ${out.status}`);
+    assert(out.json && out.json.ok === false, JSON.stringify(out.json));
+    assert(out.json.scheduled == null, "must not schedule");
+    assert(!String(out.text).includes(secret), "must not echo prompt");
+    const listed = offlineFallback("listAgents", {}, new Error("ECONNREFUSED"));
+    assert(listed.status === 200, "listAgents disk fallback");
+  }
+  ok("offline-sendPrompt-honest");
+
+  {
+    const bc = offlineFallback("broadcastToAgents", { targets: ["aaa"] }, new Error("ECONNREFUSED"));
+    assert(bc.status === 502, `bc status ${bc.status}`);
+    assert(bc.json && bc.json.ok === false, JSON.stringify(bc.json));
+    assert(bc.json.scheduled == null, "broadcast must not schedule");
+    assert(authorizationMatches("Bearer fake-gateway-token"), "auth ok");
+    assert(!authorizationMatches(""), "empty auth");
+    assert(!authorizationMatches("Bearer other"), "wrong auth");
+    assert(resolveUp("http://127.0.0.1:19338") === "http://127.0.0.1:19338", "loopback up");
+    assert(resolveUp("http://example.com:80") === "http://127.0.0.1:1338", "reject off-loopback");
+  }
+  ok("offline-broadcast-auth-up");
 
   console.log(`\n${n} unit groups passed`);
 })().catch((e) => {

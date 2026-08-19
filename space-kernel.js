@@ -20,8 +20,8 @@ let dust = [];
 let stars = [];
 let galaxy = [];
 let holes = [];
-let auroras = [];
-let auroraWait = 3;
+let nebulas = [];
+let nebulaWait = 3;
 let frameMs = 0;
 let accPrev = null;
 const SUN = { x: -0.62, y: -0.48 };
@@ -106,13 +106,17 @@ function cheapKepler(d) {
   };
 }
 
+// The deck is the hero of the cover; the orbit around the mark carries it, so
+// it is drawn larger than the physics radii would give on their own.
+const ORBIT_ZOOM = 1.32;
+
 function project(x, y, z, pitch, yaw) {
   const cy = y * Math.cos(pitch) - z * Math.sin(pitch);
   const cz = y * Math.sin(pitch) + z * Math.cos(pitch);
   const cx = x * Math.cos(yaw) - cy * Math.sin(yaw);
   const cy2 = x * Math.sin(yaw) + cy * Math.cos(yaw);
   const sc = 1 + cz * 0.00095;
-  return { x: cx * sc, y: cy2 * sc, z: cz, s: sc };
+  return { x: cx * sc * ORBIT_ZOOM, y: cy2 * sc * ORBIT_ZOOM, z: cz, s: sc };
 }
 
 function ringBands() {
@@ -166,19 +170,169 @@ function seedGalaxy() {
   return out;
 }
 
-function seedHoles() {
-  // r is the capture-shadow radius the shader solves for (b_crit), in css px
-  // at a 900px reference. inc near edge-on so the far side of the disk lenses
-  // up over the top. Both sit in opposite corners, clear of the grok mark.
-  return [
-    { u: 0.20, v: 0.22, r: 74, inc: 1.38, pa: -0.34, sense: 1,
-      tilt: 1.18, yaw: -0.35, spin: 0.07, rs: 2.4 },
-    { u: 0.82, v: 0.77, r: 44, inc: 1.30, pa: 0.61, sense: -1,
-      tilt: 0.98, yaw: 0.55, spin: -0.05, rs: 1.7 },
-  ];
+// r is the capture-shadow radius the shader solves for (b_crit), in css px at a
+// 900px reference. inc near edge-on so the far side of the disk lenses up over
+// the top. Nothing here is fixed: the sky carries between HOLE_MIN and HOLE_MAX
+// holes, each drifting, breathing and eventually giving its slot to a new one.
+const HOLE_MIN = 2;
+const HOLE_MAX = 4;              // must match MAXH in space-field-gl.js
+const HOLE_BUDGET = 196;         // total shadow radius; the march cost is area
+const HOLE_CLEAR = { u0: 0.28, u1: 0.72, v0: 0.30, v1: 0.70 }; // the mark's box
+let holeWait = 0;
+
+// Two incommensurate sines per axis: the pattern never lands on itself twice.
+function wobble(base, w1, p1, a1, w2, p2, a2, t) {
+  return base + Math.sin(t * w1 + p1) * a1 + Math.sin(t * w2 + p2) * a2;
 }
 
-// Union of everything the curtains must not cross: the mark and the wordmark.
+function clearOfMark(u, v) {
+  return u < HOLE_CLEAR.u0 || u > HOLE_CLEAR.u1 || v < HOLE_CLEAR.v0 || v > HOLE_CLEAR.v1;
+}
+
+// The shader marches a neighbourhood around each hole and keeps the first one
+// a pixel falls into, so a disk that reaches inside a neighbour's march circle
+// gets cut off along it. MARCH_R and DISK_R are that geometry in units of the
+// shadow radius (RMARCH / BCRIT and ROUT / BCRIT in space-field-gl.js).
+const MARCH_R = 3.85;
+const DISK_R = 2.25;
+
+// The cover is measured in css px; hole radii are quoted against a 900px sky,
+// so placement has to compare the two in the same units.
+function refSize() {
+  const w = (far && far._w) || 1200;
+  const h = (far && far._h) || 900;
+  const scale = Math.min(w, h) / 900;
+  return { w: w / scale, h: h / scale };
+}
+
+function makeHole(existing) {
+  const rand = Math.random;
+  const others = existing || [];
+  const spent = others.reduce((sum, x) => sum + x.r, 0);
+  const room = HOLE_BUDGET - spent;
+  if (room < 24) return null;
+  const ref = refSize();
+  const r = Math.max(20, Math.min(room, 24 + rand() * 58));
+  let u = -1;
+  let v = -1;
+  for (let tries = 0; tries < 40; tries++) {
+    const tu = 0.05 + rand() * 0.90;
+    const tv = 0.06 + rand() * 0.88;
+    if (!clearOfMark(tu, tv)) continue;
+    const clash = others.some((x) => {
+      const du = (x.u - tu) * ref.w;
+      const dv = (x.v - tv) * ref.h;
+      const need = Math.max(x.r * MARCH_R + r * DISK_R, r * MARCH_R + x.r * DISK_R) * 1.05;
+      return Math.sqrt(du * du + dv * dv) < need;
+    });
+    if (!clash) { u = tu; v = tv; break; }
+  }
+  if (u < 0) return null; // no room left in this sky, stay at the current count
+  return {
+    u0: u, v0: v, r0: r,
+    u, v, r,
+    // most disks read gold; a hot blue-white one is the exception, so skew low
+    temp: Math.pow(rand(), 1.7),
+    gain: 0.78 + rand() * 0.5,
+    inc: 1.04 + rand() * 0.42,
+    pa: rand() * Math.PI * 2,
+    sense: rand() < 0.5 ? 1 : -1,
+    spin: (0.003 + rand() * 0.009) * (rand() < 0.5 ? 1 : -1),
+    rs: 1.5 + rand() * 1.1,
+    drift: {
+      w1: 0.011 + rand() * 0.026, p1: rand() * 6.28, a1: 0.018 + rand() * 0.05,
+      w2: 0.007 + rand() * 0.017, p2: rand() * 6.28, a2: 0.010 + rand() * 0.030,
+      w3: 0.013 + rand() * 0.023, p3: rand() * 6.28, a3: 0.014 + rand() * 0.042,
+      w4: 0.006 + rand() * 0.015, p4: rand() * 6.28, a4: 0.008 + rand() * 0.024,
+    },
+    breathe: {
+      w1: 0.022 + rand() * 0.055, p1: rand() * 6.28, a1: 0.10 + rand() * 0.20,
+      w2: 0.009 + rand() * 0.031, p2: rand() * 6.28, a2: 0.05 + rand() * 0.11,
+    },
+    life: 0,
+    grow: 5 + rand() * 6,
+    max: 48 + rand() * 90,
+    sink: 7 + rand() * 8,
+    fade: 0,
+  };
+}
+
+function seedHoles() {
+  const out = [];
+  const n = HOLE_MIN + Math.floor(Math.random() * (HOLE_MAX - HOLE_MIN + 1));
+  for (let i = 0; i < n; i++) {
+    const hole = makeHole(out);
+    if (hole) out.push(hole);
+  }
+  // the opening frame should already be a sky, not a fade-in
+  out.forEach((hole) => { hole.life = hole.grow; hole.fade = 1; });
+  holeWait = 16 + Math.random() * 20;
+  return out;
+}
+
+// Position and radius are recomputed from the seed each frame, so drift never
+// accumulates and a paused cover resumes exactly where the clock says it is.
+function tickHoles(list, dt, t) {
+  for (let i = list.length - 1; i >= 0; i--) {
+    const hole = list[i];
+    hole.life += dt;
+    if (hole.life > hole.max + hole.sink) { list.splice(i, 1); continue; }
+    hole.fade = hole.life < hole.grow
+      ? hole.life / hole.grow
+      : (hole.life > hole.max ? Math.max(0, 1 - (hole.life - hole.max) / hole.sink) : 1);
+    const d = hole.drift;
+    let u = wobble(hole.u0, d.w1, d.p1, d.a1, d.w2, d.p2, d.a2, t);
+    let v = wobble(hole.v0, d.w3, d.p3, d.a3, d.w4, d.p4, d.a4, t);
+    if (!clearOfMark(u, v)) {
+      // push back out the way it came rather than letting it cross the mark
+      const du = u - 0.5;
+      const dv = v - 0.5;
+      const scale = Math.max(Math.abs(du) / 0.22, Math.abs(dv) / 0.20, 1e-3);
+      u = 0.5 + du / scale;
+      v = 0.5 + dv / scale;
+    }
+    hole.u = Math.max(0.02, Math.min(0.98, u));
+    hole.v = Math.max(0.04, Math.min(0.96, v));
+    const b = hole.breathe;
+    const swell = 1 + Math.sin(t * b.w1 + b.p1) * b.a1 + Math.sin(t * b.w2 + b.p2) * b.a2;
+    hole.r = Math.max(6, hole.r0 * swell);
+  }
+  // drift is slow but two neighbours can still close on each other; the younger
+  // one gives way rather than letting a disk get sliced along a march circle
+  const ref = refSize();
+  for (let i = 1; i < list.length; i++) {
+    for (let j = 0; j < i; j++) {
+      const a = list[j];
+      const b = list[i];
+      const du = (a.u - b.u) * ref.w;
+      const dv = (a.v - b.v) * ref.h;
+      const d = Math.sqrt(du * du + dv * dv) || 1e-3;
+      const need = Math.max(a.r * MARCH_R + b.r * DISK_R, b.r * MARCH_R + a.r * DISK_R);
+      if (d >= need) continue;
+      const push = (need - d) / ref.w;
+      b.u = Math.max(0.02, Math.min(0.98, b.u - (du / d) * push));
+      b.v = Math.max(0.04, Math.min(0.96, b.v - (dv / d) * push * (ref.w / ref.h)));
+      b.u0 = b.u;
+      b.v0 = b.v;
+    }
+  }
+  holeWait -= dt;
+  if (holeWait <= 0) {
+    holeWait = 15 + Math.random() * 26;
+    if (list.length < HOLE_MAX) {
+      const born = makeHole(list);
+      if (born) list.push(born);
+    }
+  }
+  for (let guard = 0; list.length < HOLE_MIN && guard < 8; guard++) {
+    const born = makeHole(list);
+    if (!born) break;
+    list.push(born);
+  }
+  return list;
+}
+
+// Union of everything a cloud core must not cross: the mark and the wordmark.
 function markSpan() {
   if (!wrap) return null;
   const wb = wrap.getBoundingClientRect();
@@ -196,33 +350,38 @@ function markSpan() {
   return x0 < x1 ? { x0: x0 - 46, x1: x1 + 46 } : null;
 }
 
-function makeAurora(w, h, t) {
-  const rand = rng((t * 997 + w * 13 + auroras.length * 71) | 0);
-  // short and local, but a 70px curtain is a speck on a 2000px cover: let it
-  // grow with the sky and stop well before it could read as page-length
-  const k = Math.max(1, Math.min(1.7, Math.min(w, h) / 900));
-  const len = (70 + rand() * 90) * k;
-  const wid = (30 + rand() * 26) * k;
+function makeNebula(w, h, t) {
+  const rand = rng((t * 997 + w * 13 + nebulas.length * 71) | 0);
+  // a nebula is a big soft cloud; it is sized against the sky, not the copy
+  const k = Math.max(1, Math.min(1.9, Math.min(w, h) / 900));
+  const r = (150 + rand() * 210) * k;
+  const aspect = 0.62 + rand() * 0.9;
   const left = rand() < 0.5;
-  let x0 = left ? w * (0.07 + rand() * 0.15) : w * (0.78 + rand() * 0.15);
+  let cx = left ? w * (0.04 + rand() * 0.26) : w * (0.70 + rand() * 0.26);
 
-  // push clear of the mark + wordmark rather than drawing across them
+  // the copy stays readable: keep the cloud's core off the mark and wordmark
   const span = markSpan();
   if (span) {
-    const half = wid * 1.4;
-    if (x0 + half > span.x0 && x0 - half < span.x1) {
-      x0 = left ? Math.max(w * 0.05, span.x0 - half - 24)
-                : Math.min(w * 0.95, span.x1 + half + 24);
+    const half = r * 0.75;
+    if (cx + half > span.x0 && cx - half < span.x1) {
+      cx = left ? Math.max(w * 0.03, span.x0 - half - 30)
+                : Math.min(w * 0.97, span.x1 + half + 30);
     }
   }
 
-  // foot sits mid-sky; the curtain rises from there toward the top edge
-  const y0 = h * (0.20 + rand() * 0.16) + len;
+  // energy drives the churn and how hot the core burns; hue slides Ha crimson
+  // through to a blue reflection cloud
+  const energy = Math.pow(rand(), 1.3);
   return {
-    x0, y0, len, wid,
+    cx,
+    cy: h * (0.12 + rand() * 0.62),
+    r,
+    aspect,
     seed: rand() * 12.57,
+    hue: Math.pow(rand(), 1.25),
+    energy,
     life: 0,
-    max: 6.5 + rand() * 6.0,
+    max: 26 + rand() * 34,
   };
 }
 
@@ -392,25 +551,33 @@ function lensXY(x, y, w, h, cx, cy) {
   return { x, y };
 }
 
+// Same temperature ramp as the shader, coarse: gold disk cool, blue-white hot.
+function diskRgb(temp, hot) {
+  const k = Math.max(0, Math.min(1, temp == null ? 0.2 : temp));
+  const r = Math.round((hot ? 255 : 255) - k * (hot ? 40 : 70));
+  const g = Math.round((hot ? 210 : 110) + k * (hot ? 20 : 60));
+  const b = Math.round((hot ? 140 : 40) + k * (hot ? 110 : 175));
+  return r + "," + g + "," + b;
+}
+
 function drawHoles(ctx, w, h, t) {
   for (let i = 0; i < holes.length; i++) {
     const hole = holes[i];
-    const hx = hole.u * w;
-    const hy = hole.v * h;
-    const rs = hole.r;
+    const rs = hole.r * (hole.fade == null ? 1 : hole.fade);
+    if (rs < 2) continue;
     ctx.save();
-    ctx.translate(hx, hy);
-    ctx.rotate((hole.yaw + t * hole.spin) * 0.12);
+    ctx.translate(hole.u * w, hole.v * h);
+    ctx.rotate((hole.pa + t * hole.spin) * 0.12);
     const disk = ctx.createRadialGradient(-rs * 0.35, 0, rs * 0.2, 0, 0, rs * 4.4);
-    disk.addColorStop(0, "rgba(255,210,140,0.22)");
-    disk.addColorStop(0.28, "rgba(255,110,40,0.12)");
+    disk.addColorStop(0, "rgba(" + diskRgb(hole.temp, true) + ",0.22)");
+    disk.addColorStop(0.28, "rgba(" + diskRgb(hole.temp, false) + ",0.12)");
     disk.addColorStop(0.55, "rgba(40,8,6,0.05)");
     disk.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = disk;
     ctx.beginPath();
     ctx.ellipse(0, 0, rs * 4.2, rs * 1.55, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,226,170,0.85)";
+    ctx.strokeStyle = "rgba(" + diskRgb(hole.temp, true) + ",0.85)";
     ctx.lineWidth = Math.max(1.4, rs * 0.045);
     ctx.beginPath();
     ctx.arc(0, 0, rs * 1.32, 0, Math.PI * 2);
@@ -423,33 +590,33 @@ function drawHoles(ctx, w, h, t) {
   }
 }
 
-// Fallback curtain for the no-WebGL path: same short sheet, same altitude
-// colours, drawn as a few vertical field-aligned rays.
-function drawAuroras(ctx, w, h, t) {
+// Fallback for the no-WebGL path: soft radial clouds, faded to nothing at
+// every edge. No noise here, so it reads as haze rather than structure.
+function drawNebulas(ctx, w, h, t) {
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  for (let i = 0; i < auroras.length; i++) {
-    const a = auroras[i];
-    const fade = Math.sin((a.life / a.max) * Math.PI);
+  for (let i = 0; i < nebulas.length; i++) {
+    const n = nebulas[i];
+    const fade = Math.sin((n.life / n.max) * Math.PI);
     if (fade <= 0.02) continue;
-    const rays = 9;
-    for (let r = 0; r < rays; r++) {
-      const u = r / (rays - 1) - 0.5;
-      const x = a.x0 + u * a.wid * 1.6
-        + Math.sin(t * 0.4 + a.seed + u * 3.1) * a.wid * 0.22;
-      const top = a.y0 - a.len;
-      const g = ctx.createLinearGradient(0, a.y0, 0, top);
-      const k = fade * (0.30 - 0.16 * Math.abs(u * 2));
-      g.addColorStop(0.00, "rgba(117,41,184," + (k * 0.8).toFixed(3) + ")");
-      g.addColorStop(0.30, "rgba(26,235,117," + k.toFixed(3) + ")");
-      g.addColorStop(0.72, "rgba(219,46,64," + (k * 0.5).toFixed(3) + ")");
-      g.addColorStop(1.00, "rgba(219,46,64,0)");
-      ctx.strokeStyle = g;
-      ctx.lineWidth = a.wid * 0.16;
+    const hue = n.hue == null ? 0.3 : n.hue;
+    const core = "rgba(" + Math.round(200 - hue * 140) + "," + Math.round(60 + hue * 90) + "," +
+      Math.round(80 + hue * 150) + ",";
+    for (let lobe = 0; lobe < 3; lobe++) {
+      const ph = t * 0.05 + n.seed + lobe * 2.1;
+      const rx = n.r * (0.55 + lobe * 0.22) * (1 + Math.sin(ph) * 0.08);
+      const ry = rx * n.aspect;
+      const ox = Math.cos(ph * 0.7) * n.r * 0.16;
+      const oy = Math.sin(ph * 0.9) * n.r * 0.12;
+      const g = ctx.createRadialGradient(n.cx + ox, n.cy + oy, 0, n.cx + ox, n.cy + oy, rx);
+      const a = fade * (0.09 - lobe * 0.022) * (0.6 + 0.7 * (n.energy || 0.4));
+      g.addColorStop(0, core + a.toFixed(3) + ")");
+      g.addColorStop(0.45, "rgba(60,120,150," + (a * 0.5).toFixed(3) + ")");
+      g.addColorStop(1, "rgba(20,10,40,0)");
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.moveTo(x, a.y0);
-      ctx.lineTo(x + Math.sin(t * 0.3 + a.seed) * a.wid * 0.3, top);
-      ctx.stroke();
+      ctx.ellipse(n.cx + ox, n.cy + oy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
   ctx.restore();
@@ -466,7 +633,7 @@ function drawField(ctx, w, h, t, cx, cy) {
   }
 
   drawHoles(ctx, w, h, t);
-  drawAuroras(ctx, w, h, t);
+  drawNebulas(ctx, w, h, t);
 
   for (let i = 0; i < stars.length; i++) {
     const s = stars[i];
@@ -551,9 +718,9 @@ function drawDust(ctx, cx, cy, pitch, yaw, front) {
   ctx.restore();
 }
 
-function ensureSprites(pack) {
+function ensureSprites() {
   if (!layer) return;
-  if (layer.childElementCount === pack.length) return;
+  if (layer.childElementCount === sats.length && sats.every((s) => s.el && s.el.isConnected)) return;
   layer.innerHTML = "";
   sats.forEach((s) => {
     const el = document.createElement("div");
@@ -571,7 +738,7 @@ function placeSats(cx, cy, pitch, yaw) {
     if (!s.el) continue;
     const p = project(s.x, s.y, s.z, pitch, yaw);
     const front = p.z >= 0;
-    const size = (16 + 6 * Math.max(0.7, p.s)) * (s.item.scale || 1);
+    const size = (22 + 8 * Math.max(0.7, p.s)) * (s.item.scale || 1);
     s.el.style.transform =
       "translate(" + (cx + p.x - size / 2).toFixed(2) + "px," +
       (cy + p.y - size / 2).toFixed(2) + "px) rotate(" +
@@ -592,15 +759,15 @@ function tickDust(dt) {
   for (let i = 0; i < dust.length; i++) dust[i].M = wrapPi(dust[i].M + dust[i].n * dt);
 }
 
-function tickAuroras(dt, w, h, t) {
-  for (let i = auroras.length - 1; i >= 0; i--) {
-    auroras[i].life += dt;
-    if (auroras[i].life > auroras[i].max) auroras.splice(i, 1);
+function tickNebulas(dt, w, h, t) {
+  for (let i = nebulas.length - 1; i >= 0; i--) {
+    nebulas[i].life += dt;
+    if (nebulas[i].life > nebulas[i].max) nebulas.splice(i, 1);
   }
-  auroraWait -= dt;
-  if (auroraWait <= 0 && auroras.length < 3) {
-    auroras.push(makeAurora(w, h, t + auroras.length));
-    auroraWait = (auroras.length >= 2 ? 9 : 4) + Math.random() * 8;
+  nebulaWait -= dt;
+  if (nebulaWait <= 0 && nebulas.length < 4) {
+    nebulas.push(makeNebula(w, h, t + nebulas.length));
+    nebulaWait = (nebulas.length >= 3 ? 7 : 3) + Math.random() * 6;
   }
 }
 
@@ -629,7 +796,8 @@ function frame(now) {
   if (!reduced) {
     stepSats(dt);
     tickDust(dt);
-    tickAuroras(dt, far._w, far._h, t);
+    tickHoles(holes, dt, t);
+    tickNebulas(dt, far._w, far._h, t);
   }
   if (mood.special === "pearl" && c.mark) {
     c.mark.style.setProperty("--fg", pearlHex(t));
@@ -639,7 +807,7 @@ function frame(now) {
   if (glApi) {
     try {
       const field = require(require("os").homedir() + "/.grok/grokbot-d/space-field-gl.js");
-      field.frame(glApi, t, holes, auroras);
+      field.frame(glApi, t, holes, nebulas);
       if (!reduced && dt > 0) {
         frameMs = frameMs ? frameMs * 0.9 + dt * 100 : dt * 1000;
         field.retune(glApi, frameMs);
@@ -714,6 +882,7 @@ function start(pack) {
   reduced = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   if (running && document.getElementById("gd-kernel") && sats.length) {
     ensureDom();
+    ensureSprites();
     return;
   }
   const leftover = document.getElementById("gd-orbit");
@@ -728,16 +897,16 @@ function start(pack) {
   holes = seedHoles();
   dust = seedDust();
   sats = seedSats(pack || []);
-  auroras = [];
-  auroraWait = 1.2;
+  nebulas = [];
+  nebulaWait = 1.2;
   frameMs = 0;
   if (reduced && far) {
-    // one composed frame: two curtains held at full brightness
-    auroras = [makeAurora(far._w, far._h, 3), makeAurora(far._w, far._h, 41)];
-    auroras.forEach((a) => { a.life = a.max * 0.5; });
+    // one composed frame: two clouds held at full brightness
+    nebulas = [makeNebula(far._w, far._h, 3), makeNebula(far._w, far._h, 41)];
+    nebulas.forEach((n) => { n.life = n.max * 0.5; });
   }
   accPrev = null;
-  ensureSprites(pack || []);
+  ensureSprites();
   t0 = performance.now();
   last = 0;
   running = true;
@@ -762,7 +931,7 @@ function stop() {
   stars = [];
   galaxy = [];
   holes = [];
-  auroras = [];
+  nebulas = [];
   accPrev = null;
 }
 
@@ -770,4 +939,8 @@ function isRunning() {
   return running;
 }
 
-module.exports = { start, stop, isRunning, setMood };
+module.exports = {
+  start, stop, isRunning, setMood,
+  seedHoles, makeHole, tickHoles, clearOfMark, refSize, makeNebula, tickNebulas,
+  HOLE_MIN, HOLE_MAX, MARCH_R, DISK_R,
+};

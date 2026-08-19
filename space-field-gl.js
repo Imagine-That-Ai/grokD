@@ -9,9 +9,15 @@
 // carries ISCO truncation, Keplerian shear, gravitational redshift and
 // relativistic Doppler beaming.
 //
-// Auroras are short local curtains: a folded sheet seen edge-on, vertical
-// field-aligned rays, crisp lower border, and altitude colour (N2 purple foot,
-// 557.7 green body, 630.0 red top).
+// Nebulae are emission clouds, not curtains: low-frequency fbm sets the shape,
+// a domain warp churns it, high-frequency noise erodes it into wisps, and a
+// radial envelope takes the density to zero long before the sample bound — so
+// there is no edge to see. Colour is line emission (Ha crimson, [OIII] teal)
+// against a blue reflection component, with dust eating the light in lanes.
+//
+// Hole count is dynamic (up to MAXH), and each hole carries a disk temperature:
+// the ramp runs from a cool ~gold disk to a hot blue-white one, which is the
+// real spread between a fat cool disk and a hard X-ray binary.
 "use strict";
 
 const VERT = `
@@ -28,20 +34,20 @@ uniform vec2 uRes;
 uniform float uTime;
 uniform float uSteps;
 
-// xy = centre px, z = shadow radius px (b_crit), w = spin sense
-uniform vec4 uH0;
-uniform vec4 uH1;
-// x = disk inclination, y = position angle
-uniform vec2 uO0;
-uniform vec2 uO1;
+#define MAXH 4
+#define MAXN 4
 
-uniform vec4 uA0;
-uniform vec4 uA1;
-uniform vec4 uA2;
-uniform vec2 uAL0;
-uniform vec2 uAL1;
-uniform vec2 uAL2;
-uniform float uAN;
+// xy = centre px, z = shadow radius px (b_crit), w = spin sense
+uniform vec4 uH[MAXH];
+// x = disk inclination, y = position angle, z = temperature, w = disk gain
+uniform vec4 uO[MAXH];
+uniform float uHN;
+
+// xy = centre px, z = fade, w = seed
+uniform vec4 uN[MAXN];
+// x = radius px, y = aspect, z = hue mix, w = energy
+uniform vec4 uNL[MAXN];
+uniform float uNN;
 
 const float BCRIT = 5.19615242;   // 3*sqrt(3) M
 const float RH    = 2.0;          // horizon
@@ -109,8 +115,11 @@ vec2 weakLens(vec2 p, vec4 H) {
 }
 
 vec3 background(vec2 p) {
-  vec2 q = weakLens(p, uH0);
-  q = weakLens(q, uH1);
+  vec2 q = p;
+  for (int i = 0; i < MAXH; i++) {
+    if (float(i) >= uHN) break;
+    q = weakLens(q, uH[i]);
+  }
   vec3 col = vec3(0.021, 0.021, 0.034);
   col += starField(q);
   return col;
@@ -118,7 +127,19 @@ vec3 background(vec2 p) {
 
 // ------------------------------------------------------------------ the disk
 
-vec3 diskEmit(vec3 x, vec3 vel, vec3 n, vec3 e1, vec3 e2, float rd, float spin) {
+// Temperature slides the whole ramp: a cool disk never reaches its blue-white
+// stop, a hot one is past gold before beaming even helps.
+vec3 diskColour(float g, float temp) {
+  float x = g * (0.76 + 0.74 * temp);
+  vec3 col = mix(vec3(0.34, 0.026, 0.005), vec3(0.16, 0.05, 0.20), temp);
+  col = mix(col, mix(vec3(1.0, 0.30, 0.05), vec3(0.96, 0.44, 0.30), temp), smoothstep(0.34, 0.72, x));
+  col = mix(col, mix(vec3(1.0, 0.64, 0.19), vec3(0.86, 0.80, 0.62), temp), smoothstep(0.72, 1.08, x));
+  col = mix(col, mix(vec3(1.0, 0.91, 0.72), vec3(0.80, 0.90, 1.0), temp), smoothstep(1.02, 1.38, x));
+  col = mix(col, mix(vec3(0.88, 0.94, 1.0), vec3(0.66, 0.82, 1.0), temp), smoothstep(1.75, 2.50, x));
+  return col;
+}
+
+vec3 diskEmit(vec3 x, vec3 vel, vec3 n, vec3 e1, vec3 e2, float rd, float spin, float temp) {
   vec3 rhat = x / rd;
   vec3 vdir = normalize(cross(n, rhat)) * (spin >= 0.0 ? 1.0 : -1.0);
 
@@ -147,19 +168,12 @@ vec3 diskEmit(vec3 x, vec3 vel, vec3 n, vec3 e1, vec3 e2, float rd, float spin) 
   // beaming: specific intensity picks up g^3, emitted spectrum adds the rest
   float boost = pow(clamp(g, 0.04, 3.2), 4.0);
 
-  // gold through the body, white only where beaming actually wins
-  vec3 col = vec3(0.30, 0.028, 0.006);
-  col = mix(col, vec3(1.0, 0.34, 0.05), smoothstep(0.34, 0.72, g));
-  col = mix(col, vec3(1.0, 0.68, 0.22), smoothstep(0.72, 1.08, g));
-  col = mix(col, vec3(1.0, 0.93, 0.74), smoothstep(1.02, 1.38, g));
-  col = mix(col, vec3(0.86, 0.94, 1.0), smoothstep(1.75, 2.5, g));
-
-  return col * emis * boost * 2.6;
+  return diskColour(g, temp) * emis * boost * 2.6;
 }
 
 // ------------------------------------------------------------------ the hole
 
-vec3 renderHole(vec2 frag, vec4 H, vec2 O, float t) {
+vec3 renderHole(vec2 frag, vec4 H, vec4 O, float t) {
   float mpx = H.z / BCRIT;
   vec2 q = (frag - H.xy) / mpx;
 
@@ -200,7 +214,7 @@ vec3 renderHole(vec2 frag, vec4 H, vec2 O, float t) {
       vec3 xp = mix(pos, npos, clamp(f, 0.0, 1.0));
       float rd = length(xp);
       if (rd > RISCO && rd < ROUT) {
-        accum += diskEmit(xp, nvel, n, e1, e2, rd, H.w);
+        accum += diskEmit(xp, nvel, n, e1, e2, rd, H.w, O.z) * O.w;
       }
     }
     prevSide = side;
@@ -240,55 +254,59 @@ vec3 renderHole(vec2 frag, vec4 H, vec2 O, float t) {
   // reading as a drawn circle.
   float b = length(q);
   float ring = exp(-pow((b - BCRIT) / 0.055, 2.0));
-  vec3 ringCol = accum * 2.2 + vec3(1.0, 0.86, 0.62) * 0.045;
+  vec3 ringCol = accum * 2.2 + diskColour(1.15, O.z) * 0.05;
   col += ringCol * ring * (1.0 - captured);
 
   return col;
 }
 
-// ---------------------------------------------------------------- the aurora
+// ---------------------------------------------------------------- the nebula
 
-vec3 curtain(vec2 frag, vec4 A, vec2 L, float t) {
-  if (A.z <= 0.002 || L.x < 4.0) return vec3(0.0);
-  vec2 d = frag - A.xy;
-  float v = d.y / L.x;
-  if (v < -0.10 || v > 1.26) return vec3(0.0);
+vec3 nebula(vec2 frag, vec4 N, vec4 L, float t) {
+  if (N.z <= 0.002 || L.x < 4.0) return vec3(0.0);
+  vec2 d = (frag - N.xy) / vec2(L.x, max(L.x * L.y, 1.0));
+  float r2 = dot(d, d);
+  if (r2 > 2.9) return vec3(0.0);   // density is already nil this far out
+  float r = sqrt(r2);
 
-  float seed = A.w;
-  // a gentle drape, not a comma-shaped stroke
-  float sway = sin(v * 1.25 + t * 0.26 + seed) * L.y * 0.26
-             + sin(v * 3.1 - t * 0.17 + seed * 2.3) * L.y * 0.09;
-  float x = d.x - sway;
-  if (abs(x) > L.y * 2.4) return vec3(0.0);
+  float seed = N.w;
+  float energy = L.w;
 
-  // one soft sheet with two brighter folds where it turns edge-on
-  float sheet = exp(-pow(x / (L.y * 1.05), 2.0));
-  for (int k = 0; k < 2; k++) {
-    float fk = float(k) * 2.0 - 1.0;
-    float cx = fk * L.y * 0.52 + sin(t * 0.34 + fk * 1.7 + seed) * L.y * 0.30;
-    sheet += 0.62 * exp(-pow((x - cx) / (L.y * 0.24), 2.0));
-  }
+  // churn in place: warping the sample point beats translating the cloud
+  vec2 p = d * 1.75 + vec2(seed, seed * 0.63);
+  vec2 warp = vec2(
+    fbm(p * 1.25 + vec2(t * 0.021, 0.0)),
+    fbm(p * 1.25 + vec2(5.2, -t * 0.017))
+  ) - 0.5;
+  p += warp * (0.85 + 0.75 * energy);
 
-  // field-aligned rays: fine vertical structure running across the sheet
-  float phase = x * 0.62 + seed * 9.0 + fbm(vec2(x * 0.06, seed)) * 5.0;
-  float rays = 0.44 + 0.56 * pow(abs(sin(phase)), 2.2);
-  rays *= 0.70 + 0.30 * fbm(vec2(x * 0.17, v * 1.6 + t * 0.05));
-  rays = mix(1.0, rays, smoothstep(0.0, 0.35, v));
+  float base = fbm(p * 1.10 + seed);
+  float detail = fbm(p * 3.60 + warp * 2.2 - t * 0.013);
+  float grain = fbm(p * 8.5 + t * 0.02);
 
-  // gaps and thin patches along the arc, so the sheet is not a solid panel
-  sheet *= 0.45 + 0.75 * fbm(vec2(x * 0.028 + t * 0.03, seed * 4.0));
+  // coverage remap, then erosion: wisps instead of a blob
+  float cover = smoothstep(0.38, 0.86, base + 0.20 * detail);
+  cover *= 0.60 + 0.55 * detail;
+  cover -= 0.22 * smoothstep(0.45, 0.95, grain);
 
-  // every ray ends at its own height; the lower border is crisp but not flat
-  float top = 0.62 + 0.46 * fbm(vec2(x * 0.09, seed * 3.0 + 7.0));
-  float foot = 0.012 + 0.045 * fbm(vec2(x * 0.13 + 3.0, seed));
-  float env = smoothstep(foot, foot + 0.05, v) * smoothstep(top * 1.55, top * 0.5, v);
-  float dens = sheet * rays * env * A.z;
+  // the envelope is what guarantees there is no edge anywhere
+  float env = exp(-r2 * 1.55) * (0.45 + 0.55 * fbm(p * 0.55 + 11.0));
+  float dens = max(0.0, cover) * env * N.z;
+  if (dens <= 0.0005) return vec3(0.0);
 
-  vec3 col = vec3(0.46, 0.16, 0.72) * exp(-pow((v - 0.03) / 0.115, 2.0)) * 0.85;
-  col += vec3(0.16, 0.78, 0.44) * exp(-pow((v - 0.33) / 0.27, 2.0));
-  col += vec3(0.86, 0.18, 0.25) * smoothstep(0.46, 1.06, v) * 0.70;
+  // dust lanes take light back out, which is what gives a nebula its structure
+  float dust = smoothstep(0.52, 0.18, fbm(p * 1.9 + 3.3));
+  dens *= 0.35 + 0.65 * dust;
 
-  return col * dens * 0.27;
+  float core = smoothstep(0.55, 0.02, r) * cover;
+  float hue = L.z;
+
+  vec3 col = mix(vec3(0.78, 0.13, 0.24), vec3(0.20, 0.34, 0.86), hue);   // Ha -> reflection
+  col = mix(col, vec3(0.10, 0.74, 0.62), smoothstep(0.25, 0.95, core));  // [OIII] core
+  col += vec3(0.95, 0.52, 0.30) * pow(core, 2.4) * (0.35 + 0.5 * energy);
+  col += vec3(0.35, 0.20, 0.62) * smoothstep(0.75, 1.5, r) * 0.5;        // cool halo
+
+  return col * dens * (0.85 + 0.75 * energy);
 }
 
 // ------------------------------------------------------------------ assemble
@@ -296,29 +314,43 @@ vec3 curtain(vec2 frag, vec4 A, vec2 L, float t) {
 void main() {
   vec2 frag = gl_FragCoord.xy;
 
-  float m0 = uH0.z / BCRIT * RMARCH;
-  float m1 = uH1.z / BCRIT * RMARCH;
-  float d0 = length(frag - uH0.xy);
-  float d1 = length(frag - uH1.xy);
-
-  vec3 col;
-  if (d0 < m0) {
-    col = renderHole(frag, uH0, uO0, uTime);
-  } else if (d1 < m1) {
-    col = renderHole(frag, uH1, uO1, uTime);
-  } else {
-    col = background(frag);
+  // Copy the hole this pixel belongs to out of the array first: the march is
+  // inlined once that way, instead of once per slot.
+  vec4 H = vec4(0.0);
+  vec4 O = vec4(0.0);
+  float inside = 0.0;
+  for (int i = 0; i < MAXH; i++) {
+    if (float(i) >= uHN) break;
+    float march = uH[i].z / BCRIT * RMARCH;
+    if (inside < 0.5 && uH[i].z > 1.0 && length(frag - uH[i].xy) < march) {
+      H = uH[i];
+      O = uO[i];
+      inside = 1.0;
+    }
   }
 
-  if (uAN > 0.5) col += curtain(frag, uA0, uAL0, uTime);
-  if (uAN > 1.5) col += curtain(frag, uA1, uAL1, uTime);
-  if (uAN > 2.5) col += curtain(frag, uA2, uAL2, uTime);
+  vec3 sky = background(frag);
+  vec3 col = sky;
+  if (inside > 0.5) {
+    float march = H.z / BCRIT * RMARCH;
+    float edge = smoothstep(march, march * 0.88, length(frag - H.xy));
+    col = mix(sky, renderHole(frag, H, O, uTime), edge);
+  }
+
+  for (int i = 0; i < MAXN; i++) {
+    if (float(i) >= uNN) break;
+    col += nebula(frag, uN[i], uNL[i], uTime);
+  }
 
   col = col / (col + vec3(0.86));
   col = pow(col, vec3(0.92));
   gl_FragColor = vec4(col, 1.0);
 }
 `;
+
+// Must match MAXH / MAXA in the shader.
+const MAXH = 4;
+const MAXN = 4;
 
 function compile(gl, type, src) {
   const s = gl.createShader(type);
@@ -358,19 +390,20 @@ function create(canvas) {
     res: name("uRes"),
     time: name("uTime"),
     steps: name("uSteps"),
-    h0: name("uH0"),
-    h1: name("uH1"),
-    o0: name("uO0"),
-    o1: name("uO1"),
-    a0: name("uA0"),
-    a1: name("uA1"),
-    a2: name("uA2"),
-    al0: name("uAL0"),
-    al1: name("uAL1"),
-    al2: name("uAL2"),
-    an: name("uAN"),
+    h: name("uH[0]"),
+    o: name("uO[0]"),
+    hn: name("uHN"),
+    n: name("uN[0]"),
+    nl: name("uNL[0]"),
+    nn: name("uNN"),
   };
-  return { gl, prog, buf, loc, canvas, steps: 96 };
+  return {
+    gl, prog, buf, loc, canvas, steps: 96,
+    hv: new Float32Array(MAXH * 4),
+    ov: new Float32Array(MAXH * 4),
+    nv: new Float32Array(MAXN * 4),
+    nlv: new Float32Array(MAXN * 4),
+  };
 }
 
 function resize(api, cssW, cssH, dpr) {
@@ -394,7 +427,7 @@ function retune(api, ms) {
   else if (ms < 12 && api.steps < 120) api.steps += 2;
 }
 
-function frame(api, t, holes, auroras) {
+function frame(api, t, holes, nebulas) {
   if (!api) return;
   const gl = api.gl;
   gl.useProgram(api.prog);
@@ -408,36 +441,50 @@ function frame(api, t, holes, auroras) {
   gl.uniform1f(api.loc.time, t);
   gl.uniform1f(api.loc.steps, api.steps);
 
-  const h0 = holes[0] || { u: 0.14, v: 0.20, r: 62, sense: 1, inc: 1.36, pa: -0.32 };
-  const h1 = holes[1] || { u: 0.85, v: 0.78, r: 38, sense: -1, inc: 1.18, pa: 0.62 };
   const scale = Math.min(w, h) / 900;
-  gl.uniform4f(api.loc.h0, h0.u * w, (1 - h0.v) * h, Math.max(8, h0.r * scale), h0.sense || 1);
-  gl.uniform4f(api.loc.h1, h1.u * w, (1 - h1.v) * h, Math.max(6, h1.r * scale), h1.sense || -1);
-  gl.uniform2f(api.loc.o0, h0.inc + Math.sin(t * 0.017) * 0.05, h0.pa + t * 0.006);
-  gl.uniform2f(api.loc.o1, h1.inc + Math.sin(t * 0.013 + 1.7) * 0.05, h1.pa - t * 0.004);
+  const hn = Math.min(MAXH, holes.length);
+  api.hv.fill(0);
+  api.ov.fill(0);
+  for (let i = 0; i < hn; i++) {
+    const hole = holes[i];
+    const k = i * 4;
+    // fade is how far into its life the hole is: a new one grows in, a dying
+    // one shrinks away, and the shader skips anything under a pixel.
+    api.hv[k] = hole.u * w;
+    api.hv[k + 1] = (1 - hole.v) * h;
+    api.hv[k + 2] = Math.max(0, hole.r * (hole.fade == null ? 1 : hole.fade) * scale);
+    api.hv[k + 3] = hole.sense || 1;
+    api.ov[k] = hole.inc + Math.sin(t * (0.013 + i * 0.005) + i * 1.7) * 0.05;
+    api.ov[k + 1] = hole.pa + t * (hole.spin || 0.005);
+    api.ov[k + 2] = hole.temp == null ? 0.2 : hole.temp;
+    api.ov[k + 3] = hole.gain == null ? 1 : hole.gain;
+  }
+  gl.uniform4fv(api.loc.h, api.hv);
+  gl.uniform4fv(api.loc.o, api.ov);
+  gl.uniform1f(api.loc.hn, hn);
 
   const cssW = Math.max(1, api.canvas.clientWidth || w);
   const cssH = Math.max(1, api.canvas.clientHeight || h);
   const sx = w / cssW;
-  const sy = h / cssH;
-  const pack = (a) => {
-    if (!a) return { p: [0, 0, 0, 0], d: [0, 0] };
-    const frac = Math.max(0, Math.min(1, a.life / Math.max(0.01, a.max)));
-    return {
-      p: [a.x0 * sx, (1 - a.y0 / cssH) * h, Math.sin(Math.PI * frac), a.seed || 1],
-      d: [(a.len || 110) * sy, (a.wid || 32) * 0.5 * sx],
-    };
-  };
-  const a0 = pack(auroras[0]);
-  const a1 = pack(auroras[1]);
-  const a2 = pack(auroras[2]);
-  gl.uniform4f(api.loc.a0, a0.p[0], a0.p[1], a0.p[2], a0.p[3]);
-  gl.uniform4f(api.loc.a1, a1.p[0], a1.p[1], a1.p[2], a1.p[3]);
-  gl.uniform4f(api.loc.a2, a2.p[0], a2.p[1], a2.p[2], a2.p[3]);
-  gl.uniform2f(api.loc.al0, a0.d[0], a0.d[1]);
-  gl.uniform2f(api.loc.al1, a1.d[0], a1.d[1]);
-  gl.uniform2f(api.loc.al2, a2.d[0], a2.d[1]);
-  gl.uniform1f(api.loc.an, auroras.length);
+  const nn = Math.min(MAXN, nebulas.length);
+  api.nv.fill(0);
+  api.nlv.fill(0);
+  for (let i = 0; i < nn; i++) {
+    const cloud = nebulas[i];
+    const k = i * 4;
+    const frac = Math.max(0, Math.min(1, cloud.life / Math.max(0.01, cloud.max)));
+    api.nv[k] = cloud.cx * sx;
+    api.nv[k + 1] = (1 - cloud.cy / cssH) * h;
+    api.nv[k + 2] = Math.sin(Math.PI * frac);
+    api.nv[k + 3] = cloud.seed || 1;
+    api.nlv[k] = (cloud.r || 200) * sx;
+    api.nlv[k + 1] = cloud.aspect == null ? 1 : cloud.aspect;
+    api.nlv[k + 2] = cloud.hue == null ? 0.3 : cloud.hue;
+    api.nlv[k + 3] = cloud.energy == null ? 0.5 : cloud.energy;
+  }
+  gl.uniform4fv(api.loc.n, api.nv);
+  gl.uniform4fv(api.loc.nl, api.nlv);
+  gl.uniform1f(api.loc.nn, nn);
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }

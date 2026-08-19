@@ -44,6 +44,17 @@ try { cloneAgent("not-a-uuid", { agentsDir: agents }); } catch { threw = true; }
 assert(threw, "bad id");
 ok("clone-missing");
 
+const rebuilt = cloneAgent("cccccccc-cccc-cccc-cccc-cccccccccccc", {
+  agentsDir: agents,
+  destId: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+  lastUser: "keep going on the hover tip",
+  profileId: "cursor-b",
+});
+assert(rebuilt.reconstructed === true, "reconstructed");
+assert(fs.existsSync(path.join(agents, rebuilt.destId, "memory", "log", "failover.md")), "seed memory");
+assert(/hover tip/.test(fs.readFileSync(path.join(agents, rebuilt.destId, "memory", "log", "failover.md"), "utf8")), "captured turn");
+ok("clone-reconstruct");
+
 const chief = pickChief([
   { id: "1", name: "Worker" },
   { id: "2", name: 'grok"D"' },
@@ -71,4 +82,4 @@ assert(fs.readFileSync(file, "utf8") === pack, "written");
 ok("pack");
 
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(`\n${n}/4 clone-handoff checks passed`);
+console.log(`\n${n}/5 clone-handoff checks passed`);

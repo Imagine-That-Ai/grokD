@@ -27,6 +27,7 @@ for f in \
   onboard-accounts.js bot-pause.js failover.js failover-act.js \
   failover-watch.js fallover-ui.js clone-bot.js handoff-pack.js \
   seat-quota.js create-bot-hook.js takeover-local.js bot-chatter.js \
+  space-kernel.js space-field-gl.js liquid-metal-mark.js cursor-model-bubble.js \
   
   ensure-local-box.sh install-runtime.sh pack-asar.sh patch-asar.sh patch-asar.js \
   sync-to-tmp.sh

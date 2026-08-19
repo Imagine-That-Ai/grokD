@@ -48,13 +48,72 @@ function disableAutos(agentDir) {
   return n;
 }
 
-function cloneAgent(srcId, opts) {
+function findSourceDir(srcId, opts) {
+  opts = opts || {};
+  const id = String(srcId || "");
+  if (!UUID_RE.test(id)) return null;
+  const roots = [];
+  if (opts.agentsDir) roots.push(opts.agentsDir);
+  roots.push(paths.agentsDir());
+  if (opts.profileId) {
+    roots.push(path.join(paths.ROOT, "profile-data", opts.profileId, "box-data", "agents"));
+  }
+  const seen = new Set();
+  for (const root of roots) {
+    if (!root || seen.has(root)) continue;
+    seen.add(root);
+    const from = path.join(root, id);
+    if (fs.existsSync(from)) return from;
+  }
+  return null;
+}
+
+function reconstructAgent(opts) {
   opts = opts || {};
   const root = opts.agentsDir || paths.agentsDir();
-  const from = path.join(root, String(srcId || ""));
-  if (!UUID_RE.test(String(srcId || "")) || !fs.existsSync(from)) {
-    throw new Error("clone source missing: " + srcId);
+  const destId = opts.destId && UUID_RE.test(opts.destId) ? opts.destId : newId();
+  const dest = path.join(root, destId);
+  if (fs.existsSync(dest)) throw new Error("clone dest exists: " + destId);
+  fs.mkdirSync(path.join(dest, "memory", "log"), { recursive: true });
+  const name = String(opts.name || "Continued bot").replace(/\s*\(clone\)\s*$/i, "") + " (clone)";
+  const prof = {
+    name,
+    origin: "failover-reconstruct",
+    clonedFrom: {
+      agentId: opts.srcId || null,
+      profileId: opts.profileId || null,
+      at: Date.now(),
+      reconstructed: true,
+    },
+  };
+  fs.writeFileSync(path.join(dest, "profile.json"), JSON.stringify(prof, null, 2) + "\n");
+  fs.writeFileSync(path.join(dest, "settings.json"), "{}\n");
+  const lines = [
+    "# Failover clone",
+    "",
+    "Official Cursor bots often have no portable store.db.",
+    "This local agent continues the work from the last captured turn.",
+    "",
+    "From: " + (opts.profileId || "?"),
+    "When: " + new Date().toISOString(),
+    "",
+    "## Last user",
+    opts.lastUser || "(none captured)",
+    "",
+  ];
+  fs.writeFileSync(path.join(dest, "memory", "log", "failover.md"), lines.join("\n"));
+  return { ok: true, srcId: opts.srcId || null, destId, dest, name, parked: 0, reconstructed: true };
+}
+
+function cloneAgent(srcId, opts) {
+  opts = opts || {};
+  const id = String(srcId || "");
+  if (id && !UUID_RE.test(id)) throw new Error("clone source missing: " + srcId);
+  const from = findSourceDir(id, opts);
+  if (!from) {
+    return reconstructAgent(Object.assign({}, opts, { srcId: id || null }));
   }
+  const root = opts.agentsDir || paths.agentsDir();
   const destId = opts.destId && UUID_RE.test(opts.destId) ? opts.destId : newId();
   const dest = path.join(root, destId);
   if (fs.existsSync(dest)) throw new Error("clone dest exists: " + destId);
@@ -70,7 +129,7 @@ function cloneAgent(srcId, opts) {
   return { ok: true, srcId, destId, dest, name: prof.name, parked };
 }
 
-module.exports = { cloneAgent, newId, disableAutos, UUID_RE };
+module.exports = { cloneAgent, reconstructAgent, findSourceDir, newId, disableAutos, UUID_RE };
 
 if (require.main === module) {
   const src = process.argv[2];

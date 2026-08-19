@@ -1,11 +1,16 @@
 "use strict";
 
+function profileRoot() {
+  const path = require("path");
+  const os = require("os");
+  return process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
+}
+
 function readMode() {
   try {
     const fs = require("fs");
     const path = require("path");
-    const os = require("os");
-    const env = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".grok", "grokbot-d", "active-env.json"), "utf8"));
+    const env = JSON.parse(fs.readFileSync(path.join(profileRoot(), "active-env.json"), "utf8"));
     return env && env.mode ? env.mode : "local";
   } catch (e) {
     return "local";
@@ -87,7 +92,7 @@ function applyAuthPolicy(Q) {
     try {
       const ident = (() => {
         try {
-          return require(require("path").join(require("os").homedir(), ".grok", "grokbot-d", "account-identity.js"));
+          return require(require("path").join(profileRoot(), "account-identity.js"));
         } catch { return null; }
       })();
       const orig = Q.cursorAccount && Q.cursorAccount.getStatus;
@@ -98,7 +103,7 @@ function applyAuthPolicy(Q) {
             let envId = "";
             try {
               envId = JSON.parse(require("fs").readFileSync(
-                require("path").join(require("os").homedir(), ".grok", "grokbot-d", "active-env.json"), "utf8"
+                require("path").join(profileRoot(), "active-env.json"), "utf8"
               )).profileId || "";
             } catch {}
             const e = ident ? ident.enrichStatus(s, { profileId: envId }) : s;
@@ -126,7 +131,7 @@ function applyAuthPolicy(Q) {
             let envId = "";
             try {
               envId = JSON.parse(require("fs").readFileSync(
-                require("path").join(require("os").homedir(), ".grok", "grokbot-d", "active-env.json"), "utf8"
+                require("path").join(profileRoot(), "active-env.json"), "utf8"
               )).profileId || "";
             } catch {}
             const cached = envId && ident.readCache(envId);
@@ -154,7 +159,7 @@ function applyAuthPolicy(Q) {
     } catch (e) { log("wrap-err " + e); }
     try {
       const { safeStorage } = require("electron");
-      const quota = require(require("path").join(require("os").homedir(), ".grok", "grokbot-d", "seat-quota.js"));
+      const quota = require(require("path").join(profileRoot(), "seat-quota.js"));
       quota.refreshAll(safeStorage).catch((e) => log("quota-refresh " + e));
     } catch (e) { log("quota-boot " + e); }
     return Q;
@@ -185,7 +190,7 @@ function applyAuthPolicy(Q) {
 function isLocalMode() {
   try {
     const env = JSON.parse(require("fs").readFileSync(
-      require("path").join(require("os").homedir(), ".grok", "grokbot-d", "active-env.json"),
+      require("path").join(profileRoot(), "active-env.json"),
       "utf8"
     ));
     return env && env.mode === "local";

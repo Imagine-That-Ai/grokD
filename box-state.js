@@ -98,6 +98,19 @@ function pickRemoteConnection(roots) {
   return null;
 }
 
+// Official Grok Bot A on this machine has no VM file — the computer is this Mac.
+// A leftover D snapshot of a dead cursorvm.com pod is not a substitute.
+function officialUsesThisMac(identityRoot) {
+  if (!identityRoot || !fs.existsSync(identityRoot)) return false;
+  return !isRemoteConnection(connectionPath(identityRoot));
+}
+
+function chooseCursorConnection(identityRoot, savedRoot) {
+  const official = identityRoot ? pickRemoteConnection([identityRoot]) : null;
+  if (identityRoot && officialUsesThisMac(identityRoot) && !official) return null;
+  return official || pickRemoteConnection([savedRoot]);
+}
+
 function installConnection(fromFile, seat4) {
   if (!fromFile || !fs.existsSync(fromFile)) return false;
   if (!isRemoteConnection(fromFile)) return false;
@@ -186,6 +199,30 @@ function decryptDescriptor(file, safeStorage) {
 }
 
 // Electron-only: turn a safeStorage gateway-descriptor into the plaintext VM URL.
+function probeRemoteUrlSync(url, timeoutMs) {
+  const ms = timeoutMs == null ? 3500 : timeoutMs;
+  if (!url || typeof url !== "string") return false;
+  if (!/^https?:\/\//i.test(url)) return false;
+  if (/127\.0\.0\.1|localhost/.test(url)) return true;
+  const script = [
+    "const http=require('http');const https=require('https');",
+    "const u=new URL(process.argv[1].replace(/\\/$/,'')+'/health');",
+    "const lib=u.protocol==='https:'?https:http;",
+    "const req=lib.get({hostname:u.hostname,port:u.port||(u.protocol==='https:'?443:80),path:u.pathname,timeout:" + ms + ",rejectUnauthorized:false},(res)=>process.exit(res.statusCode===404||res.statusCode>=500?2:0));",
+    "req.on('error',()=>process.exit(2));",
+    "req.on('timeout',()=>{req.destroy();process.exit(2)});",
+  ].join("");
+  try {
+    require("child_process").execFileSync(process.execPath, ["-e", script, url], {
+      timeout: ms + 800,
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function installFromDescriptor(seat4, safeStorage, extraFiles) {
   const files = [
     path.join(seat4, "gateway-descriptor.json"),
@@ -194,6 +231,7 @@ function installFromDescriptor(seat4, safeStorage, extraFiles) {
   for (const file of files) {
     const conn = decryptDescriptor(file, safeStorage);
     if (!conn) continue;
+    if (!probeRemoteUrlSync(conn.baseUrl)) continue;
     const dest = connectionPath(seat4);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, JSON.stringify(conn));
@@ -214,6 +252,8 @@ module.exports = {
   findLocalCredential,
   installLocalCredential,
   pickRemoteConnection,
+  officialUsesThisMac,
+  chooseCursorConnection,
   installConnection,
   snapshotHost,
   secretsPath,
@@ -222,4 +262,5 @@ module.exports = {
   resetForeignSettings,
   decryptDescriptor,
   installFromDescriptor,
+  probeRemoteUrlSync,
 };

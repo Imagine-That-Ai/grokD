@@ -51,6 +51,19 @@ const picked = box.pickRemoteConnection([path.join(tmp, "none"), dest, from]);
 assert(picked && picked.endsWith("local-exec-daemon-connection.json"), picked);
 ok("pick");
 
+const officialMac = path.join(tmp, "official-a");
+fs.mkdirSync(officialMac, { recursive: true });
+assert(box.officialUsesThisMac(officialMac) === true, "official A with no VM is this Mac");
+const staleSnap = path.join(tmp, "stale-a");
+fs.mkdirSync(path.join(staleSnap, "sand-data"), { recursive: true });
+fs.copyFileSync(remote, box.connectionPath(staleSnap));
+assert(box.chooseCursorConnection(officialMac, staleSnap) == null, "do not rehydrate dead snapshot over this-Mac official");
+assert(box.chooseCursorConnection(null, staleSnap) === box.connectionPath(staleSnap), "sign-in seat still uses saved VM");
+ok("this-mac-not-stale-vm");
+assert(box.probeRemoteUrlSync("http://127.0.0.1:1337") === true, "loopback probe ok");
+assert(box.probeRemoteUrlSync("https://900322d227ff6573fc34-pod-5vjl3y33brfrhjtdfh5kbhouou-1340.us9.cursorvm.com") === false, "dead vm probe");
+ok("probe-dead-vm");
+
 const older = path.join(tmp, "older.json");
 const newer = path.join(tmp, "newer.json");
 fs.writeFileSync(older, "a");

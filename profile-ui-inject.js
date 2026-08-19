@@ -1002,6 +1002,7 @@
         ? path.join(p.identitySource, "gateway-descriptor.json")
         : null;
       const box = require(path.join(ROOT, "box-state.js"));
+      if (box.officialUsesThisMac(p.identitySource || p.sourceUserData)) return false;
       const src = box.newerFile(
         fs.existsSync(saved) ? saved : null,
         live && fs.existsSync(live) ? live : null

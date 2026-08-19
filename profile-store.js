@@ -152,6 +152,22 @@ function add(opts) {
   return profile;
 }
 
+function importDetected(id) {
+  const existing = get(id);
+  if (existing) return existing;
+  const found = detectedCursorProfiles().find((p) => p.id === id);
+  if (!found) throw new Error(`unknown import ${id}`);
+  return add({
+    id: found.id,
+    name: found.name,
+    kind: "cursor",
+    color: found.color,
+    seat: found.seat,
+    sourceUserData: found.sourceUserData,
+    identitySource: found.identitySource,
+  });
+}
+
 function rename(id, name) {
   const s = load();
   const p = s.profiles.find((x) => x.id === id);
@@ -200,7 +216,7 @@ function readActiveEnv() {
 
 module.exports = {
   ROOT, STORE, DATA, SEATS,
-  load, save, list, get, getActive, setActive, add, rename, remove,
+  load, save, list, get, getActive, setActive, add, rename, remove, importDetected,
   profileDataDir, writeActiveEnv, readActiveEnv, defaultState, ensureDirs,
   detectedCursorProfiles,
 };

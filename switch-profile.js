@@ -142,6 +142,12 @@ function applyCursor(profile) {
   // Prefer that, or the newer of the two files.
   const srcSec = box.newerFile(hasSavedSec ? savedSec : null, liveSec);
   if (srcSec) copyFile(srcSec, path.join(SEAT4, "sand-secrets.json"));
+  else if (!identity && !hasSavedSec) {
+    // Fresh in-app sign-in: drop the previous seat's tokens or Cursor
+    // will skip login and the new profile inherits the old account.
+    try { fs.rmSync(path.join(SEAT4, "sand-secrets.json"), { force: true }); } catch {}
+    try { fs.rmSync(path.join(SEAT4, "gateway-descriptor.json"), { force: true }); } catch {}
+  }
 
   const savedGd = path.join(dir, "secrets", "gateway-descriptor.json");
   const liveGd = identity ? path.join(identity, "gateway-descriptor.json") : null;
@@ -149,16 +155,19 @@ function applyCursor(profile) {
     fs.existsSync(savedGd) ? savedGd : null,
     liveGd && fs.existsSync(liveGd) ? liveGd : null
   );
-  if (srcGd) copyFile(srcGd, path.join(SEAT4, "gateway-descriptor.json"));
+  // Encrypted official descriptors for this-Mac seats often still hold a
+  // dead cursorvm.com pod. Copying that file makes D decrypt it on boot and
+  // the Mac looks offline again.
+  if (srcGd && !box.officialUsesThisMac(identity)) {
+    copyFile(srcGd, path.join(SEAT4, "gateway-descriptor.json"));
+  }
 
   box.resetForeignSettings(SEAT4, box.accountScopeFromSecrets(SEAT4));
 
-  const remote = box.pickRemoteConnection([
-    identity,
-    path.join(dir),
-  ]);
+  const remote = box.chooseCursorConnection(identity, dir);
   if (remote) box.installConnection(remote, SEAT4);
-  // Cursor send goes to that seat's computer, not the last local proxy.
+  // Official this-Mac seats have no VM file. Do not rehydrate a dead
+  // cursorvm.com snapshot — that is what made "Couldn't reach your Mac".
 
   const persistDst = path.join(SEAT4, "sand-client-persistence");
   const livePersist = identity && path.join(identity, "sand-client-persistence");

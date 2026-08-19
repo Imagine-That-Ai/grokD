@@ -46,7 +46,47 @@ wait_listen() {
 RUN_JS="$DURABLE"
 [ -f "$DURABLE/runbox.js" ] || RUN_JS="$HACK"
 
+# host-main.cjs needs tree-sitter from the unpacked Electron app, not a global npm tree.
+resolve_node_deps() {
+  if [ -n "${GROK_D_NODE_PATH:-}" ] && [ -d "$GROK_D_NODE_PATH" ]; then
+    printf '%s\n' "$GROK_D_NODE_PATH"
+    return 0
+  fi
+  local app unpacked
+  for app in \
+    "$DURABLE/dist/Grok Bot D.app" \
+    "$DURABLE/dist/Grok Bot.app" \
+    "/Applications/Grok Bot D.app" \
+    "/Applications/Grok Bot.app"
+  do
+    unpacked="$app/Contents/Resources/app.asar.unpacked/dist/deps"
+    if [ -d "$unpacked/tree-sitter" ] || [ -d "$unpacked/web-tree-sitter" ]; then
+      printf '%s\n' "$unpacked"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if NODE_DEPS="$(resolve_node_deps)"; then
+  if [ -n "${NODE_PATH:-}" ]; then
+    export NODE_PATH="$NODE_DEPS:$NODE_PATH"
+  else
+    export NODE_PATH="$NODE_DEPS"
+  fi
+fi
+
+if [ "${1:-}" = "--print-node-path" ]; then
+  if [ -n "${NODE_PATH:-}" ]; then
+    printf '%s\n' "$NODE_PATH"
+    exit 0
+  fi
+  echo "warn: tree-sitter deps not found" >&2
+  exit 1
+fi
+
 # Real host on 1338; shim owns 1337 (idle-wait + broadcast retry).
+# NODE_PATH is exported above so host-main can load tree-sitter.
 if ! is_listen 1338; then
   nohup env SAND_HOST_PORT=1338 GROKBOT_HACK="$HACK" GROK_HOST_MAIN="${GROK_HOST_MAIN:-$DURABLE/host/host-main.cjs}" "$NODE" "$RUN_JS/runbox.js" >"$HACK/runbox.out" 2>&1 &
   echo "started runbox pid $! (host :1338)"

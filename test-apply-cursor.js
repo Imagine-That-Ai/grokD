@@ -31,6 +31,14 @@ assert(!fs.existsSync(box.connectionPath(seat4)), "sign-in must not keep leftove
 assert(store.readActiveEnv().mode === "cursor", "cursor env");
 ok("sign-in-clears-host");
 
+fs.writeFileSync(path.join(seat4, "sand-secrets.json"), JSON.stringify({
+  "cursor-access-token": "leftover-from-account-1",
+}));
+const second = store.add({ name: "Cursor 2", kind: "cursor" });
+sw.applyCursor(second);
+assert(!fs.existsSync(path.join(seat4, "sand-secrets.json")), "fresh sign-in drops previous tokens");
+ok("fresh-signin-wipes-leftover-secrets");
+
 const saved = store.profileDataDir(signin.id);
 fs.mkdirSync(path.join(saved, "sand-data"), { recursive: true });
 fs.writeFileSync(path.join(saved, "sand-data", "local-exec-daemon-connection.json"), JSON.stringify({
@@ -76,6 +84,31 @@ assert(kept && kept["cursor-access-token"] === "d-login-new", "in-app login wins
 const setAfter = box.readJson(path.join(seat4, "sand-data", "settings.json"));
 assert(!setAfter.mcpCustomInstructionsAccountScope, "foreign settings scope stripped");
 ok("saved-login-wins");
+
+const officialMac = path.join(tmp, "official-mac");
+fs.mkdirSync(officialMac, { recursive: true });
+fs.writeFileSync(path.join(officialMac, "sand-secrets.json"), JSON.stringify({
+  "cursor-access-token": "mac-tok",
+  "cursor-refresh-token": "mac-r",
+}));
+const macSeat = store.add({
+  name: "Official Mac A",
+  kind: "cursor",
+  sourceUserData: officialMac,
+  identitySource: officialMac,
+});
+fs.mkdirSync(path.join(store.profileDataDir(macSeat.id), "sand-data"), { recursive: true });
+fs.writeFileSync(box.connectionPath(store.profileDataDir(macSeat.id)), JSON.stringify({
+  baseUrl: "https://dead-pod.cursorvm.com",
+  token: "stale",
+}));
+fs.writeFileSync(box.connectionPath(seat4), JSON.stringify({
+  baseUrl: "https://leftover.cursorvm.com",
+  token: "leftover",
+}));
+sw.applyCursor(macSeat);
+assert(!fs.existsSync(box.connectionPath(seat4)), "this-Mac official A must not keep a snapshot VM");
+ok("official-this-mac-drops-stale-vm");
 
 const other = store.add({ name: "Other Cursor", kind: "cursor" });
 sw.applyCursor(other);

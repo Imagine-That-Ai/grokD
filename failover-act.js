@@ -40,12 +40,14 @@ function landLocal(decision, deps) {
   }
   if (decision.action === "local-clone") {
     const src = deps.sourceAgentId;
-    if (src) {
-      try {
-        extra.clone = (deps.clone || require("./clone-bot").cloneAgent)(src, { profileId: decision.from });
-      } catch (e) {
-        extra.cloneError = String(e && e.message || e);
-      }
+    try {
+      extra.clone = (deps.clone || require("./clone-bot").cloneAgent)(src, {
+        profileId: decision.from,
+        lastUser: deps.lastUser || "",
+        name: deps.sourceName || "",
+      });
+    } catch (e) {
+      extra.cloneError = String(e && e.message || e);
     }
   }
   if (typeof deps.sendPrompt === "function" && extra.chief && extra.pack) {

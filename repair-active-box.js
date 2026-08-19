@@ -27,7 +27,7 @@ function repair() {
   }
   const dir = store.profileDataDir(profile.id);
   const identity = profile.identitySource || profile.sourceUserData;
-  const remote = box.pickRemoteConnection([identity, dir, SEAT4]);
+  const remote = box.chooseCursorConnection(identity, dir);
   if (remote) {
     if (!box.isRemoteConnection(box.connectionPath(SEAT4))) {
       box.installConnection(remote, SEAT4);
@@ -40,11 +40,12 @@ function repair() {
     return report;
   }
   if (box.isRemoteConnection(box.connectionPath(SEAT4))) {
-    report.action = "kept-remote";
-    report.baseUrl = box.readJson(box.connectionPath(SEAT4)).baseUrl;
+    box.clearCursorHost(SEAT4);
+    report.action = "cleared-stale-remote";
+    report.reason = "official seat uses this Mac";
     return report;
   }
-  report.action = "no-remote-available";
+  report.action = "this-mac";
   return report;
 }
 

@@ -6,16 +6,51 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { execFileSync } = require("child_process");
 const { newId } = require("./clone-bot");
 
 const HOST = "127.0.0.1";
-const PORT = 1337;
-const UP = "http://127.0.0.1:1338";
+const PORT = Number(process.env.GROK_SHIM_PORT || 1337);
 const TOKEN = "fake-gateway-token";
 const AGENTS_ROOT = process.env.GROKBOT_HACK ? path.join(process.env.GROKBOT_HACK, "box-data/agents") : "/tmp/grokbot-hack/box-data/agents";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const AUTH = `Bearer ${TOKEN}`;
+
+function resolveUp(raw) {
+  const fallback = "http://127.0.0.1:1338";
+  if (!raw) return fallback;
+  try {
+    const u = new URL(raw);
+    if (u.protocol === "http:" && u.hostname === "127.0.0.1") return raw;
+  } catch {}
+  if (process.env.GROK_SHIM_ALLOW_UP === "1") return raw;
+  return fallback;
+}
+const UP = resolveUp(process.env.GROK_SHIM_UP);
+
+function safeEqual(a, b) {
+  const aa = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  const max = Math.max(aa.length, bb.length, 1);
+  const pa = Buffer.alloc(max);
+  const pb = Buffer.alloc(max);
+  aa.copy(pa);
+  bb.copy(pb);
+  return crypto.timingSafeEqual(pa, pb) && aa.length === bb.length;
+}
+
+function allowedAuthHeaders() {
+  const headers = [AUTH];
+  const extra = String(process.env.SAND_HOST_GATEWAY_TOKEN || "").trim();
+  if (extra) headers.push(`Bearer ${extra}`);
+  return headers;
+}
+
+function authorizationMatches(header) {
+  const got = String(header || "");
+  return allowedAuthHeaders().some((allowed) => safeEqual(got, allowed));
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -120,6 +155,7 @@ function getLocalAgents() {
       avatarVersion: prof.avatarVersion || null,
       isRunning: false,
       isComposingMessage: false,
+      path: path.join(root, ent.name, "store.db"),
     });
   }
   return list;
@@ -182,71 +218,65 @@ function normalizeCreateAgent(raw) {
   return JSON.stringify(parsed);
 }
 
-async function postApi(method, body) {
+async function postApi(method, body, inboundAuth = AUTH) {
   let raw = Buffer.isBuffer(body) || typeof body === "string" ? body : JSON.stringify(body ?? {});
   if (method === "createAgent") raw = normalizeCreateAgent(raw);
   try {
     const r = await fetch(`${UP}/api/${method}`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: AUTH },
+      headers: { "content-type": "application/json", authorization: inboundAuth },
       body: raw,
     });
     const text = await r.text();
     return { status: r.status, text, json: parseJson(text), type: r.headers.get("content-type") || "application/json" };
   } catch (e) {
-    // Graceful fallback to local box-data store when UP (:1338) is offline
-    const parsedBody = parseJson(raw) || {};
-    if (method === "listAgents") {
-      const agents = getLocalAgents();
-      return { status: 200, text: JSON.stringify(agents), json: agents, type: "application/json" };
-    }
-    if (method === "getAgent") {
-      const agents = getLocalAgents();
-      const match = agents.find((a) => a.id === parsedBody.agentId) || agents[0] || null;
-      return { status: 200, text: JSON.stringify(match), json: match, type: "application/json" };
-    }
-    if (method === "getStatus") {
-      const res = { ok: true, status: "idle", mode: "local", timestamp: Date.now() };
-      return { status: 200, text: JSON.stringify(res), json: res, type: "application/json" };
-    }
-    if (method === "sendPrompt") {
-      const id = parsedBody.agentId;
-      const prompt = parsedBody.prompt || "";
-      const db = agentDbPath(id);
-      if (db && fs.existsSync(db)) {
-        try {
-          const entryJson = JSON.stringify({ type: "prompt", prompt, timestamp: Date.now() });
-          execFileSync("sqlite3", [db, `INSERT INTO transcript_entries (id, entry) VALUES ('${Date.now()}', '${entryJson.replace(/'/g, "''")}');`]);
-        } catch {}
-      }
-      const res = { ok: true, scheduled: true, agentId: id, timestamp: Date.now() };
-      return { status: 200, text: JSON.stringify(res), json: res, type: "application/json" };
-    }
-    if (method === "broadcastToAgents") {
-      const agents = getLocalAgents();
-      const res = { ok: true, scheduled: agents.length, total: agents.length };
-      return { status: 200, text: JSON.stringify(res), json: res, type: "application/json" };
-    }
-    if (method === "createAgent") {
-      try {
-        const created = createLocalAgent(parsedBody);
-        return { status: 200, text: JSON.stringify(created), json: created, type: "application/json" };
-      } catch (err) {
-        const fail = { error: String(err.message || err) };
-        return { status: 400, text: JSON.stringify(fail), json: fail, type: "application/json" };
-      }
-    }
-    if (method === "deleteAgents") {
-      const deleted = deleteLocalAgents(parsedBody.ids);
-      return { status: 200, text: JSON.stringify(deleted), json: deleted, type: "application/json" };
-    }
-    const err = { error: String(e.message || e) };
-    return { status: 502, text: JSON.stringify(err), json: err, type: "application/json" };
+    return offlineFallback(method, parseJson(raw) || {}, e);
   }
 }
 
+function offlineFallback(method, parsedBody, err) {
+  // listAgents may still answer from disk when :1338 is down. sendPrompt must not.
+  if (method === "listAgents") {
+    const agents = getLocalAgents();
+    return { status: 200, text: JSON.stringify(agents), json: agents, type: "application/json" };
+  }
+  if (method === "getAgent") {
+    const agents = getLocalAgents();
+    const match = agents.find((a) => a.id === parsedBody.agentId) || agents[0] || null;
+    return { status: 200, text: JSON.stringify(match), json: match, type: "application/json" };
+  }
+  if (method === "getStatus") {
+    const res = { ok: true, status: "idle", mode: "local", timestamp: Date.now() };
+    return { status: 200, text: JSON.stringify(res), json: res, type: "application/json" };
+  }
+  if (method === "sendPrompt") {
+    const fail = { ok: false, error: "local box host is down" };
+    return { status: 502, text: JSON.stringify(fail), json: fail, type: "application/json" };
+  }
+  if (method === "broadcastToAgents") {
+    const fail = { ok: false, error: "local box host is down" };
+    return { status: 502, text: JSON.stringify(fail), json: fail, type: "application/json" };
+  }
+  if (method === "createAgent") {
+    try {
+      const created = createLocalAgent(parsedBody);
+      return { status: 200, text: JSON.stringify(created), json: created, type: "application/json" };
+    } catch (createErr) {
+      const fail = { error: String(createErr.message || createErr) };
+      return { status: 400, text: JSON.stringify(fail), json: fail, type: "application/json" };
+    }
+  }
+  if (method === "deleteAgents") {
+    const deleted = deleteLocalAgents(parsedBody.ids);
+    return { status: 200, text: JSON.stringify(deleted), json: deleted, type: "application/json" };
+  }
+  const fail = { ok: false, error: String((err && err.message) || err || "upstream") };
+  return { status: 502, text: JSON.stringify(fail), json: fail, type: "application/json" };
+}
+
 async function handleSpecial(method, raw, body, deps = {}) {
-  const post = deps.post || postApi;
+  const auth = deps.auth || AUTH;
+  const post = deps.post || ((m, b) => postApi(m, b, auth));
   const fetchAgents = deps.fetchAgents || (async () => (await post("listAgents", {})).json);
   const waitIdle = deps.waitIdle || ((id) => waitUntilIdle(id, fetchAgents));
   const waitTx = deps.waitTx || ((ids, msg) => waitTranscripts(ids, msg));
@@ -317,11 +347,17 @@ async function onRequest(req, res) {
     const raw = await readBody(req);
     const m = /^\/api\/([^/]+)$/.exec(u.pathname);
     if (m && req.method === "POST") {
+      const inboundAuth = String(req.headers.authorization || "");
+      if (!authorizationMatches(inboundAuth)) {
+        const fail = { ok: false, error: "unauthorized" };
+        res.writeHead(401, { "content-type": "application/json" });
+        return void res.end(JSON.stringify(fail));
+      }
       const method = decodeURIComponent(m[1]);
       const body = parseJson(raw);
       const out = (method === "sendPrompt" || method === "broadcastToAgents")
-        ? await handleSpecial(method, raw, body)
-        : await postApi(method, raw);
+        ? await handleSpecial(method, raw, body, { auth: inboundAuth })
+        : await postApi(method, raw, inboundAuth);
       res.writeHead(out.status || 502, { "content-type": out.type || "application/json" });
       return void res.end(out.text != null ? out.text : JSON.stringify({ error: "upstream" }));
     }
@@ -344,6 +380,6 @@ module.exports = {
   HOST, PORT, UP, TOKEN, AGENTS_ROOT,
   parseJson, isIdle, resolveTargets, broadcastOk, distinctiveToken, hayHasMessage,
   agentDbPath, getLocalAgents, readEntries, transcriptHas, waitUntilIdle, waitTranscripts,
-  broadcastMessage, postApi, handleSpecial, onRequest, start,
-  createLocalAgent, deleteLocalAgents,
+  broadcastMessage, postApi, handleSpecial, onRequest, start, offlineFallback,
+  createLocalAgent, deleteLocalAgents, authorizationMatches, resolveUp,
 };

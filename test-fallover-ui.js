@@ -20,6 +20,7 @@ assert(/Master quota switch/.test(html), "sub");
 assert(/data-fo="enabled"/.test(html), "key");
 assert(/ON/.test(html) && /OFF/.test(html), "switches");
 assert(/halts billing/.test(html), "tooltip");
+assert(/reconstruct/.test(ui.ROWS[3].tip), "clone tip is honest about cloud bots");
 ok("html");
 
 assert(ui.TOAST.localChief === "Locally · Chief Handoff", ui.TOAST.localChief);
