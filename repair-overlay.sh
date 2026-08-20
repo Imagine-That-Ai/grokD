@@ -32,7 +32,8 @@ block["algorithm"] = "SHA256"
 block["hash"] = h
 open(plist_path, "wb").write(plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False))
 PY
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+codesign --force --deep --sign - --options runtime --timestamp=none "$APP" >/dev/null 2>&1 || \
+  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 xattr -cr "$APP" 2>/dev/null || true
 rm -rf "$WORK"
 echo "repaired overlay hook in $APP"

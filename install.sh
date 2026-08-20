@@ -188,8 +188,29 @@ if b"profile-ui-inject.js" not in data:
     raise SystemExit("install: overlay hook missing from app.asar")
 print("hook ok")
 PY
-codesign --remove-signature "$DEST" >/tmp/grokD-install-codesign.out 2>&1 || true
-codesign --force --deep --sign - "$DEST" >>/tmp/grokD-install-codesign.out 2>&1 || true
+# Official Grok is Team DCNK4UB866. Ad-hoc outer + leftover xAI framework
+# Team IDs crash ("mapped file have different Team IDs"). --deep makes
+# nested binaries ad-hoc too so they match. disable-library-validation
+# is a belt if anything nested stays signed. spctl will still reject.
+ENTS="$WORK/ents.plist"
+codesign -d --entitlements :- "$SRC" >"$ENTS" 2>/dev/null || true
+python3 - "$ENTS" <<'PY'
+import plistlib, sys, os
+path = sys.argv[1]
+info = {}
+if os.path.isfile(path) and os.path.getsize(path) > 20:
+    try:
+        info = plistlib.loads(open(path, "rb").read())
+    except Exception:
+        info = {}
+if not isinstance(info, dict):
+    info = {}
+info["com.apple.security.cs.allow-jit"] = True
+info["com.apple.security.cs.disable-library-validation"] = True
+open(path, "wb").write(plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False))
+PY
+codesign --force --deep --sign - --options runtime --timestamp=none --entitlements "$ENTS" "$DEST" >>/tmp/grokD-install-codesign.out 2>&1 || \
+  codesign --force --deep --sign - "$DEST" >>/tmp/grokD-install-codesign.out 2>&1 || true
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 xattr -cr "$DEST" 2>/dev/null || true
 
