@@ -1,4 +1,8 @@
-# grok"D"
+<p align="center">
+  <img src="assets/grokd-icon.png" width="168" alt='grok"D"'>
+</p>
+
+# Prepare to get grok"D"!
 
 A custom Grok Bot for your Mac. Run bots locally, or sign in with your Cursor account. You can add more than one Cursor login.
 
@@ -18,6 +22,8 @@ That writes `~/Applications/Grok Bot D.app` and opens it. If this Mac has Imagin
 If you were given a notarized drop (`./pack-drop.sh` on a signing Mac), drag that icon into Applications. First open finds official Grok Bot, builds D, and relaunches. GitHub does not host that `.app`.
 
 First launch is Seat in. Pick This Mac (local box), Cursor (import or sign in), or add another Cursor after the first one. Skip anytime. Tokens stay on your Mac.
+
+[CubeLove](https://cubelove.ai) is live on iPhone. grok"D" on the phone is not yet. Want the TestFlight alpha when it is? Email [alberto@imagine-that.ai](mailto:alberto@imagine-that.ai).
 
 Guides: [`grokD_Welcome_Guide.pdf`](grokD_Welcome_Guide.pdf), [`splash/onboarding-apple.html`](splash/onboarding-apple.html), [`welcome_guide_source.html`](welcome_guide_source.html).
 
