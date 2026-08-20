@@ -14,10 +14,10 @@ git ls-files -z | rsync -a --from0 --files-from=- ./ "$STAGE"/
 
 # Kitchen-only — not a public product. The export script itself holds
 # search strings for Alberto's identity; it must not ship.
+# Welcome docs (PDF, onboarding HTML, print template) stay in the public tree.
 rm -f "$STAGE/export-public.sh" \
   "$STAGE/PROMPT-npm-openburnbar-proxy.md" \
   "$STAGE/live-cursor-chat.js" \
-  "$STAGE/welcome_guide_source.html" \
   "$STAGE/sync-to-tmp.sh" \
   "$STAGE/test-export-public.js"
 
@@ -155,7 +155,6 @@ for banned in (
     "export-public.sh",
     "PROMPT-npm-openburnbar-proxy.md",
     "live-cursor-chat.js",
-    "welcome_guide_source.html",
     "sync-to-tmp.sh",
     "test-export-public.js",
 ):
@@ -197,6 +196,16 @@ That writes `~/Applications/Grok Bot D.app` and opens it. First launch is **Seat
 - **More than one Cursor** — after the first account is in, tap **Add another account**. Each login is its own seat. Your tokens stay on your Mac.
 
 Your chats and logins never come from this repo.
+
+## Welcome docs
+
+These ship in the repo so a clone has the same guide as the app:
+
+| File | What |
+| --- | --- |
+| [`grokD_Welcome_Guide.pdf`](grokD_Welcome_Guide.pdf) | Print / PDF welcome guide |
+| [`splash/onboarding-apple.html`](splash/onboarding-apple.html) | Interactive Seat-in onboarding |
+| [`welcome_guide_source.html`](welcome_guide_source.html) | Print-template source for the PDF |
 
 ## Names
 

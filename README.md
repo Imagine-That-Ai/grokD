@@ -4,6 +4,12 @@ One custom Grok Bot. **Local** bots on this Mac, or **your** Cursor login. Other
 
 See `INSTALL.md` to pack and hand it over. Do not zip `profile-data/` or `GrokBotSeat4`.
 
+Welcome docs (same files as the public repo):
+
+- [`grokD_Welcome_Guide.pdf`](grokD_Welcome_Guide.pdf) — print / PDF guide
+- [`splash/onboarding-apple.html`](splash/onboarding-apple.html) — interactive Seat-in
+- [`welcome_guide_source.html`](welcome_guide_source.html) — print-template source
+
 Strangers should **clone and run `./install.sh`**. That builds D on their Mac and `open`s it from the script. Finder may still warn once on an ad-hoc signature. Do not ship a downloaded `.app` until it is notarized. If an xAI update replaces `app.asar`, launch repairs the overlay hook when possible (`repair-overlay.sh`). Official Cursor fall-over cannot keep the same cloud thread; **Locally · Continue** seeds a local agent with the last turns.
 
 # Local box

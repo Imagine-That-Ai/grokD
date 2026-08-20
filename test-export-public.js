@@ -22,7 +22,6 @@ assert(!fs.existsSync(path.join(dest, "stale-should-go.txt")), "rsync --delete")
 assert(!fs.existsSync(path.join(dest, "export-public.sh")), "kitchen-only");
 assert(!fs.existsSync(path.join(dest, "PROMPT-npm-openburnbar-proxy.md")), "kitchen-only");
 assert(!fs.existsSync(path.join(dest, "live-cursor-chat.js")), "kitchen-only");
-assert(!fs.existsSync(path.join(dest, "welcome_guide_source.html")), "kitchen-only");
 assert(!fs.existsSync(path.join(dest, "sync-to-tmp.sh")), "kitchen-only");
 assert(!fs.existsSync(path.join(dest, "test-export-public.js")), "kitchen-only");
 assert(!fs.existsSync(path.join(dest, "profiles.json")), "no seats");
@@ -31,11 +30,17 @@ assert(fs.existsSync(path.join(dest, "install.sh")), "installer");
 assert(fs.existsSync(path.join(dest, "LICENSE")), "license");
 assert(fs.existsSync(path.join(dest, "SECURITY.md")), "security");
 assert(fs.existsSync(path.join(dest, "README.md")), "readme");
+assert(fs.existsSync(path.join(dest, "grokD_Welcome_Guide.pdf")), "welcome pdf");
+assert(fs.existsSync(path.join(dest, "splash", "onboarding-apple.html")), "onboarding html");
+assert(fs.existsSync(path.join(dest, "welcome_guide_source.html")), "print template");
 
 const readme = fs.readFileSync(path.join(dest, "README.md"), "utf8");
 assert(readme.includes('grok"D"'), "display name");
 assert(readme.includes("Grok Bot D.app"), "folder name");
 assert(readme.includes("will not click Recover"), "cursor limit");
+assert(readme.includes("grokD_Welcome_Guide.pdf"), "welcome pdf linked");
+assert(readme.includes("onboarding-apple.html"), "onboarding linked");
+assert(readme.includes("welcome_guide_source.html"), "print template linked");
 assert(!readme.includes("/tmp/grokbot-hack"), "no kitchen story");
 assert(!readme.includes("albertonunez"), "no home path");
 
