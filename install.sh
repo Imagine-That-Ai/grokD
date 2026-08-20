@@ -107,11 +107,11 @@ loc.mkdir(parents=True, exist_ok=True)
 )
 PY
 
-# Dock / Finder icon: the grok"D" mascot (edgefill), not the purple seat blob.
-ICON_SRC="$HERE/hack/grokd_edgefill.icns"
-if [ ! -f "$ICON_SRC" ] && [ -f "$HERE/hack/icons/icon-D.icns" ]; then
-  ICON_SRC="$HERE/hack/icons/icon-D.icns"
-fi
+# Dock / Finder icon: grok"D" mascot with face tats (color), not the purple seat blob.
+ICON_SRC=""
+for c in "$HERE/hack/grokd_icon_color.icns" "$HERE/hack/grokd_edgefill.icns" "$HERE/hack/icons/icon-D.icns"; do
+  if [ -f "$c" ]; then ICON_SRC="$c"; break; fi
+done
 if [ -f "$ICON_SRC" ]; then
   cp "$ICON_SRC" "$DEST/Contents/Resources/icon.icns"
   cp "$ICON_SRC" "$DEST/Contents/Resources/electron.icns" 2>/dev/null || true
