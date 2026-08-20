@@ -793,8 +793,7 @@ function placeSats(cx, cy, pitch, yaw) {
 }
 
 function hideLava() {
-  const n = document.getElementById("pure-lava-orbs-root");
-  if (n) n.style.display = "none";
+  // Keep plasma selectors visible alongside the gravitational space kernel
 }
 
 function tickDust(dt) {
