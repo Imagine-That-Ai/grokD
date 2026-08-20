@@ -230,7 +230,7 @@ cat > "$STAGE/INSTALL.md" <<'EOF'
 2. Install Node from https://nodejs.org
 3. Run `./install.sh` from Terminal.
 
-`install.sh` copies official Grok Bot to `~/Applications/Grok Bot D.app`, applies the overlay, and extracts the local-box host from *your* app. It does not upload or download xAI’s binary. Finder will not open a downloaded copy; the script `open`s the app it just built.
+`install.sh` copies official Grok Bot to `~/Applications/Grok Bot D.app`, stamps the face-tat mascot (`assets/grokd-icon.icns`), applies the space-kernel overlay (event horizons, nebulas, orbiting provider logos, light/dark), and extracts the local-box host from *your* app. It does not upload or download xAI’s binary. Finder will not open a downloaded copy; the script `open`s the app it just built.
 
 ```bash
 ./install.sh --src "/Applications/Grok Bot.app" --dest "$HOME/Applications/Grok Bot D.app"

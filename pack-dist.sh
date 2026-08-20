@@ -39,6 +39,21 @@ for f in \
 done
 mkdir -p "$RT/splash"
 [ -d "$ROOT/splash" ] && cp -R "$ROOT/splash/." "$RT/splash/"
+if [ -d "$ROOT/assets" ]; then
+  mkdir -p "$RT/assets"
+  rsync -a \
+    --exclude 'meshy_elon.glb' \
+    --exclude 'meshy_elon_textured.glb' \
+    "$ROOT/assets/" "$RT/assets/"
+fi
+if [ -d "$ROOT/gallery-icons" ]; then
+  mkdir -p "$RT/gallery-icons"
+  rsync -a "$ROOT/gallery-icons/" "$RT/gallery-icons/"
+fi
+if [ -f "$ROOT/assets/grokd-icon.icns" ]; then
+  cp "$ROOT/assets/grokd-icon.icns" "$DEST/Contents/Resources/icon.icns"
+  cp "$ROOT/assets/grokd-icon.icns" "$DEST/Contents/Resources/app.icns" 2>/dev/null || true
+fi
 if [ -d "$ROOT/host/agent-isolation" ]; then
   mkdir -p "$RT/host"
   rsync -a --exclude 'host-main.cjs' "$ROOT/host/" "$RT/host/"

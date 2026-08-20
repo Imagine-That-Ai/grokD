@@ -39,6 +39,18 @@ if [ -d "$APP_SRC" ] && [ "$APP_SRC" != "$HOME_DST" ]; then
   if [ ! -f "$HOME_DST/model-config.json" ] && [ -f "$APP_SRC/model-config.json" ]; then
     cp "$APP_SRC/model-config.json" "$HOME_DST/model-config.json"
   fi
+  # Look files the overlay reads from ~/.grok/grokbot-d: provider logos, app icon.
+  # --update keeps a newer live edit; never --delete extra local assets.
+  if command -v rsync >/dev/null 2>&1; then
+    if [ -d "$APP_SRC/assets" ]; then
+      mkdir -p "$HOME_DST/assets"
+      rsync -a --update "$APP_SRC/assets/" "$HOME_DST/assets/"
+    fi
+    if [ -d "$APP_SRC/gallery-icons" ]; then
+      mkdir -p "$HOME_DST/gallery-icons"
+      rsync -a --update "$APP_SRC/gallery-icons/" "$HOME_DST/gallery-icons/"
+    fi
+  fi
 fi
 
 if [ ! -f "$HOME_DST/profiles.json" ]; then

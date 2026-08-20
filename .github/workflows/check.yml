@@ -25,6 +25,8 @@ jobs:
           node test-failover-act.js
           node test-onboarding.js
           node test-clone-handoff.js
+          node test-space-holes.js
+          node test-install-look.js
       - name: no identity leak
         run: |
           python3 - <<'PY'

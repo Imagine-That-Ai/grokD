@@ -62,6 +62,7 @@ node /tmp/grokbot-hack/test-unit.js         # parsers, work-folder exec — no n
 node /tmp/grokbot-hack/test-robust.js       # live box
 node ~/.grok/grokbot-d/test-bot-chatter.js  # inter-bot markers, no DOM
 node ~/.grok/grokbot-d/test-space-holes.js  # cover sky invariants, no DOM
+node ~/.grok/grokbot-d/test-install-look.js # clone/install ships icon + kernel + assets
 ```
 
 `bridge-lib.js` is the shared parser module. `proxy2.js` must require it.

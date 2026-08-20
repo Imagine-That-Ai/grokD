@@ -111,16 +111,16 @@ loc.mkdir(parents=True, exist_ok=True)
 )
 PY
 
-# Dock / Finder icon: grok"D" mascot with face tats (color), not the purple seat blob.
-ICON_SRC=""
-for c in "$HERE/hack/grokd_icon_color.icns" "$HERE/hack/grokd_edgefill.icns" "$HERE/hack/icons/icon-D.icns"; do
-  if [ -f "$c" ]; then ICON_SRC="$c"; break; fi
-done
-if [ -f "$ICON_SRC" ]; then
-  cp "$ICON_SRC" "$DEST/Contents/Resources/icon.icns"
-  cp "$ICON_SRC" "$DEST/Contents/Resources/electron.icns" 2>/dev/null || true
-  cp "$ICON_SRC" "$DEST/Contents/Resources/app.icns" 2>/dev/null || true
-fi
+# Dock / Finder icon: grok"D" mascot with face tats. Lives in git at
+# assets/grokd-icon.icns so a clone has it. hack/ is local-only and gitignored.
+ICON_SRC="$HERE/assets/grokd-icon.icns"
+[ -f "$ICON_SRC" ] || die "missing face-tat icon: assets/grokd-icon.icns (clone the overlay repo; do not install a half tree)"
+[ -f "$HERE/space-kernel.js" ] || die "missing space-kernel.js"
+[ -f "$HERE/space-field-gl.js" ] || die "missing space-field-gl.js"
+[ -f "$HERE/provider-logos.js" ] || die "missing provider-logos.js"
+cp "$ICON_SRC" "$DEST/Contents/Resources/icon.icns"
+cp "$ICON_SRC" "$DEST/Contents/Resources/electron.icns" 2>/dev/null || true
+cp "$ICON_SRC" "$DEST/Contents/Resources/app.icns" 2>/dev/null || true
 # Official Grok Bot's icon catalog is the stock gray blob. Finder / Applications
 # still read it even after CFBundleIconName is dropped.
 rm -f "$DEST/Contents/Resources/Assets.car"
@@ -238,12 +238,17 @@ fi
 export GROK_PROFILE_ROOT="$ROOT"
 bash "$HERE/install-runtime.sh" "$RT"
 
-python3 - "$DEST/Contents/Resources/app.asar" <<'PY'
+python3 - "$DEST/Contents/Resources/app.asar" "$DEST/Contents/Resources/icon.icns" "$HERE/assets/grokd-icon.icns" <<'PY'
 import pathlib, sys
 data = pathlib.Path(sys.argv[1]).read_bytes()
 if b"profile-ui-inject.js" not in data:
     raise SystemExit("install: overlay hook missing from app.asar")
 print("hook ok")
+got = pathlib.Path(sys.argv[2]).read_bytes()
+want = pathlib.Path(sys.argv[3]).read_bytes()
+if got != want:
+    raise SystemExit("install: dest icon.icns is not the face-tat mascot")
+print("icon ok", len(got))
 PY
 # Official Grok is Team DCNK4UB866. Ad-hoc outer + leftover xAI framework
 # Team IDs crash ("mapped file have different Team IDs"). --deep makes
