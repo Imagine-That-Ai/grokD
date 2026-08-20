@@ -8,7 +8,6 @@ Pack and hand over: `INSTALL.md`. Do not zip `profile-data/` or `GrokBotSeat4`.
 
 Guides:
 
-- [`grokD_Welcome_Guide.pdf`](grokD_Welcome_Guide.pdf)
 - [`splash/onboarding-apple.html`](splash/onboarding-apple.html)
 - [`welcome_guide_source.html`](welcome_guide_source.html)
 

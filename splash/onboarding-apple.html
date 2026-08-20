@@ -648,9 +648,6 @@
             <button class="btn btn-primary" onclick="playClick(); nextStep();" style="padding: 12px 34px; font-size: 14px;">
               Begin Setup →
             </button>
-            <button class="btn btn-secondary" onclick="openPdfGuide();">
-              📄 View Welcome Guide PDF
-            </button>
           </div>
         </div>
       </div>
@@ -1472,11 +1469,6 @@
     function toggleSelect(card) {
       playClick();
       card.classList.toggle('selected');
-    }
-
-    function openPdfGuide() {
-      playClick();
-      window.open('../grokD_Welcome_Guide.pdf', '_blank');
     }
 
     function launchApp() {

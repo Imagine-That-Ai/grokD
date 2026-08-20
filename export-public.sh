@@ -14,7 +14,7 @@ git ls-files -z | rsync -a --from0 --files-from=- ./ "$STAGE"/
 
 # Kitchen-only — not a public product. The export script itself holds
 # search strings for Alberto's identity; it must not ship.
-# Welcome docs (PDF, onboarding HTML, print template) stay in the public tree.
+# Welcome HTML stays in the public tree. The stale brochure PDF does not.
 rm -f "$STAGE/export-public.sh" \
   "$STAGE/PROMPT-npm-openburnbar-proxy.md" \
   "$STAGE/live-cursor-chat.js" \
@@ -308,7 +308,7 @@ First launch is Seat in. Pick This Mac (local box), Cursor (import or sign in), 
 
 [CubeLove](https://cubelove.ai) is live on iPhone. grok"D" on the phone is not yet. Want the TestFlight alpha when it is? Email [alberto@imagine-that.ai](mailto:alberto@imagine-that.ai).
 
-Guides: [`grokD_Welcome_Guide.pdf`](grokD_Welcome_Guide.pdf), [`splash/onboarding-apple.html`](splash/onboarding-apple.html), [`welcome_guide_source.html`](welcome_guide_source.html).
+Guides: [`splash/onboarding-apple.html`](splash/onboarding-apple.html), [`welcome_guide_source.html`](welcome_guide_source.html).
 
 Dock name is grok"D". Folder is `Grok Bot D.app`. Apple menu and keychain stay `Grok Bot` so renderer secrets stay on the official keychain. Do not rename the folder to `grok"D".app` — quotes in the path crash Electron.
 
