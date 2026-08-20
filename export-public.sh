@@ -60,6 +60,8 @@ jobs:
           needles = [
               "Imagine-That-Ai/grok" + "-D",
               "Pending " + "Elon",
+              "Elon " + "Musk",
+              "funding " + "frontier",
               "google-oauth2|user_",
           ]
           proc = subprocess.run(
@@ -206,7 +208,6 @@ for p in root.rglob("*"):
     text2 = text2.replace("Alberto · Personal", "You · Personal").replace("alberto@example.com", "user@example.com")
     text2 = text2.replace("https://github.com/Imagine-That-Ai/grok-D", "https://github.com/Imagine-That-Ai/grokD")
     text2 = text2.replace("Imagine-That-Ai/grok-D", "Imagine-That-Ai/grokD")
-    text2 = text2.replace("Unofficial Crossover · Pending Elon seeing my tweet", "Imagine That overlay for Grok Bot")
     text2 = text2.replace("Liquid Metal Hub", "Cursor seats")
     text2 = text2.replace("BurnBar Hub", "BurnBar")
     if text2 != text:
@@ -231,6 +232,8 @@ needles = (
     "alberto@example.com",
     "alberto8793",
     "Pending Elon",
+    "Elon Musk",
+    "funding frontier",
     "Imagine-That-Ai/grok-D",
     "google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7",
     "/Users/albertonunez",

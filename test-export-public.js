@@ -89,6 +89,13 @@ assert(!onboard.includes("Alberto · Personal"), "named seat chip");
 assert(onboard.includes("You · Personal"), "generic seat chip");
 assert(!onboard.includes("Imagine-That-Ai/grok-D"), "no kitchen repo url");
 assert(!onboard.includes("Pending Elon"), "no pending-elon joke");
+assert(!onboard.includes("funding frontier"), "no elon/spacex credit");
+assert(!onboard.includes("BUILT WITH"), "no built-with spacex chip");
+assert(!onboard.includes("Elon Musk"), "no elon credit");
+const guide = fs.readFileSync(path.join(dest, "welcome_guide_source.html"), "utf8");
+assert(!guide.includes("funding frontier"), "guide has no elon/spacex credit");
+assert(!guide.includes("Elon Musk"), "guide has no elon credit");
+assert(guide.includes("Imagine That overlay for Grok Bot"), "guide overlay chip");
 
 const needles = [
   "albertonunez",
@@ -100,6 +107,8 @@ const needles = [
   "alberto@example.com",
   "alberto8793",
   "Pending Elon",
+  "Elon Musk",
+  "funding frontier",
   "Imagine-That-Ai/grok-D",
   "google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7",
 ];
