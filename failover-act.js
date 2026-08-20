@@ -1,0 +1,129 @@
+// No shebang: Electron's renderer wraps module source in an extra function,
+// so a line-1 '#!' is no longer at offset 0 and Node's shebang stripping does
+// not apply — require() throws SyntaxError in the app while working under
+// plain node. Run this as `node failover-act.js <cmd>`.
+// Perform one fall-over decision. Always pause bots before switching.
+// Does nothing unless evaluate() returned an action. Never kills Grok Bot B.
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const fo = require("./failover");
+const store = require("./profile-store");
+
+let busy = false;
+
+function markFire(decision) {
+  fo.saveConfig({
+    lastFire: {
+      at: Date.now(),
+      action: decision.action,
+      from: decision.from,
+      to: decision.to || null,
+    },
+    payingProfileId: decision.action === "pin-account" ? decision.to : undefined,
+  });
+}
+
+function packLib() {
+  return require("./handoff-pack");
+}
+
+function landLocal(decision, deps) {
+  const extra = {};
+  const packs = deps.pack || packLib();
+  try {
+    extra.packFile = packs.writePack(packs.buildPack({
+      from: decision.from,
+      to: decision.to,
+      why: decision.reason,
+      lastUser: deps.lastUser || "",
+      openWork: deps.openWork || "",
+      agents: deps.agents || [],
+    }));
+    extra.pack = packs.packBody ? packs.packBody(extra.packFile) : extra.packFile;
+    extra.chief = packs.pickChief(deps.agents || [], decision.chiefId);
+  } catch (e) {
+    extra.packError = String(e && e.message || e);
+  }
+  if (decision.action === "local-clone") {
+    const src = deps.sourceAgentId;
+    try {
+      extra.clone = (deps.clone || require("./clone-bot").cloneAgent)(src, {
+        profileId: decision.from,
+        lastUser: deps.lastUser || "",
+        name: deps.sourceName || "",
+        excerpts: deps.excerpts || [],
+      });
+    } catch (e) {
+      extra.cloneError = String(e && e.message || e);
+    }
+  }
+  const send = typeof deps.sendPrompt === "function" ? deps.sendPrompt : null;
+  const body = extra.pack || deps.lastUser || "";
+  if (send && extra.chief && body) {
+    extra.sent = send(extra.chief.id, body);
+  }
+  return extra;
+}
+
+async function act(decision, deps) {
+  deps = deps || {};
+  if (!decision || !decision.action) return { ok: false, skipped: true };
+  if (busy) return { ok: false, skipped: true, reason: "busy" };
+  busy = true;
+  try {
+    if (decision.stopFirst !== false) {
+      const pause = deps.pause || (async () => require("./bot-pause").pause({
+        seats: decision.from ? [decision.from] : undefined,
+      }));
+      await pause();
+    }
+    if (decision.action === "soft-stop") {
+      return { ok: true, action: "soft-stop", from: decision.from };
+    }
+    if (decision.action === "pin-account") {
+      const models = deps.models || require("./model-lib");
+      models.writeConfig({ payingProfileId: decision.to, cursorAccount: decision.to });
+      markFire(decision);
+      return { ok: true, action: "pin-account", to: decision.to };
+    }
+    if (decision.action === "cursor" || decision.action === "local-chief" || decision.action === "local-clone") {
+      const sw = require("./switch-profile");
+      const switchTo = deps.switchTo || ((id, opts) => sw.switchTo(id, opts));
+      const to = decision.to;
+      const land = decision.action === "local-chief" || decision.action === "local-clone";
+      // Record fire timestamp before potential process relaunch
+      markFire(decision);
+      if (to && store.get(to) && store.getActive().id !== to) {
+        switchTo(to, { relaunch: land ? false : deps.relaunch !== false });
+      }
+      const extra = land ? landLocal(decision, deps) : {};
+      if (land && extra.clone && extra.clone.destId) {
+        const body = extra.pack || deps.lastUser || "Continue this work on Local D.";
+        try {
+          const job = path.join(store.ROOT, "runtime", "continue-job.json");
+          fs.mkdirSync(path.dirname(job), { recursive: true });
+          fs.writeFileSync(job, JSON.stringify({
+            agentId: extra.clone.destId,
+            text: body,
+            at: Date.now(),
+          }) + "\n");
+          extra.continueJob = job;
+        } catch (e) {
+          extra.continueJobError = String(e && e.message || e);
+        }
+      }
+      if (land && deps.relaunch !== false) {
+        if (typeof deps.relaunchD === "function") deps.relaunchD();
+        else if (!sw.isolatedRoot || !sw.isolatedRoot()) sw.relaunchD();
+      }
+      return Object.assign({ ok: true, action: decision.action, to }, extra);
+    }
+    return { ok: false, error: "unknown action " + decision.action };
+  } finally {
+    busy = false;
+  }
+}
+
+module.exports = { act };

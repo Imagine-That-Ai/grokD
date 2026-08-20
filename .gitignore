@@ -1,0 +1,44 @@
+# Local identity, tokens, live seats
+browser-profiles/
+profile-data/
+local-d-secrets/
+runtime/
+active-env.json
+failover-config.json
+model-config.json
+onboarding.json
+profiles.json
+**/sand-secrets.json
+**/gateway-descriptor.json
+**/*-secrets.json
+
+# Packed app + extracted asar + scratch
+dist/
+drop/
+# Local kitchen (box dumps, screenshots, old seat icons). The shipping
+# face-tat mascot is assets/grokd-icon.icns — that file is tracked.
+hack/
+# Official host-main is extracted from YOUR Grok Bot asar into host/.
+host/
+/host-main.cjs
+/*-worker.cjs
+proof/
+*.log
+*.tmp
+
+# Editor / OS
+.DS_Store
+node_modules/
+*.lock
+
+# Third-party marks — do not ship
+assets/spacex_xai_logo.svg
+assets/stock_grokbot_icon.png
+assets/ref_a_grokbot_icon.png
+
+# Oversized local-only meshes and unused likenesses (do not git these)
+assets/meshy_elon.glb
+assets/meshy_elon_textured.glb
+assets/elon_musk_v7.glb
+assets/elon_musk_v7_rigged.glb
+assets/founder-musk-actions.glb

@@ -1,0 +1,29 @@
+name: check
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  door:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: unit door
+        run: |
+          node test-unit.js
+          node test-profiles.js
+          node test-box-state.js
+          node test-computer-cover.js
+          node test-paths.js
+          node test-patch-asar.js
+          node test-account-identity.js
+          node test-bot-pause.js
+          node test-failover.js
+          node test-failover-act.js
+          node test-onboarding.js
+          node test-clone-handoff.js
+          node test-space-holes.js
+          node test-install-look.js
