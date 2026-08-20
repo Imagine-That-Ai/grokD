@@ -1,16 +1,16 @@
 # grok"D"
 
-One custom Grok Bot. **Local** bots on this Mac, or **your** Cursor login. Other people install the app — they do not get your chats or tokens.
+Local bots on this Mac, or your Cursor login. Other people install from [Imagine-That-Ai/grokD](https://github.com/Imagine-That-Ai/grokD). They do not get your chats or tokens.
 
-See `INSTALL.md` to pack and hand it over. Do not zip `profile-data/` or `GrokBotSeat4`.
+Pack and hand over: `INSTALL.md`. Do not zip `profile-data/` or `GrokBotSeat4`.
 
-Welcome docs (same files as the public repo):
+Guides:
 
-- [`grokD_Welcome_Guide.pdf`](grokD_Welcome_Guide.pdf) — print / PDF guide
-- [`splash/onboarding-apple.html`](splash/onboarding-apple.html) — interactive Seat-in
-- [`welcome_guide_source.html`](welcome_guide_source.html) — print-template source
+- [`grokD_Welcome_Guide.pdf`](grokD_Welcome_Guide.pdf)
+- [`splash/onboarding-apple.html`](splash/onboarding-apple.html)
+- [`welcome_guide_source.html`](welcome_guide_source.html)
 
-Strangers should **clone and run `./install.sh`**, or drag a notarized grok"D" drop from `./pack-drop.sh` into Applications. Both need official Grok Bot already on the Mac. This repo does not attach xAI’s app. If an xAI update replaces `app.asar`, launch repairs the overlay hook when possible (`repair-overlay.sh`). Official Cursor fall-over cannot keep the same cloud thread; **Locally · Continue** seeds a local agent with the last turns.
+Strangers clone that public repo and run `./install.sh`, or drag a notarized drop from `./pack-drop.sh`. Official Grok Bot has to be on the Mac first. If an xAI update replaces `app.asar`, `repair-overlay.sh` tries to put the hook back. Official Cursor fall-over cannot keep the same cloud thread; **Locally · Continue** seeds a local agent with the last turns.
 
 # Local box
 

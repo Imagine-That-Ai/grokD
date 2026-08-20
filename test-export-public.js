@@ -45,6 +45,7 @@ assert(readme.includes("welcome_guide_source.html"), "print template linked");
 assert(!readme.includes("/tmp/grokbot-hack"), "no kitchen story");
 assert(!readme.includes("albertonunez"), "no home path");
 assert(!readme.includes("There is no notarized installer yet"), "stale no-drop docs");
+assert(!readme.includes("same files as the public repo"), "no kitchen self-talk");
 assert(readme.includes("./install.sh"), "clone install");
 assert(readme.includes("pack-drop.sh"), "drop path named");
 assert(readme.includes("does not host that"), "repo does not attach the .app");
