@@ -870,15 +870,22 @@ function frame(now) {
 }
 
 function ensureDom() {
-  const cover = document.querySelector(".sand-access-cover");
+  const cover = document.querySelector(".sand-access-cover") || document.querySelector("#sand-app") || document.body;
   if (!cover) return false;
-  if (getComputedStyle(cover).position === "static") cover.style.position = "relative";
+  if (cover !== document.body && getComputedStyle(cover).position === "static") cover.style.position = "relative";
   wrap = document.getElementById("gd-kernel");
   if (!wrap || wrap.parentNode !== cover) {
     if (wrap) wrap.remove();
     wrap = document.createElement("div");
     wrap.id = "gd-kernel";
     wrap.setAttribute("aria-hidden", "true");
+    if (cover === document.body) {
+      wrap.style.position = "fixed";
+      wrap.style.inset = "0";
+      wrap.style.pointerEvents = "none";
+      wrap.style.zIndex = "0";
+      wrap.style.opacity = "0.85";
+    }
     glCanvas = document.createElement("canvas");
     glCanvas.id = "gd-kernel-gl";
     far = document.createElement("canvas");

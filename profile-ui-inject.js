@@ -3325,6 +3325,10 @@
     } catch (e) {
       try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[plasma-selectors] " + e + "\n"); } catch (_) {}
     }
+    try {
+      const logos = require(path.join(ROOT, "provider-logos.js"));
+      require(path.join(ROOT, "space-kernel.js")).start(logos.ORBITERS || []);
+    } catch (_) {}
     try { require(path.join(ROOT, "glass-theme.js")).start(); } catch (_) {}
     try { candyGrokMarks(); } catch (_) {}
     try { require(path.join(ROOT, "cursor-model-bubble.js")).start(); } catch (_) {}

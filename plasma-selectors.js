@@ -1151,8 +1151,13 @@
     const container = document.createElement('div');
     container.id = 'pure-lava-orbs-root';
     container.className = 'pure-lava-wrapper';
-    container.style.top = Math.max(5, savedPos.top) + 'px';
-    container.style.left = Math.max(5, savedPos.left) + 'px';
+    
+    let maxLeft = Math.max(20, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 180);
+    let maxTop = Math.max(20, (typeof window !== 'undefined' ? window.innerHeight : 800) - 100);
+    let topPos = Math.min(maxTop, Math.max(12, savedPos.top || 12));
+    let leftPos = Math.min(maxLeft, Math.max(20, savedPos.left || 82));
+    container.style.top = topPos + 'px';
+    container.style.left = leftPos + 'px';
 
     // State
     let activeProf = getActiveProfile();
