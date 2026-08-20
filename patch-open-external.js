@@ -17,6 +17,22 @@ try {
     app.name = "Grok Bot";
     const DISPLAY = 'grok"D"';
     try { app.setAboutPanelOptions({ applicationName: DISPLAY }); } catch (_) {}
+    try {
+      if (app.dock && typeof app.dock.setIcon === "function") {
+        const iconCandidates = [
+          path.join(ROOT, "hack", "icons", "icon-D.icns"),
+          path.join(ROOT, "hack", "grokd_edgefill.icns"),
+          path.join(ROOT, "hack", "grokd_icon.icns"),
+          path.join(process.resourcesPath, "icon.icns"),
+        ];
+        for (const ic of iconCandidates) {
+          if (fs.existsSync(ic)) {
+            app.dock.setIcon(ic);
+            break;
+          }
+        }
+      }
+    } catch (_) {}
     const { BrowserWindow } = require("electron");
     const updateTitle = (win) => {
       if (!win || win.isDestroyed()) return;

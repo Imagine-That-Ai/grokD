@@ -102,10 +102,21 @@ import pathlib
 loc = pathlib.Path(path).parent / "Resources" / "en.lproj"
 loc.mkdir(parents=True, exist_ok=True)
 (loc / "InfoPlist.strings").write_text(
-    'CFBundleDisplayName = "grok\\"D\\"";\n',
+    'CFBundleDisplayName = "grok\\"D\\"";\nCFBundleName = "grok\\"D\\"";\n',
     encoding="utf-8",
 )
 PY
+
+# Copy custom Grok D icon
+ICON_SRC="$HERE/hack/icons/icon-D.icns"
+if [ ! -f "$ICON_SRC" ] && [ -f "$HERE/hack/grokd_edgefill.icns" ]; then
+  ICON_SRC="$HERE/hack/grokd_edgefill.icns"
+fi
+if [ -f "$ICON_SRC" ]; then
+  cp "$ICON_SRC" "$DEST/Contents/Resources/icon.icns"
+  cp "$ICON_SRC" "$DEST/Contents/Resources/electron.icns" 2>/dev/null || true
+  cp "$ICON_SRC" "$DEST/Contents/Resources/app.icns" 2>/dev/null || true
+fi
 
 # Rename helper apps to match CFBundleName so Electron finds them
 python3 - "$DEST/Contents/Frameworks" <<'PY'
