@@ -20,7 +20,7 @@ function need(a, b) {
   return Math.max(a.r * k.MARCH_R + b.r * k.DISK_R, b.r * k.MARCH_R + a.r * k.DISK_R);
 }
 function checkSky(holes, slack, where) {
-  assert(holes.length >= 1 && holes.length <= k.HOLE_MAX, where + " count " + holes.length);
+  assert(holes.length >= 1, where + " empty sky");
   for (const h of holes) {
     assert(h.u >= 0 && h.u <= 1 && h.v >= 0 && h.v <= 1, where + " on screen");
     assert(h.r > 0 && h.r < 200, where + " radius " + h.r);
@@ -38,7 +38,7 @@ function checkSky(holes, slack, where) {
 
 {
   const sky = k.seedHoles();
-  assert(sky.length >= k.HOLE_MIN && sky.length <= k.HOLE_MAX, "count " + sky.length);
+  assert(sky.length === 1, "one horizon: " + sky.length);
   sky.forEach((h) => assert(k.clearOfMark(h.u, h.v), "clear of the mark"));
   sky.forEach((h) => assert(h.fade === 1, "opens as a sky, not a fade-in"));
   checkSky(sky, 1.0, "seed");
@@ -69,17 +69,16 @@ ok("never-the-same");
   let minR = Infinity;
   let maxR = 0;
   let travel = 0;
-  let births = 0;
-  let deaths = 0;
+  // a dying hole is replaced inside the same tick, so succession shows up as
+  // new identities, not as a change in count
+  const lived = new Set(sky);
   let counts = new Set();
   let seen = sky.length;
   const dt = 1 / 30;
   for (let step = 0; step < 30 * 60 * 30; step++) {
-    const before = sky.length;
     const has = sky.includes(watch);
     sky = k.tickHoles(sky, dt, step * dt);
-    if (sky.length > before) births++;
-    if (sky.length < before) deaths++;
+    sky.forEach((h) => lived.add(h));
     counts.add(sky.length);
     seen = Math.max(seen, sky.length);
     if (has && sky.includes(watch)) {
@@ -92,14 +91,15 @@ ok("never-the-same");
   assert(sky.length >= k.HOLE_MIN, "never starves: " + sky.length);
   assert(maxR / minR > 1.15, "radius breathes: " + minR.toFixed(1) + ".." + maxR.toFixed(1));
   assert(travel > 0.01, "position drifts: " + travel.toFixed(4));
-  assert(births > 0 && deaths > 0, "sky turns over: " + births + " born, " + deaths + " gone");
-  assert(counts.size > 1, "count varies over time: " + [...counts].join());
-  assert(seen <= k.HOLE_MAX, "never past the shader's slots: " + seen);
+  assert(lived.size > 3, "the sky turns over: " + lived.size + " holes in half an hour");
+  assert(!sky.includes(watch), "the one it opened with is long gone");
+  assert([...counts].every((c) => c === 1), "one horizon at a time: " + [...counts].join());
+  assert(seen === k.HOLE_MAX, "never past the slot: " + seen);
 }
 ok("tickHoles");
 
 {
-  // a full sky refuses to add more rather than stacking holes on each other
+  // the placement rule still holds if the ceiling is ever raised again
   const packed = [];
   for (let i = 0; i < 12; i++) {
     const born = k.makeHole(packed);
@@ -111,25 +111,21 @@ ok("tickHoles");
 ok("makeHole-declines");
 
 {
-  // the point of the bands: a sky of two or three must not read as one hole
-  // drawn three times
-  let runs = 0;
-  let spread = 0;
-  let tempSpread = 0;
-  for (let i = 0; i < 60; i++) {
-    const sky = k.seedHoles();
-    if (sky.length < 2) continue;
-    runs++;
-    const rs = sky.map((h) => h.r0).sort((a, b) => a - b);
-    const ts = sky.map((h) => h.temp).sort((a, b) => a - b);
-    spread += rs[rs.length - 1] / rs[0];
-    tempSpread += ts[ts.length - 1] - ts[0];
+  // one slot, so the variety is in the succession: each hole has to differ from
+  // the one it replaced, in size and in disk temperature
+  let sizeJump = 0;
+  let tempJump = 0;
+  let prev = k.makeHole([]);
+  for (let i = 0; i < 40; i++) {
+    const next = k.makeHole([]);
+    sizeJump += Math.max(next.r0, prev.r0) / Math.min(next.r0, prev.r0);
+    tempJump += Math.abs(next.temp - prev.temp);
+    prev = next;
   }
-  assert(runs > 5, "some skies hold more than one hole: " + runs);
-  assert(spread / runs > 1.5, "sizes differ: " + (spread / runs).toFixed(2) + "x");
-  assert(tempSpread / runs > 0.25, "temperatures differ: " + (tempSpread / runs).toFixed(2));
-  assert(k.pickBand(k.SIZE_BANDS, [80], () => 0.5) < 50, "picks a band away from what is up");
+  assert(sizeJump / 40 > 1.5, "the next hole is a different size: " + (sizeJump / 40).toFixed(2) + "x");
+  assert(tempJump / 40 > 0.25, "and a different colour: " + (tempJump / 40).toFixed(2));
+  assert(k.pickBand(k.SIZE_BANDS, [80], () => 0.5) < 50, "picks a band away from the last one");
 }
-ok("variety");
+ok("succession");
 
 console.log(`\n${n}/6 space-hole checks passed`);

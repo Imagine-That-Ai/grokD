@@ -263,7 +263,7 @@ vec3 renderHole(vec2 frag, vec4 H, vec4 O, float t, out vec3 skyHit, out float s
   // reading as a drawn circle.
   float b = length(q);
   float ring = exp(-pow((b - BCRIT) / 0.055, 2.0));
-  vec3 ringCol = accum * 2.2 + diskColour(1.15, O.z) * 0.05;
+  vec3 ringCol = accum * 2.2 + diskColour(1.15, O.z) * mix(0.05, 0.42, uLight);
   col += ringCol * ring * (1.0 - captured);
 
   return col;
@@ -317,11 +317,14 @@ vec4 nebula(vec2 frag, vec4 N, vec4 L, float t) {
 
   // By day the same cloud is lit, not luminous: pastel, low contrast, and the
   // dust lanes read as shadow rather than as holes punched in the sky.
-  vec3 lit = mix(vec3(0.98, 0.86, 0.86), vec3(0.80, 0.90, 0.97), hue);
-  lit = mix(lit, vec3(0.99, 0.92, 0.83), core * 0.8);
-  lit *= 0.86 + 0.18 * dust;
+  vec3 lit = mix(vec3(0.98, 0.83, 0.82), vec3(0.82, 0.90, 0.98), hue);
+  lit = mix(lit, vec3(0.99, 0.93, 0.85), core * 0.8);
+  lit = mix(lit, vec3(0.90, 0.95, 0.94), 0.25 * (1.0 - hue));   // pale teal edge
+  lit *= 0.94 + 0.10 * dust;                                    // lanes shade, not black
   vec3 out3 = mix(col * (0.85 + 0.75 * energy), lit, uLight);
-  return vec4(out3 * dens, clamp(dens * 1.35, 0.0, 0.92));
+  // high cloud, not weather: by day it only tints the sky it sits on
+  float alpha = clamp(dens * 1.35, 0.0, 0.92) * mix(1.0, 0.52, uLight);
+  return vec4(out3 * alpha, alpha);
 }
 
 // ------------------------------------------------------------------ assemble
@@ -346,16 +349,22 @@ void main() {
 
   vec3 sky = background(frag);
   vec3 emis = vec3(0.0);
+  float skyLeft = 1.0;   // 0 where the horizon has taken the background
   if (inside > 0.5) {
     vec3 hit;
     float mask;
     vec3 hole = renderHole(frag, H, O, uTime, hit, mask);
     float march = H.z / BCRIT * RMARCH;
-    float edge = smoothstep(march, march * 0.88, length(frag - H.xy));
+    float edge = smoothstep(march, march * mix(0.88, 0.66, uLight), length(frag - H.xy));
     // outside the march the weak-field sky already stands; inside, the horizon
     // decides how much sky is left and the disk adds on top
     sky = mix(sky, skyColour(hit.xy) * mask, edge);
     emis = hole * edge;
+    skyLeft = mix(1.0, mask, edge);
+    float b = length(frag - H.xy) / max(H.z / BCRIT, 1e-4);
+    float collar = exp(-pow((b - BCRIT) / 1.35, 2.0));
+    sky *= 1.0 - 0.62 * collar * uLight;
+    skyLeft *= 1.0 - 0.62 * collar * uLight;
   }
 
   vec4 cloud = vec4(0.0);
@@ -365,20 +374,24 @@ void main() {
     cloud.rgb = cloud.rgb * (1.0 - n.a) + n.rgb;
     cloud.a = cloud.a * (1.0 - n.a) + n.a;
   }
+  // the cloud is out there with the stars, so whatever ate the sky ate it too
+  cloud *= skyLeft;
 
   // Night: everything is emission, tonemapped together. Day: the sky is already
-  // display-referred, the cloud sits over it, and only the disk is HDR.
+  // display-referred, the cloud is lit matter over it, and only the disk is HDR.
   vec3 night = sky + cloud.rgb + emis;
   night = night / (night + vec3(0.86));
   vec3 dayBase = mix(sky, cloud.a > 0.001 ? cloud.rgb / cloud.a : sky, cloud.a);
-  vec3 day = dayBase + emis / (emis + vec3(0.55));
+  vec3 e = emis / (emis + vec3(1.30));
+  vec3 hot = normalize(emis + vec3(1e-4)) * 1.35 + vec3(0.36);
+  vec3 day = mix(dayBase, clamp(hot, 0.0, 1.15), clamp(e * 1.08, 0.0, 1.0));
   vec3 col = mix(night, day, uLight);
   col = pow(col, vec3(0.92));
   gl_FragColor = vec4(col, 1.0);
 }
 `;
 
-// Must match MAXH / MAXA in the shader.
+// Must match MAXH / MAXN in the shader.
 const MAXH = 4;
 const MAXN = 4;
 

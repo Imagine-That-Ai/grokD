@@ -62,4 +62,12 @@ function writePack(text) {
   return file;
 }
 
-module.exports = { pickChief, buildPack, writePack, ROOT };
+function packBody(pack) {
+  const s = String(pack || "");
+  if (/\.md$/.test(s) && fs.existsSync(s)) {
+    try { return fs.readFileSync(s, "utf8"); } catch { return s; }
+  }
+  return s;
+}
+
+module.exports = { pickChief, buildPack, writePack, packBody, ROOT };

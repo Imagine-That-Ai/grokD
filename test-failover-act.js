@@ -43,8 +43,9 @@ const ok = (name) => { n++; console.log("PASS ", name); };
     sourceAgentId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
     clone: (id) => { clones.push(id); return { destId: "clone-1" }; },
     pack: {
-      buildPack: (o) => { packs.push(o); return "# pack"; },
-      writePack: (t) => "/tmp/pack.md",
+      buildPack: (o) => { packs.push(o); return "# pack\nhello"; },
+      writePack: (t) => t,
+      packBody: (t) => t,
       pickChief: () => ({ id: "chief", name: "Chief" }),
     },
     sendPrompt: () => true,

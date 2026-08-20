@@ -4,7 +4,7 @@ One custom Grok Bot. **Local** bots on this Mac, or **your** Cursor login. Other
 
 See `INSTALL.md` to pack and hand it over. Do not zip `profile-data/` or `GrokBotSeat4`.
 
-Strangers should **clone and run `./install.sh`**. That builds D on their Mac (Gatekeeper allows a local build). Do not ship a downloaded `.app` until it is notarized. If an xAI update replaces `app.asar`, launch repairs the overlay hook when possible (`repair-overlay.sh`). Official Cursor fall-over cannot keep the same cloud thread; **Locally · Continue** seeds a local agent with the last turns.
+Strangers should **clone and run `./install.sh`**. That builds D on their Mac and `open`s it from the script. Finder may still warn once on an ad-hoc signature. Do not ship a downloaded `.app` until it is notarized. If an xAI update replaces `app.asar`, launch repairs the overlay hook when possible (`repair-overlay.sh`). Official Cursor fall-over cannot keep the same cloud thread; **Locally · Continue** seeds a local agent with the last turns.
 
 # Local box
 
@@ -20,10 +20,20 @@ Local mode talks to this machine, not to a signed-in cloud box.
 
 Scripts are also copied to `~/.grok/grokbot-d/`. Official from-agent chrome is not exposed on `sendPrompt`; bot-to-bot still uses `[Bot-to-bot from NAME]:` on the wire. `bot-chatter.js` hides that raw text in the transcript: a run of inter-bot turns collapses to one marker (`3 messages with <Bot>`, `Messaged <marks> 3 Bots`) in each bot’s own colour, and clicking it opens their view-only chat. Outbound sends are read back out of the recipients’ `store.db`, since this box only records them there.
 
-The seat cover draws its own sky: `space-field-gl.js` back-traces the holes (up to
-four at once, each with its own disk temperature) and the curtains, while
-`space-kernel.js` decides how many there are, drifts and breathes them, and
-retires one to make room for the next — so no two covers look alike.
+The seat cover draws its own sky. `space-field-gl.js` back-traces **one** event
+horizon and paints the nebulae; `space-kernel.js` drifts and breathes that
+horizon, then retires it for a fresh one from a different size and disk
+temperature band — so succession, not quantity, is where the variety comes from.
+Light mode is daybreak: cream-to-pale-blue sky with a low sun, stars burned off,
+the shadow still black behind a dark collar and photon ring, nebulae reduced to
+lit pastel cloud. It follows `prefers-color-scheme`, which the app drives through
+Electron's `themeSource`, so it flips with the app's own theme setting.
+
+To look at either without changing your theme:
+
+```bash
+node -e "require('$HOME/.grok/grokbot-d/command-client').sendCommand('cover',{mode:'light'})"   # or dark / auto
+```
 
 Do not kill **Grok Bot B**.
 

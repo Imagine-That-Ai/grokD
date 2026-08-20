@@ -189,14 +189,16 @@ function seedGalaxy() {
 // the top. Nothing here is fixed: the sky carries between HOLE_MIN and HOLE_MAX
 // holes, each drifting, breathing and eventually giving its slot to a new one.
 const HOLE_MIN = 1;
-const HOLE_MAX = 3;              // MAXH in space-field-gl.js is the ceiling
+const HOLE_MAX = 1;              // one horizon at a time; MAXH is the ceiling
 const HOLE_BUDGET = 178;         // total shadow radius; the march cost is area
 
-// A sky of three same-sized gold holes reads as wallpaper. Each new hole takes
-// the size band and the disk temperature furthest from what is already up, so
-// a giant cool one and a small blue-hot one can share the frame.
+// With a single slot the variety has to come from succession: each hole takes
+// the size band and the disk temperature furthest from the one it replaces, so
+// a giant cool one gives way to a small blue-hot one rather than to its twin.
 const SIZE_BANDS = [[58, 94], [30, 46], [15, 26]];
 const TEMP_BANDS = [[0.0, 0.14], [0.34, 0.56], [0.78, 1.0]];
+
+let lastSpec = { r: null, temp: null };
 
 function pickBand(bands, used, rand) {
   let best = bands[0];
@@ -243,7 +245,12 @@ function makeHole(existing) {
   const room = HOLE_BUDGET - spent;
   if (room < 24) return null;
   const ref = refSize();
-  const r = Math.max(14, Math.min(room, pickBand(SIZE_BANDS, others.map((x) => x.r0), rand)));
+  const usedR = others.map((x) => x.r0);
+  const usedT = others.map((x) => x.temp);
+  if (lastSpec.r != null) usedR.push(lastSpec.r);
+  if (lastSpec.temp != null) usedT.push(lastSpec.temp);
+  const r = Math.max(14, Math.min(room, pickBand(SIZE_BANDS, usedR, rand)));
+  const temp = pickBand(TEMP_BANDS, usedT, rand);
   let u = -1;
   let v = -1;
   for (let tries = 0; tries < 40; tries++) {
@@ -259,10 +266,11 @@ function makeHole(existing) {
     if (!clash) { u = tu; v = tv; break; }
   }
   if (u < 0) return null; // no room left in this sky, stay at the current count
+  lastSpec = { r, temp };
   return {
     u0: u, v0: v, r0: r,
     u, v, r,
-    temp: pickBand(TEMP_BANDS, others.map((x) => x.temp), rand),
+    temp,
     gain: 0.78 + rand() * 0.5,
     inc: 1.04 + rand() * 0.42,
     pa: rand() * Math.PI * 2,
@@ -281,7 +289,7 @@ function makeHole(existing) {
     },
     life: 0,
     grow: 5 + rand() * 6,
-    max: 48 + rand() * 90,
+    max: 42 + rand() * 58,
     sink: 7 + rand() * 8,
     fade: 0,
   };
@@ -691,7 +699,7 @@ function drawRings(ctx, cx, cy, pitch, yaw) {
         else ctx.lineTo(p.x, p.y);
       }
       ctx.closePath();
-      const ink = isLight() ? 0.16 + b.dens * 0.16 : 0.09 + b.dens * 0.1;
+      const ink = isLight() ? 0.24 + b.dens * 0.26 : 0.09 + b.dens * 0.1;
       ctx.strokeStyle = "rgba(" + rgb + "," + ink.toFixed(3) + ")";
       ctx.lineWidth = 1.2;
       ctx.stroke();
@@ -744,7 +752,7 @@ function drawDust(ctx, cx, cy, pitch, yaw, front) {
     const p = project(st.x, st.y, st.z, pitch, yaw);
     if ((p.z >= 0) !== front) continue;
     const sun = 0.28 + 0.72 * Math.max(0, (st.x * SUN.x + st.y * SUN.y) / (d.a || 1) * -1 + 0.35);
-    const a = d.lum * sun * (front ? 0.95 : 0.42);
+    const a = d.lum * sun * (front ? 0.95 : 0.42) * (isLight() ? 1.35 : 1);
     ctx.fillStyle = "rgba(" + rgb + "," + a.toFixed(3) + ")";
     const sz = d.s * (front ? 1 : 0.75);
     ctx.fillRect(p.x, p.y, sz, sz);

@@ -190,7 +190,8 @@ if b"profile-ui-inject.js" not in data:
     raise SystemExit("install: overlay hook missing from app.asar")
 print("hook ok")
 PY
-codesign --force --deep --sign - "$DEST" >/tmp/grokD-install-codesign.out 2>&1 || true
+codesign --remove-signature "$DEST" >/tmp/grokD-install-codesign.out 2>&1 || true
+codesign --force --deep --sign - "$DEST" >>/tmp/grokD-install-codesign.out 2>&1 || true
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 xattr -cr "$DEST" 2>/dev/null || true
 

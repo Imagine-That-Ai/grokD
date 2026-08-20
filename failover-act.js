@@ -23,18 +23,24 @@ function markFire(decision) {
   });
 }
 
+function packLib() {
+  return require("./handoff-pack");
+}
+
 function landLocal(decision, deps) {
   const extra = {};
+  const packs = deps.pack || packLib();
   try {
-    const packLib = deps.pack || require("./handoff-pack");
-    extra.pack = packLib.writePack(packLib.buildPack({
+    extra.packFile = packs.writePack(packs.buildPack({
       from: decision.from,
       to: decision.to,
       why: decision.reason,
       lastUser: deps.lastUser || "",
+      openWork: deps.openWork || "",
       agents: deps.agents || [],
     }));
-    extra.chief = packLib.pickChief(deps.agents || [], decision.chiefId);
+    extra.pack = packs.packBody ? packs.packBody(extra.packFile) : extra.packFile;
+    extra.chief = packs.pickChief(deps.agents || [], decision.chiefId);
   } catch (e) {
     extra.packError = String(e && e.message || e);
   }
@@ -45,13 +51,16 @@ function landLocal(decision, deps) {
         profileId: decision.from,
         lastUser: deps.lastUser || "",
         name: deps.sourceName || "",
+        excerpts: deps.excerpts || [],
       });
     } catch (e) {
       extra.cloneError = String(e && e.message || e);
     }
   }
-  if (typeof deps.sendPrompt === "function" && extra.chief && extra.pack) {
-    extra.sent = deps.sendPrompt(extra.chief.id, extra.pack);
+  const send = typeof deps.sendPrompt === "function" ? deps.sendPrompt : null;
+  const body = extra.pack || deps.lastUser || "";
+  if (send && extra.chief && body) {
+    extra.sent = send(extra.chief.id, body);
   }
   return extra;
 }
@@ -88,7 +97,10 @@ async function act(decision, deps) {
       }
       const extra = land ? landLocal(decision, deps) : {};
       if (land && extra.clone && extra.clone.destId && typeof deps.sendPrompt === "function") {
-        extra.continued = deps.sendPrompt(extra.clone.destId, extra.pack || deps.lastUser || "Continue.");
+        extra.continued = deps.sendPrompt(
+          extra.clone.destId,
+          extra.pack || deps.lastUser || "Continue this work on Local D."
+        );
       }
       if (land && deps.relaunch !== false) {
         if (typeof deps.relaunchD === "function") deps.relaunchD();

@@ -9,7 +9,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "grok-clone-"));
 process.env.GROK_PROFILE_ROOT = tmp;
 process.env.GROKBOT_HACK = path.join(tmp, "hack");
 const { cloneAgent } = require("./clone-bot");
-const { pickChief, buildPack, writePack } = require("./handoff-pack");
+const { pickChief, buildPack, writePack, packBody } = require("./handoff-pack");
 
 let n = 0;
 const ok = (name) => { n++; console.log("PASS ", name); };
@@ -87,6 +87,8 @@ assert(/Night Shift Chief/.test(pack), pack);
 const file = writePack(pack);
 assert(fs.existsSync(file), file);
 assert(fs.readFileSync(file, "utf8") === pack, "written");
+assert(packBody(file) === pack, "packBody reads file");
+assert(packBody("# already markdown") === "# already markdown", "packBody passthrough");
 ok("pack");
 
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -165,13 +165,19 @@ function getLocalAgents() {
 }
 
 function sqliteRead(db, sql) {
+  // macOS sqlite3's -readonly flag treats the next arg as SQL, not the file.
+  // URI mode=ro works. Never throw disk I/O at the HTTP client.
   try {
-    return execFileSync("sqlite3", ["-readonly", db, sql], {
-      encoding: "utf8", timeout: 4000,
-    });
+    return execFileSync("python3", ["-c",
+      "import sqlite3,sys\n"
+      + "c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro', uri=True, timeout=2)\n"
+      + "rows=c.execute(sys.argv[2])\n"
+      + "print('\\n'.join('' if r[0] is None else str(r[0]) for r in rows))\n",
+      db, sql,
+    ], { encoding: "utf8", timeout: 4000 });
   } catch {
     try {
-      return execFileSync("sqlite3", ["file:" + db + "?mode=ro", sql], {
+      return execFileSync("sqlite3", ["file:" + db + "?mode=ro&immutable=1", sql], {
         encoding: "utf8", timeout: 4000,
       });
     } catch {

@@ -348,6 +348,35 @@
         background: #07070a;
         overflow: hidden;
       }
+      /* Daybreak: the same sky a few hours later. The canvas paints itself, so
+         these are only the surfaces behind and above it. */
+      @media (prefers-color-scheme: light) {
+        .sand-access-cover { background: #fbf7f1 !important; }
+        #gd-kernel { background: #fbf7f1; }
+        #sand-access-cover-heading,
+        .sand-access-cover h1 { text-shadow: 0 1px 16px rgba(255,255,255,0.85); }
+        #gd-sats .gd-sat { filter: drop-shadow(0 2px 4px rgba(24,26,38,0.30)); }
+        /* the copy is white for the night sky; on paper it has to be ink */
+        .sand-access-cover h1,
+        .sand-access-cover h2,
+        .sand-access-cover p,
+        .sand-access-cover span,
+        #sand-access-cover-heading { color: #16171d !important; }
+        .sand-access-cover p { color: rgba(22,23,29,0.72) !important; }
+      }
+      .sand-access-cover[data-gd-scheme="light"] { background: #fbf7f1 !important; }
+      .sand-access-cover[data-gd-scheme="light"] #gd-kernel { background: #fbf7f1; }
+      .sand-access-cover[data-gd-scheme="light"] #sand-access-cover-heading,
+      .sand-access-cover[data-gd-scheme="light"] h1 { text-shadow: 0 1px 16px rgba(255,255,255,0.85); }
+      .sand-access-cover[data-gd-scheme="light"] #gd-sats .gd-sat {
+        filter: drop-shadow(0 2px 4px rgba(24,26,38,0.30));
+      }
+      .sand-access-cover[data-gd-scheme="light"] h1,
+      .sand-access-cover[data-gd-scheme="light"] h2,
+      .sand-access-cover[data-gd-scheme="light"] span,
+      .sand-access-cover[data-gd-scheme="light"] #sand-access-cover-heading { color: #16171d !important; }
+      .sand-access-cover[data-gd-scheme="light"] p { color: rgba(22,23,29,0.72) !important; }
+      .sand-access-cover[data-gd-scheme="dark"] { background: #07070a !important; }
       #gd-kernel-gl, #gd-kernel-far, #gd-kernel-near, #gd-sats {
         position: absolute;
         inset: 0;
@@ -1554,12 +1583,46 @@
         agents = Array.isArray(j) ? j : [];
       } catch {}
       const focus = agents.find((a) => a && a.isRunning) || agents[0] || null;
+      let lastUser = "";
+      try { lastUser = String(window.__grokdLastPrompt || ""); } catch {}
+      if (!lastUser && focus) lastUser = String(focus.lastMessagePreview || focus.lastUserMessage || "");
+      if (!lastUser) {
+        try {
+          const box = document.querySelector("textarea,[contenteditable='true']");
+          lastUser = String((box && (box.value || box.innerText)) || "").trim();
+        } catch {}
+      }
+      lastUser = lastUser.slice(0, 4000);
+      let excerpts = [];
+      if (active.kind === "local" && focus && focus.id) {
+        try {
+          const shim = require(path.join(ROOT, "gateway-shim.js"));
+          const raw = shim.readEntries(focus.id);
+          excerpts = String(raw || "").split("\n").filter(Boolean).slice(0, 20);
+        } catch {}
+      }
       const { act } = require(path.join(ROOT, "failover-act.js"));
+      const sendPrompt = (id, text) => {
+        try {
+          execFileSync("curl", [
+            "-sS", "-X", "POST", "http://127.0.0.1:1337/api/sendPrompt",
+            "-H", "content-type: application/json",
+            "-H", "authorization: Bearer fake-gateway-token",
+            "-d", JSON.stringify({ agentId: id, prompt: String(text || ""), awaitTurn: false }),
+          ], { encoding: "utf8", timeout: 8000 });
+          return true;
+        } catch (e) {
+          return false;
+        }
+      };
       const r = await act(decision, {
         relaunch: decision.action === "cursor" || decision.action === "local-chief" || decision.action === "local-clone",
-        lastUser: focus && (focus.lastMessagePreview || ""),
+        lastUser,
+        excerpts,
         sourceAgentId: focus && focus.id,
+        sourceName: focus && focus.name,
         agents,
+        sendPrompt,
       });
       if (r && r.ok) toast("Fall over · " + decision.action + (decision.to ? " → " + decision.to : ""));
     } catch (e) {
@@ -2847,6 +2910,15 @@
           out.reply = await waitForReply(cmd.token || text.slice(0, 12), cmd.timeoutMs || 90000);
           out.ok = !!(out.reply && out.reply.includes(cmd.token || text.slice(0, 12)));
         }
+      } else if (cmd.op === "cover") {
+        const kernel = require(path.join(ROOT, "space-kernel.js"));
+        out.cover = kernel.setScheme(cmd.mode);
+        const cover = document.querySelector(".sand-access-cover");
+        if (cover) {
+          if (cmd.mode === "light" || cmd.mode === "dark") cover.dataset.gdScheme = cmd.mode;
+          else delete cover.dataset.gdScheme;
+        }
+        out.ok = true;
       } else if (cmd.op === "chatter") {
         out.chatter = require(path.join(ROOT, "bot-chatter.js")).preview(cmd.mode);
         out.ok = !!out.chatter;
