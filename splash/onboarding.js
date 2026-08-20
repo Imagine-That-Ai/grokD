@@ -7,6 +7,42 @@
   "use strict";
 
   const FILE = "onboarding.json";
+  const OPENBURNBAR_PORT = 8320;
+  const LOCAL_PROXY_CHOICES = [
+    {
+      id: "openburnbar",
+      name: "OpenBurnBar",
+      port: 8320,
+      description: "OpenAI-compatible npm gateway",
+      badge: "Recommended",
+      logo: "../assets/burnbar-mark.svg",
+    },
+    {
+      id: "cliproxy",
+      name: "CLI Proxy",
+      port: 8322,
+      description: "Direct local CLI bridge",
+      logo: "../assets/cliproxy-mark.svg",
+    },
+    {
+      id: "vibeproxy",
+      name: "Vibe Proxy",
+      port: 8325,
+      description: "Alternate local route",
+      logo: "../assets/vibeproxy-mark.svg",
+    },
+  ];
+
+  function isOpenBurnBarHealthPayload(value, port) {
+    return Boolean(
+      value &&
+      value.status === "ok" &&
+      value.service === "openburnbar-proxy" &&
+      Number.isInteger(value.pid) &&
+      value.pid > 0 &&
+      value.port === (port ?? OPENBURNBAR_PORT)
+    );
+  }
 
   function host() {
     if (typeof require === "function") {
@@ -37,6 +73,25 @@
           },
           ports: { box: 1337, host: 1338, infer: 8787, cliproxy: 8322, openburnbar: 8320, vibeproxy: 8325 },
           portUp(port) {
+            if (port === OPENBURNBAR_PORT) {
+              try {
+                const output = execFileSync("/usr/bin/curl", [
+                  "--fail",
+                  "--silent",
+                  "--show-error",
+                  "--max-time",
+                  "1",
+                  "--noproxy",
+                  "*",
+                  `http://127.0.0.1:${port}/health`,
+                ], {
+                  encoding: "utf8",
+                  stdio: ["ignore", "pipe", "ignore"],
+                  timeout: 1500,
+                });
+                return isOpenBurnBarHealthPayload(JSON.parse(output), port);
+              } catch { return false; }
+            }
             if (models && models.portOpen) return models.portOpen(port);
             try {
               execFileSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], { stdio: "ignore", timeout: 800 });
@@ -54,11 +109,21 @@
           },
           models() { return (models && models.CURATED) || []; },
           currentModel() { return models ? models.resolveConfig() : { model: "grok-4.6", proxyTarget: "openburnbar" }; },
-          installOpenBurnBar() {
+          installOpenBurnBar(onFailure) {
             const inst = path.join(ROOT, "openburnbar-install.js");
             let info = { install: { proxy: "npx -y openburnbar proxy --port 8320 --allow-local-key" } };
             try { info = require(inst).info(); } catch (_) {}
-            spawn("npx", ["-y", "openburnbar", "proxy", "--port", "8320", "--allow-local-key"], { detached: true, stdio: "ignore" }).unref();
+            const child = spawn("npx", ["-y", "openburnbar", "proxy", "--port", "8320", "--allow-local-key"], { detached: true, stdio: "ignore" });
+            const fail = (error, log) => {
+              if (log) process.stderr.write("Could not start OpenBurnBar proxy: " + error.message + "\n");
+              if (typeof onFailure === "function") onFailure(error);
+            };
+            child.once("error", (error) => fail(error, true));
+            child.once("exit", (code, signal) => {
+              const detail = signal ? ` (${signal})` : ` (exit ${code})`;
+              fail(new Error("OpenBurnBar exited before it became ready" + detail), false);
+            });
+            child.unref();
             return info;
           },
           seats() {
@@ -120,7 +185,12 @@
       readState() { return this._s; },
       writeState(s) { this._s = s; try { localStorage.setItem("gd-onboard", JSON.stringify(s)); } catch (_) {} },
       ports: { box: 1337, host: 1338, infer: 8787, cliproxy: 8322, openburnbar: 8320, vibeproxy: 8325 },
-      portUp(port) { return port === 1337 || port === 8322; },
+      _openBurnBarInstalled: false,
+      portUp(port) {
+        return port === 1337 ||
+          port === 8322 ||
+          (port === OPENBURNBAR_PORT && this._openBurnBarInstalled);
+      },
       startBox() {},
       setProxy(target, model) { return { proxyTarget: target, model: model || "grok-4.6" }; },
       models() {
@@ -131,7 +201,13 @@
         ];
       },
       currentModel() { return { model: "grok-4.6", proxyTarget: "openburnbar" }; },
-      installOpenBurnBar() { return { npmProxy: false, install: { macApp: "npx -y openburnbar app install" } }; },
+      installOpenBurnBar() {
+        this._openBurnBarInstalled = true;
+        return {
+          npmProxy: true,
+          install: { proxy: "npx -y openburnbar proxy --port 8320 --allow-local-key" },
+        };
+      },
       seats() { return [{ id: "cursor-a", name: "Grok A", seat: "A" }]; },
       switchTo() {},
       _signIns: 0,
@@ -183,7 +259,9 @@
     const root = el("div");
     root.id = "gd-onboard";
     root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
     root.setAttribute("aria-label", "Set up Grok D");
+    root.setAttribute("aria-describedby", "gd-lede");
     root.innerHTML = `
       <div class="gd-mesh"></div>
       <div class="gd-vignette"></div>
@@ -201,7 +279,7 @@
           <p class="gd-lede" id="gd-lede"></p>
           <div id="gd-body"></div>
           <div class="gd-actions" id="gd-actions"></div>
-          <p class="gd-note" id="gd-note"></p>
+          <p class="gd-note" id="gd-note" role="status" aria-live="polite"></p>
         </section>
       </div>
     `;
@@ -385,47 +463,101 @@
 
     function renderLocalProxy() {
       setBead(0.5);
-      root.querySelector("#gd-kicker").textContent = "This Mac · proxy";
-      root.querySelector("#gd-title").textContent = "Where should answers come from?";
-      root.querySelector("#gd-lede").textContent = "OpenBurnBar is the default. Install the Mac app if it is not running. npm cannot start the proxy yet — that is the Mac daemon.";
+      root.querySelector("#gd-kicker").textContent = "This Mac · routing";
+      root.querySelector("#gd-title").textContent = "Choose your gateway";
+      root.querySelector("#gd-lede").textContent = "Pick the local bridge D should use. OpenBurnBar is the recommended default and installs from npm.";
       const up = probe();
       const body = root.querySelector("#gd-body");
       body.innerHTML = "";
-      const list = el("div", "gd-list");
-      const choices = [
-        ["openburnbar", "OpenBurnBar", ":8320", up.openburnbar],
-        ["cliproxy", "CLI Proxy", ":8322", up.cliproxy],
-        ["vibeproxy", "Vibe Proxy", ":8325", up.vibeproxy],
-      ];
-      choices.forEach(([id, name, port, ok]) => {
-        const row = el("div", "gd-row");
-        const left = document.createElement("div");
-        left.innerHTML = `<strong></strong><small></small>`;
-        left.querySelector("strong").textContent = name;
-        left.querySelector("small").textContent = port + (ok ? " · listening" : " · not running");
-        const use = btn(id === "openburnbar" && !ok ? "Install & use" : "Use this", id === "openburnbar" ? "gd-go" : "gd-ghost", () => {
+      const list = el("div", "gd-proxy-grid");
+      LOCAL_PROXY_CHOICES.forEach((choice) => {
+        const { id, name, port, description, badge, logo } = choice;
+        const ok = up[id];
+        const row = el("div", "gd-proxy-choice" + (id === "openburnbar" ? " is-primary" : ""));
+        row.dataset.proxy = id;
+
+        const identity = el("div", "gd-proxy-identity");
+        const mark = el("span", "gd-proxy-logo");
+        const image = document.createElement("img");
+        image.src = logo;
+        image.alt = "";
+        image.setAttribute("aria-hidden", "true");
+        mark.appendChild(image);
+
+        const copy = el("div", "gd-proxy-copy");
+        if (badge) copy.appendChild(el("span", "gd-proxy-badge", badge));
+        copy.appendChild(el("strong", "", name));
+        copy.appendChild(el("small", "", description));
+        identity.appendChild(mark);
+        identity.appendChild(copy);
+
+        const controls = el("div", "gd-proxy-controls");
+        const endpoint = el("code", "gd-proxy-port", "localhost:" + port);
+        const pill = el("span", "gd-pill " + (ok ? "up" : "down"), ok ? "Ready" : "Offline");
+        pill.setAttribute("aria-label", name + " is " + (ok ? "ready" : "offline"));
+        const useLabel = id === "openburnbar" && !ok ? "Install & use" : "Use " + name;
+        const use = btn(useLabel, id === "openburnbar" ? "gd-go" : "gd-ghost", () => {
+          const select = () => {
+            try { h.setProxy(id, state.model); } catch (e) { note(String(e.message || e), "bad"); return; }
+            state.proxyTarget = id;
+            go("local-model");
+          };
           if (id === "openburnbar" && !ok && h.installOpenBurnBar) {
-            try { h.installOpenBurnBar(); } catch (e) { note(String(e.message || e), "bad"); }
-            note("Installing OpenBurnBar.app via npm, then launching it. The OpenAI proxy is the app daemon, not npx proxy.", "");
+            let launchError = null;
+            let launchReady = false;
+            try {
+              h.installOpenBurnBar((error) => { if (!launchReady) launchError = error; });
+            } catch (e) {
+              note(String(e.message || e), "bad");
+              return;
+            }
+            use.disabled = true;
+            use.textContent = "Starting…";
+            row.setAttribute("aria-busy", "true");
+            note("Starting the OpenBurnBar npm gateway on :8320. The first npx run can take a moment.", "");
+            const deadline = Date.now() + 30000;
+            const waitForReady = () => {
+              if (state.step !== "local-proxy") return;
+              if (launchError) {
+                use.disabled = false;
+                use.textContent = "Try again";
+                row.removeAttribute("aria-busy");
+                note(String(launchError.message || launchError), "bad");
+                return;
+              }
+              if (h.portUp(h.ports.openburnbar)) {
+                launchReady = true;
+                select();
+                return;
+              }
+              if (Date.now() >= deadline) {
+                use.disabled = false;
+                use.textContent = "Try again";
+                row.removeAttribute("aria-busy");
+                note(
+                  "OpenBurnBar did not start. Run npx -y openburnbar proxy --port 8320 --allow-local-key in Terminal to see the error.",
+                  "bad"
+                );
+                return;
+              }
+              setTimeout(waitForReady, 500);
+            };
+            setTimeout(waitForReady, 250);
+            return;
           }
-          state.proxyTarget = id;
-          try { h.setProxy(id, state.model); } catch (e) { note(String(e.message || e), "bad"); return; }
-          go("local-model");
+          select();
         });
-        const pill = el("span", "gd-pill " + (ok ? "up" : "down"), ok ? "up" : "down");
-        const right = document.createElement("div");
-        right.style.display = "flex";
-        right.style.gap = "8px";
-        right.style.alignItems = "center";
-        right.appendChild(pill);
-        right.appendChild(use);
-        row.appendChild(left);
-        row.appendChild(right);
+        use.classList.add("gd-proxy-button");
+        controls.appendChild(endpoint);
+        controls.appendChild(pill);
+        controls.appendChild(use);
+        row.appendChild(identity);
+        row.appendChild(controls);
         list.appendChild(row);
       });
       body.appendChild(list);
       if (!up.openburnbar) {
-        note("No proxy via npm yet. Install the app: npx -y openburnbar app install — then open OpenBurnBar. GET http://127.0.0.1:1337/install/openburnbar has the same commands.", "");
+        note("OpenBurnBar is offline. You can also start it in Terminal: npx -y openburnbar proxy --port 8320 --allow-local-key", "");
       }
       actions([btn("Back", "gd-ghost", () => go("local-box")), btn("Skip", "gd-skip", skip)]);
     }
@@ -633,7 +765,9 @@
     }
 
     function render() {
+      note("");
       const step = state.step || "choose";
+      root.dataset.step = step;
       if (step === "choose") renderChoose();
       else if (step === "local-box") renderLocalBox();
       else if (step === "local-proxy") renderLocalProxy();
@@ -668,5 +802,5 @@
     return s;
   }
 
-  return { start, shouldShow, markSplashSeen, host, blank };
+  return { start, shouldShow, markSplashSeen, host, blank, isOpenBurnBarHealthPayload };
 });

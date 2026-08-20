@@ -1,9 +1,8 @@
 "use strict";
 
-// Honest install contract for grokD. The published `openburnbar` npm package
-// is MCP / resume / memory / Mac-app install. It does not start the local
-// OpenAI-compatible gateway. That gateway is the native OpenBurnBar daemon
-// (127.0.0.1:8317). grokD's `openburnbar` target still talks to :8320.
+// Install contract for grokD. The `openburnbar` npm package owns the
+// loopback OpenAI-compatible gateway on :8320. The native app remains an
+// optional install path, and its Swift daemon remains separate on :8317.
 
 const DAEMON_PORT = 8317;
 const GROKD_PORT = 8320;

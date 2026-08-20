@@ -5,12 +5,6 @@
  * =========================================================================
  */
 
-(function(global) {
-  // Universal Node / Browser compatibility layer
-  const fs = typeof require !== 'undefined' ? (function() { try { return require('fs'); } catch { return null; } })() : null;
-  const child_process = typeof require !== 'undefined' ? (function() { try { return require('child_process'); } catch { return null; } })() : null;
-
-
 (function() {
   const { execSync, spawn } = require('child_process');
   const fs = require('fs');
@@ -1898,20 +1892,3 @@
     }
   }, 1000);
 })();
-
-
-  // Export to global scope
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { injectPureLavaOrbs };
-  }
-  global.injectPureLavaOrbs = injectPureLavaOrbs;
-
-  // Auto-mount if document is ready
-  if (typeof document !== 'undefined') {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', injectPureLavaOrbs);
-    } else {
-      injectPureLavaOrbs();
-    }
-  }
-})(typeof window !== 'undefined' ? window : globalThis);

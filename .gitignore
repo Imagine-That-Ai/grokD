@@ -17,7 +17,10 @@ dist/
 # Local kitchen (box dumps, screenshots, old seat icons). The shipping
 # face-tat mascot is assets/grokd-icon.icns — that file is tracked.
 hack/
+# Official host-main is extracted from YOUR Grok Bot asar into host/.
 host/
+/host-main.cjs
+/*-worker.cjs
 proof/
 *.log
 *.tmp
