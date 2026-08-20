@@ -11,17 +11,16 @@ try {
   const box = require(path.join(ROOT, "box-state.js"));
 
   try {
-    // Process name must stay "Grok Bot" so official tokens decrypt
-    // (keychain: "Grok Bot Safe Storage"). People see grok"D".
-    app.setName("Grok Bot");
-    app.name = "Grok Bot";
     const DISPLAY = 'grok"D"';
+    app.setName(DISPLAY);
+    app.name = DISPLAY;
     try { app.setAboutPanelOptions({ applicationName: DISPLAY }); } catch (_) {}
     try {
       if (app.dock && typeof app.dock.setIcon === "function") {
         const iconCandidates = [
-          path.join(ROOT, "hack", "icons", "icon-D.icns"),
           path.join(ROOT, "hack", "grokd_edgefill.icns"),
+          path.join(ROOT, "hack", "grokd_icon_color.icns"),
+          path.join(ROOT, "hack", "icons", "icon-D.icns"),
           path.join(ROOT, "hack", "grokd_icon.icns"),
           path.join(process.resourcesPath, "icon.icns"),
         ];
