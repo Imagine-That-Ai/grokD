@@ -30,7 +30,7 @@ assert(fs.existsSync(path.join(dest, "install.sh")), "installer");
 assert(fs.existsSync(path.join(dest, "LICENSE")), "license");
 assert(fs.existsSync(path.join(dest, "SECURITY.md")), "security");
 assert(fs.existsSync(path.join(dest, "README.md")), "readme");
-assert(fs.existsSync(path.join(dest, "grokD_Welcome_Guide.pdf")), "welcome pdf");
+assert(!fs.existsSync(path.join(dest, "grokD_Welcome_Guide.pdf")), "no stale brochure pdf");
 assert(fs.existsSync(path.join(dest, "splash", "onboarding-apple.html")), "onboarding html");
 assert(fs.existsSync(path.join(dest, "welcome_guide_source.html")), "print template");
 assert(!fs.readFileSync(path.join(dest, "PROFILES.md"), "utf8").includes("live-cursor-chat.js"), "no kitchen chat script");
@@ -39,7 +39,7 @@ const readme = fs.readFileSync(path.join(dest, "README.md"), "utf8");
 assert(readme.includes('grok"D"'), "display name");
 assert(readme.includes("Grok Bot D.app"), "folder name");
 assert(readme.includes("will not click Recover"), "cursor limit");
-assert(readme.includes("grokD_Welcome_Guide.pdf"), "welcome pdf linked");
+assert(!readme.includes("grokD_Welcome_Guide.pdf"), "no brochure pdf linked");
 assert(readme.includes("onboarding-apple.html"), "onboarding linked");
 assert(readme.includes("welcome_guide_source.html"), "print template linked");
 assert(!readme.includes("/tmp/grokbot-hack"), "no kitchen story");
@@ -89,6 +89,13 @@ assert(!onboard.includes("Alberto · Personal"), "named seat chip");
 assert(onboard.includes("You · Personal"), "generic seat chip");
 assert(!onboard.includes("Imagine-That-Ai/grok-D"), "no kitchen repo url");
 assert(!onboard.includes("Pending Elon"), "no pending-elon joke");
+assert(!onboard.includes("funding frontier"), "no elon/spacex credit");
+assert(!onboard.includes("BUILT WITH"), "no built-with spacex chip");
+assert(!onboard.includes("Elon Musk"), "no elon credit");
+const guide = fs.readFileSync(path.join(dest, "welcome_guide_source.html"), "utf8");
+assert(!guide.includes("funding frontier"), "guide has no elon/spacex credit");
+assert(!guide.includes("Elon Musk"), "guide has no elon credit");
+assert(guide.includes("Imagine That overlay for Grok Bot"), "guide overlay chip");
 
 const needles = [
   "albertonunez",
@@ -100,6 +107,8 @@ const needles = [
   "alberto@example.com",
   "alberto8793",
   "Pending Elon",
+  "Elon Musk",
+  "funding frontier",
   "Imagine-That-Ai/grok-D",
   "google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7",
 ];

@@ -14,7 +14,7 @@ git ls-files -z | rsync -a --from0 --files-from=- ./ "$STAGE"/
 
 # Kitchen-only — not a public product. The export script itself holds
 # search strings for Alberto's identity; it must not ship.
-# Welcome docs (PDF, onboarding HTML, print template) stay in the public tree.
+# Welcome HTML stays in the public tree. The stale brochure PDF does not.
 rm -f "$STAGE/export-public.sh" \
   "$STAGE/PROMPT-npm-openburnbar-proxy.md" \
   "$STAGE/live-cursor-chat.js" \
@@ -60,6 +60,8 @@ jobs:
           needles = [
               "Imagine-That-Ai/grok" + "-D",
               "Pending " + "Elon",
+              "Elon " + "Musk",
+              "funding " + "frontier",
               "google-oauth2|user_",
           ]
           proc = subprocess.run(
@@ -206,7 +208,6 @@ for p in root.rglob("*"):
     text2 = text2.replace("Alberto · Personal", "You · Personal").replace("alberto@example.com", "user@example.com")
     text2 = text2.replace("https://github.com/Imagine-That-Ai/grok-D", "https://github.com/Imagine-That-Ai/grokD")
     text2 = text2.replace("Imagine-That-Ai/grok-D", "Imagine-That-Ai/grokD")
-    text2 = text2.replace("Unofficial Crossover · Pending Elon seeing my tweet", "Imagine That overlay for Grok Bot")
     text2 = text2.replace("Liquid Metal Hub", "Cursor seats")
     text2 = text2.replace("BurnBar Hub", "BurnBar")
     if text2 != text:
@@ -231,6 +232,8 @@ needles = (
     "alberto@example.com",
     "alberto8793",
     "Pending Elon",
+    "Elon Musk",
+    "funding frontier",
     "Imagine-That-Ai/grok-D",
     "google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7",
     "/Users/albertonunez",
@@ -305,7 +308,7 @@ First launch is Seat in. Pick This Mac (local box), Cursor (import or sign in), 
 
 [CubeLove](https://cubelove.ai) is live on iPhone. grok"D" on the phone is not yet. Want the TestFlight alpha when it is? Email [alberto@imagine-that.ai](mailto:alberto@imagine-that.ai).
 
-Guides: [`grokD_Welcome_Guide.pdf`](grokD_Welcome_Guide.pdf), [`splash/onboarding-apple.html`](splash/onboarding-apple.html), [`welcome_guide_source.html`](welcome_guide_source.html).
+Guides: [`splash/onboarding-apple.html`](splash/onboarding-apple.html), [`welcome_guide_source.html`](welcome_guide_source.html).
 
 Dock name is grok"D". Folder is `Grok Bot D.app`. Apple menu and keychain stay `Grok Bot` so renderer secrets stay on the official keychain. Do not rename the folder to `grok"D".app` — quotes in the path crash Electron.
 
