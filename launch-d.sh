@@ -38,20 +38,28 @@ else
 fi
 
 ASAR="$DIR/../Resources/app.asar"
-if [ -f "$ASAR" ] && ! python3 - "$ASAR" "$HOME_DST" <<'PY'
+HOOK_OK=1
+if [ -f "$ASAR" ]; then
+  if command -v grep >/dev/null && grep -a -q -F "profile-ui-inject.js" "$ASAR"; then
+    HOOK_OK=1
+  elif command -v python3 >/dev/null && python3 - "$ASAR" <<'PY'
 import sys, pathlib
-asar, root = sys.argv[1], sys.argv[2]
-ok = b"profile-ui-inject.js" in pathlib.Path(asar).read_bytes()
-pathlib.Path(root, "runtime").mkdir(parents=True, exist_ok=True)
-pathlib.Path(root, "runtime", "overlay-status.json").write_text(
-    ('{"ok": true, "hook": "present"}\n' if ok else '{"ok": false, "hook": "missing"}\n')
-)
-sys.exit(0 if ok else 1)
+sys.exit(0 if b"profile-ui-inject.js" in pathlib.Path(sys.argv[1]).read_bytes() else 1)
 PY
-then
-  echo "overlay hook missing from asar — run install.sh" >>"$HOME_DST/runtime/overlay-status.log" 2>/dev/null || true
-  if [ -x "$HOME_DST/repair-overlay.sh" ]; then
-    "$HOME_DST/repair-overlay.sh" "$DIR/../.." >>"$HOME_DST/runtime/overlay-repair.log" 2>&1 || true
+  then
+    HOOK_OK=1
+  else
+    HOOK_OK=0
+  fi
+  mkdir -p "$HOME_DST/runtime" 2>/dev/null || true
+  if [ "$HOOK_OK" -eq 1 ]; then
+    printf '%s\n' '{"ok": true, "hook": "present"}' >"$HOME_DST/runtime/overlay-status.json" 2>/dev/null || true
+  else
+    printf '%s\n' '{"ok": false, "hook": "missing"}' >"$HOME_DST/runtime/overlay-status.json" 2>/dev/null || true
+    echo "overlay hook missing from asar — run install.sh" >>"$HOME_DST/runtime/overlay-status.log" 2>/dev/null || true
+    if [ -x "$HOME_DST/repair-overlay.sh" ]; then
+      "$HOME_DST/repair-overlay.sh" "$DIR/../.." >>"$HOME_DST/runtime/overlay-repair.log" 2>&1 || true
+    fi
   fi
 fi
 

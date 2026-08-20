@@ -54,10 +54,12 @@ resolve_node_deps() {
   fi
   local app unpacked
   for app in \
+    "$HOME/Applications/Grok Bot D.app" \
     "$DURABLE/dist/Grok Bot D.app" \
     "$DURABLE/dist/Grok Bot.app" \
     "/Applications/Grok Bot D.app" \
-    "/Applications/Grok Bot.app"
+    "/Applications/Grok Bot.app" \
+    "$HOME/Applications/Grok Bot.app"
   do
     unpacked="$app/Contents/Resources/app.asar.unpacked/dist/deps"
     if [ -d "$unpacked/tree-sitter" ] || [ -d "$unpacked/web-tree-sitter" ]; then

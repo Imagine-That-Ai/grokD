@@ -21,19 +21,16 @@ fi
 npx --yes asar pack "$WORK/asar" "$WORK/app.asar" || exit 1
 cp "$WORK/app.asar" "$ASAR"
 python3 - "$APP" <<'PY'
-import hashlib, re, sys
+import hashlib, plistlib, sys
 app = sys.argv[1]
 dest = app + "/Contents/Resources/app.asar"
-plist = app + "/Contents/Info.plist"
+plist_path = app + "/Contents/Info.plist"
 h = hashlib.sha256(open(dest, "rb").read()).hexdigest()
-c = open(plist, encoding="utf-8").read()
-c2, n = re.subn(
-    r'(<key>ElectronAsarIntegrity</key>\s*<dict>\s*<key>Resources/app\.asar</key>\s*<dict>\s*<key>algorithm</key>\s*<string>SHA256</string>\s*<key>hash</key>\s*<string>)[^<]+(</string>)',
-    r'\g<1>' + h + r'\g<2>',
-    c, count=1,
-)
-if n == 1:
-    open(plist, "w", encoding="utf-8").write(c2)
+info = plistlib.loads(open(plist_path, "rb").read())
+block = info.setdefault("ElectronAsarIntegrity", {}).setdefault("Resources/app.asar", {})
+block["algorithm"] = "SHA256"
+block["hash"] = h
+open(plist_path, "wb").write(plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False))
 PY
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 xattr -cr "$APP" 2>/dev/null || true

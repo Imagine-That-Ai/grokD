@@ -1,0 +1,30 @@
+// Read-only SQLite that works on macOS while a WAL writer is live.
+// Apple's sqlite3 -readonly does not take FILENAME SQL the way we need.
+"use strict";
+
+const { execFileSync } = require("child_process");
+
+function sqliteRead(db, sql, opts) {
+  const timeout = (opts && opts.timeout) || 4000;
+  const encoding = (opts && opts.encoding) || "utf8";
+  const maxBuffer = (opts && opts.maxBuffer) || 4 * 1024 * 1024;
+  try {
+    return execFileSync("python3", ["-c",
+      "import sqlite3,sys\n"
+      + "c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro', uri=True, timeout=2)\n"
+      + "rows=c.execute(sys.argv[2])\n"
+      + "print('\\n'.join('' if r[0] is None else str(r[0]) for r in rows))\n",
+      db, sql,
+    ], { encoding, timeout, maxBuffer, stdio: ["ignore", "pipe", "pipe"] });
+  } catch {
+    try {
+      return execFileSync("sqlite3", ["file:" + db + "?mode=ro&immutable=1", sql], {
+        encoding, timeout, maxBuffer, stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      return "";
+    }
+  }
+}
+
+module.exports = { sqliteRead };

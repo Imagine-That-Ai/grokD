@@ -278,9 +278,8 @@ function agentsDir() {
 // A read-only handle cannot create the -shm a WAL database needs, and the box
 // leaves that file behind only while an agent is warm. Plain open, SELECT only.
 function sql(db, query) {
-  const opts = { encoding: "utf8", timeout: 6000, maxBuffer: 32 * 1024 * 1024 };
-  try { return execFileSync(SQLITE, ["-readonly", "-noheader", db, query], opts); }
-  catch { return execFileSync(SQLITE, ["-noheader", db, query], opts); }
+  const { sqliteRead } = require("./sqlite-ro");
+  return sqliteRead(db, query, { timeout: 6000, maxBuffer: 32 * 1024 * 1024 });
 }
 
 function rowsOf(db, query) {

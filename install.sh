@@ -95,7 +95,7 @@ info["CFBundleDisplayName"] = 'grok"D"'
 info["CFBundleName"] = "Grok Bot D"
 info["CFBundleIdentifier"] = "com.imaginethat.grokbot.seatd"
 with open(path, "wb") as f:
-    plistlib.dump(info, f, sort_keys=False)
+    plistlib.dump(info, f, fmt=plistlib.FMT_XML, sort_keys=False)
 PY
 
 BIN="$DEST/Contents/MacOS/Grok Bot"
@@ -141,7 +141,10 @@ if [ -f "$PRELOAD" ] && ! grep -q 'profile-ui-inject.js' "$PRELOAD"; then
   cat >> "$PRELOAD" <<'EOF'
 
 try {
-  require(require("os").homedir() + "/.grok/grokbot-d/profile-ui-inject.js");
+  const os = require("os");
+  const path = require("path");
+  const root = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
+  require(path.join(root, "profile-ui-inject.js"));
 } catch (e) {
   try { require("fs").appendFileSync("/tmp/grokbot-renderer.log", "[profile-ui-inject] " + e + "\n"); } catch (_) {}
 }
@@ -153,21 +156,16 @@ npx --yes asar pack "$ASAR_SRC" "$WORK/app.asar"
 cp "$WORK/app.asar" "$DEST/Contents/Resources/app.asar"
 
 python3 - "$DEST" <<'PY'
-import hashlib, re, sys
+import hashlib, plistlib, sys
 app = sys.argv[1]
 dest = app + "/Contents/Resources/app.asar"
-plist = app + "/Contents/Info.plist"
+plist_path = app + "/Contents/Info.plist"
 h = hashlib.sha256(open(dest, "rb").read()).hexdigest()
-c = open(plist, encoding="utf-8").read()
-c2, n = re.subn(
-    r'(<key>ElectronAsarIntegrity</key>\s*<dict>\s*<key>Resources/app\.asar</key>\s*<dict>\s*<key>algorithm</key>\s*<string>SHA256</string>\s*<key>hash</key>\s*<string>)[^<]+(</string>)',
-    r'\g<1>' + h + r'\g<2>',
-    c,
-    count=1,
-)
-if n != 1:
-    raise SystemExit("could not update ElectronAsarIntegrity")
-open(plist, "w", encoding="utf-8").write(c2)
+info = plistlib.loads(open(plist_path, "rb").read())
+block = info.setdefault("ElectronAsarIntegrity", {}).setdefault("Resources/app.asar", {})
+block["algorithm"] = "SHA256"
+block["hash"] = h
+open(plist_path, "wb").write(plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False))
 print("asar hash", h)
 PY
 

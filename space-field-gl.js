@@ -115,21 +115,102 @@ vec2 weakLens(vec2 p, vec4 H) {
   return H.xy + d / bpx * (sky * mpx);
 }
 
-// Night is deep space. Day is the same universe a few hours later: a low sun
-// off to the left, cream near the horizon, pale blue overhead, and the stars
-// burned off except for the few that survive a bright sky.
+// Night is deep space. Day is the same universe a few hours later, and the sky
+// is computed rather than picked: Rayleigh + Mie single scattering with their
+// own phase functions, an optical mass that grows toward the horizon, and a sun
+// that keeps moving. That is where the colour comes from — blue overhead
+// because short wavelengths scatter out, gold along the sun's line because Mie
+// throws long wavelengths forward, and a red band at the horizon because that
+// is the longest path through the air.
+const float PI = 3.14159265;
+const vec3 BETA_R = vec3(0.0058, 0.0135, 0.0331);  // 680 / 550 / 440 nm
+const float BETA_M = 0.0210;
+const float G_MIE = 0.76;
+const float SUN_ANG = 0.0175;   // a touch wider than the true 0.004675 so it reads
+
+float rayleighPhase(float mu) {
+  return 3.0 / (16.0 * PI) * (1.0 + mu * mu);
+}
+
+float miePhase(float mu, float g) {
+  float g2 = g * g;
+  float d = 1.0 + g2 - 2.0 * g * mu;
+  return 3.0 / (8.0 * PI) * ((1.0 - g2) * (1.0 + mu * mu)) / ((2.0 + g2) * pow(max(d, 1e-4), 1.5));
+}
+
+// Preetham's closed-form air mass: cheap, and right where it matters — it runs
+// away as the view drops to the horizon, which is what reddens it.
+float opticalMass(float cosZ) {
+  float c = max(cosZ, 0.0);
+  float zdeg = degrees(acos(clamp(c, -1.0, 1.0)));
+  return 1.0 / (c + 0.15 * pow(max(93.885 - zdeg, 0.5), -1.253));
+}
+
+// two slow terms that never line up: the light keeps moving all day
+vec3 sunDirection() {
+  // mid-morning, climbing and drifting on two periods that never line up
+  float el = 0.30 + 0.14 * (0.5 + 0.5 * sin(uTime * 0.0061 + 1.1))
+                  + 0.05 * sin(uTime * 0.0143);
+  float az = -1.02 + 0.13 * sin(uTime * 0.0037);
+  return normalize(vec3(sin(az), el, cos(az)));
+}
+
+vec3 viewDirection(vec2 p) {
+  vec2 uv = (p - 0.5 * uRes) / max(uRes.y, 1.0);
+  // the horizon sits just under the frame, so the whole cover is sky
+  return normalize(vec3(uv.x, uv.y * 0.52 + 0.145, 1.0));
+}
+
+vec3 daySky(vec2 p) {
+  vec3 dir = viewDirection(p);
+  vec3 sun = sunDirection();
+  float mu = dot(dir, sun);
+
+  float mView = opticalMass(dir.y);
+  float mSun = opticalMass(sun.y);
+  float m = mView + mSun;
+
+  // The colour lives in (1 - transmittance), so the optical depth must not
+  // saturate: at zenith blue is around 0.7 and red near 0.13, which is exactly
+  // the gap that makes a sky blue overhead and red along the horizon. Mie gets
+  // its own, much shorter scale height — sharing Rayleigh's washes it grey.
+  vec3 tauR = BETA_R * 9.0 * m;
+  vec3 tauM = vec3(BETA_M * 2.2 * 0.35 * m);
+  vec3 trans = exp(-(tauR + tauM));
+
+  vec3 sR = BETA_R * rayleighPhase(mu);
+  // the aureole is Mie's, and at full strength it swallows half the frame
+  vec3 sM = vec3(BETA_M) * miePhase(mu, G_MIE) * 0.55;
+  vec3 ratio = (sR + sM) / (BETA_R + vec3(BETA_M));
+  vec3 inscatter = ratio * (1.0 - trans) * vec3(19.0, 18.4, 18.0);
+
+  // second order and up, which is what keeps a real sky from going inky
+  inscatter += vec3(0.10, 0.135, 0.20) * (1.0 - trans);
+
+  // the sun itself, and the aureole Mie already threw forward
+  float ang = acos(clamp(mu, -1.0, 1.0));
+  float disc = smoothstep(SUN_ANG * 1.35, SUN_ANG * 0.55, ang);
+  inscatter += vec3(2.6, 2.3, 1.8) * disc;
+
+  // aerial perspective: the last stretch to the horizon goes pale and warm,
+  // which is also what gives the copy a quiet band to sit on
+  float low = smoothstep(0.30, -0.02, dir.y);
+  inscatter = mix(inscatter, vec3(0.94, 0.91, 0.88), low * 0.30);
+
+  // exposure with a soft shoulder: the sun's neighbourhood keeps its gold
+  // instead of clipping to a white hole, which is the whole point of doing the
+  // scattering rather than painting a gradient
+  return vec3(1.0) - exp(-inscatter * 1.15);
+}
+
 vec3 skyColour(vec2 p) {
-  float y = clamp(p.y / max(uRes.y, 1.0), 0.0, 1.0);
   vec3 night = vec3(0.021, 0.021, 0.034);
-  vec3 day = mix(vec3(0.985, 0.968, 0.945), vec3(0.855, 0.898, 0.955), pow(y, 0.85));
-  vec2 sun = vec2(uRes.x * 0.16, uRes.y * 0.12);
-  float glow = exp(-length(p - sun) / (uRes.y * 0.55));
-  day += vec3(0.055, 0.032, 0.004) * glow;
   vec3 stars = starField(p);
   // by day only the brightest points survive, and they read warm
-  stars *= mix(1.0, 0.10, uLight);
+  stars *= mix(1.0, 0.08, uLight);
   stars = mix(stars, stars * vec3(1.0, 0.93, 0.82), uLight);
-  return mix(night, day, uLight) + stars;
+  if (uLight < 0.001) return night + stars;
+  return mix(night, daySky(p), uLight) + stars;
 }
 
 vec3 background(vec2 p) {
@@ -315,11 +396,23 @@ vec4 nebula(vec2 frag, vec4 N, vec4 L, float t) {
   col += vec3(0.95, 0.52, 0.30) * pow(core, 2.4) * (0.35 + 0.5 * energy);
   col += vec3(0.35, 0.20, 0.62) * smoothstep(0.75, 1.5, r) * 0.5;        // cool halo
 
-  // By day the same cloud is lit, not luminous: pastel, low contrast, and the
-  // dust lanes read as shadow rather than as holes punched in the sky.
-  vec3 lit = mix(vec3(0.98, 0.83, 0.82), vec3(0.82, 0.90, 0.98), hue);
-  lit = mix(lit, vec3(0.99, 0.93, 0.85), core * 0.8);
-  lit = mix(lit, vec3(0.90, 0.95, 0.94), 0.25 * (1.0 - hue));   // pale teal edge
+  // By day the same cloud is lit, not luminous. Where it faces the sun it takes
+  // a warm rim; where it turns away it keeps the sky's own blue in shadow; and
+  // at its thin edges it does what real clouds do near the sun — diffracts,
+  // and shows pastel iridescence.
+  vec3 vdir = viewDirection(frag);
+  vec3 sdir = sunDirection();
+  float mus = clamp(dot(vdir, sdir), 0.0, 1.0);
+  float rim = pow(mus, 6.0);
+  float thin = smoothstep(0.34, 0.02, dens);
+
+  vec3 lit = mix(vec3(0.97, 0.94, 0.93), vec3(0.80, 0.87, 0.97), 0.55 - 0.35 * rim);
+  lit = mix(lit, vec3(1.0, 0.93, 0.80), rim * 0.75);                  // sunward warmth
+  lit = mix(lit, vec3(0.62, 0.70, 0.86), (1.0 - rim) * 0.30 * (1.0 - core)); // shaded blue
+  vec3 irid = 0.5 + 0.5 * cos(6.2831 * (vec3(0.0, 0.33, 0.66)
+              + base * 2.2 + detail * 1.1 + seed));
+  lit = mix(lit, mix(lit, irid, 0.62), thin * rim * 0.85);
+  lit = mix(lit, mix(lit, vec3(0.98, 0.84, 0.92), 0.5), thin * (1.0 - rim) * 0.25);
   lit *= 0.94 + 0.10 * dust;                                    // lanes shade, not black
   vec3 out3 = mix(col * (0.85 + 0.75 * energy), lit, uLight);
   // high cloud, not weather: by day it only tints the sky it sits on
@@ -362,9 +455,9 @@ void main() {
     emis = hole * edge;
     skyLeft = mix(1.0, mask, edge);
     float b = length(frag - H.xy) / max(H.z / BCRIT, 1e-4);
-    float collar = exp(-pow((b - BCRIT) / 1.35, 2.0));
-    sky *= 1.0 - 0.62 * collar * uLight;
-    skyLeft *= 1.0 - 0.62 * collar * uLight;
+    float collar = exp(-pow((b - BCRIT) / 0.95, 2.0));
+    sky *= 1.0 - 0.44 * collar * uLight;
+    skyLeft *= 1.0 - 0.44 * collar * uLight;
   }
 
   vec4 cloud = vec4(0.0);

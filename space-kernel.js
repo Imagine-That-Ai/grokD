@@ -562,8 +562,8 @@ function resizeCanvases() {
 }
 
 function ringRgb() {
-  // by day the ring is ink on paper, not light on black
-  if (isLight()) return "58,66,84";
+  // by day the ring is ink under a blue sky, so it carries that blue
+  if (isLight()) return "46,62,96";
   return mood.ring || "255,170,176";
 }
 

@@ -22,13 +22,16 @@ const HOOK = `
 
 // Disk-loaded Profiles + model picker + command bus.
 try {
-  require(require("os").homedir() + "/.grok/grokbot-d/profile-ui-inject.js");
+  const os = require("os");
+  const path = require("path");
+  const root = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
+  require(path.join(root, "profile-ui-inject.js"));
 } catch (e) {
   try { require("fs").appendFileSync("/tmp/grokbot-renderer.log", "[profile-ui-inject] " + e + "\\n"); } catch (_) {}
 }
 `;
 
-const MAIN_HOOK = `try{require(require("os").homedir()+"/.grok/grokbot-d/patch-open-external.js")}catch(e){try{require("fs").appendFileSync("/tmp/grokbot-renderer.log","[open-ext] "+e+"\\n")}catch(_){}}
+const MAIN_HOOK = `try{const os=require("os"),path=require("path"),root=process.env.GROK_PROFILE_ROOT||path.join(os.homedir(),".grok","grokbot-d");require(path.join(root,"patch-open-external.js"))}catch(e){try{require("fs").appendFileSync("/tmp/grokbot-renderer.log","[open-ext] "+e+"\\n")}catch(_){}}
 `;
 
 function tryReplace(text, from, to, label) {

@@ -24,10 +24,15 @@ The seat cover draws its own sky. `space-field-gl.js` back-traces **one** event
 horizon and paints the nebulae; `space-kernel.js` drifts and breathes that
 horizon, then retires it for a fresh one from a different size and disk
 temperature band — so succession, not quantity, is where the variety comes from.
-Light mode is daybreak: cream-to-pale-blue sky with a low sun, stars burned off,
-the shadow still black behind a dark collar and photon ring, nebulae reduced to
-lit pastel cloud. It follows `prefers-color-scheme`, which the app drives through
-Electron's `themeSource`, so it flips with the app's own theme setting.
+Light mode is daybreak, and the sky is computed rather than picked: Rayleigh +
+Mie single scattering with their own phase functions, Preetham's closed-form air
+mass, a soft-shouldered exposure, and a sun that keeps climbing and drifting on
+two periods that never line up. That is where the colour comes from — blue at
+the zenith, gold along the sun's line, pale and warm toward the horizon. The
+shadow is still black, behind a dark collar and a brighter photon ring; the
+nebulae become lit cloud with a sunward rim, blue shade away from it, and
+iridescence at the thin edges. It follows `prefers-color-scheme`, which the app
+drives through Electron's `themeSource`, so it flips with the app's own theme.
 
 To look at either without changing your theme:
 
