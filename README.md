@@ -46,6 +46,12 @@ account photo, or that seat's mascot if the account has none — and the bubble 
 reflects it like any other orb content. The choice lives in
 `runtime/ui-prefs.json`, not localStorage, so it survives a seat hop.
 
+Two more switches live there. The button in the selector's chin **pauses the
+plasma**: rim, slosh and glow stop and the orbs sit plain — press again for
+plasma. And the account chip bottom-left **collapses to its avatar**; click the
+puck to bring it back. Both remember across restarts (`orbStyle`,
+`chipCollapsed`).
+
 Do not kill **Grok Bot B**.
 
 ## Checks

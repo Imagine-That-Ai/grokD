@@ -165,6 +165,16 @@
     return !!uiPrefs().orbAvatar;
   }
 
+  // "classic" is the selector with our plasma layer paused: no soap rim, no
+  // slosh, no glow — the orbs sit still. Plasma is the default.
+  function orbStyle() {
+    return uiPrefs().orbStyle === "classic" ? "classic" : "plasma";
+  }
+
+  function chipCollapsed() {
+    return !!uiPrefs().chipCollapsed;
+  }
+
   function switchBtn(on, extra, attrs) {
     return `<button type="button" class="gd-sw${on ? " is-on" : ""}${extra ? " " + extra : ""}" ${attrs || ""} aria-pressed="${on ? "true" : "false"}"><i></i></button>`;
   }
@@ -436,6 +446,38 @@
       }
       #gd-sats .gd-sat svg { width: 100%; height: 100%; display: block; }
       .gd-orb-hidden { display: none !important; }
+      /* classic: the plasma layer holds still */
+      .gd-orbs-classic [data-gd-rim] { display: none !important; }
+      .gd-orbs-classic .pure-plasma-orb-1,
+      .gd-orbs-classic .pure-plasma-orb-2 { filter: none !important; }
+      .gd-orbs-classic .pure-plasma-orb-1 *,
+      .gd-orbs-classic .pure-plasma-orb-2 * { animation: none !important; }
+      .gd-orbs-classic .pure-plasma-core-glow { opacity: 0.32 !important; }
+      #gd-orb-style {
+        position: fixed; z-index: 999991; width: 22px; height: 22px; padding: 0;
+        border-radius: 50%; cursor: pointer; display: flex; align-items: center;
+        justify-content: center; color: var(--gd-text);
+        border: 1px solid var(--gd-border); background: var(--gd-card-bg);
+        box-shadow: var(--gd-shadow); backdrop-filter: blur(14px) saturate(160%);
+        -webkit-backdrop-filter: blur(14px) saturate(160%);
+        opacity: 0.55; transition: opacity .15s ease, transform .15s ease;
+      }
+      #gd-orb-style:hover { opacity: 1; transform: scale(1.08); }
+      #gd-orb-style svg { display: block; }
+      /* the chip carries inline sizing from when it is built, so the collapsed
+         puck has to out-rank it */
+      #grok-d-login-chip.is-collapsed {
+        min-width: 0 !important; max-width: none !important;
+        width: 46px !important; height: 46px !important; box-sizing: border-box !important;
+        padding: 5px !important; border-radius: 50% !important; gap: 0 !important;
+        justify-content: center;
+      }
+      #grok-d-login-chip.is-collapsed > *:not(.gd-acc-photo) { display: none !important; }
+      #grok-d-chip-toggle {
+        border: 0; background: transparent; cursor: pointer; padding: 2px;
+        color: var(--gd-text-dim); display: flex; align-items: center; border-radius: 6px;
+      }
+      #grok-d-chip-toggle:hover { color: var(--gd-text); background: rgba(127,127,140,0.18); }
       .pure-plasma-orb-1 .gd-orb-photo {
         position: absolute;
         inset: 0;
@@ -1890,6 +1932,63 @@
     orb.classList.add("gd-orb-avatar");
   }
 
+  // Pause the plasma and the selector falls back to the plain orbs; press again
+  // and the rim, the slosh and the glow come back. The button rides under the
+  // orbs, which is where the thing it changes lives.
+  const PLAY_SVG = `<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><polygon points="8,5 19,12 8,19"/></svg>`;
+  const PAUSE_SVG = `<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><rect x="7" y="5" width="3.6" height="14" rx="1.2"/><rect x="13.4" y="5" width="3.6" height="14" rx="1.2"/></svg>`;
+
+  function applyOrbStyle() {
+    const classic = orbStyle() === "classic";
+    document.documentElement.classList.toggle("gd-orbs-classic", classic);
+    return classic;
+  }
+
+  function positionOrbStyleBtn(btn) {
+    const wrap = document.getElementById("pure-lava-orbs-root");
+    const host = wrap && wrap.offsetWidth ? wrap : document.querySelector(".pure-plasma-orb-1");
+    if (!host || !host.offsetWidth) { btn.style.display = "none"; return; }
+    const r = host.getBoundingClientRect();
+    btn.style.display = "flex";
+    btn.style.top = Math.round(r.bottom - 4) + "px";
+    btn.style.left = Math.round(r.left + r.width / 2 - 11) + "px";
+  }
+
+  function paintOrbStyleBtn() {
+    const classic = applyOrbStyle();
+    const lavaHidden = !!document.querySelector(".sand-access-cover");
+    let btn = document.getElementById("gd-orb-style");
+    if (lavaHidden) {
+      if (btn) btn.remove();
+      return;
+    }
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.id = "gd-orb-style";
+      document.body.appendChild(btn);
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        const next = orbStyle() === "classic" ? "plasma" : "classic";
+        setUiPref("orbStyle", next);
+        paintOrbStyleBtn();
+        try {
+          const rim = require(path.join(ROOT, "bubble-rim.js"));
+          if (next === "classic") rim.stop(); else rim.start();
+        } catch (_) {}
+        toast(next === "classic" ? "Classic orbs — plasma paused" : "Plasma orbs");
+      }, true);
+    }
+    const label = classic ? "Resume plasma" : "Pause plasma (classic orbs)";
+    btn.innerHTML = classic ? PLAY_SVG : PAUSE_SVG;
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+    btn.setAttribute("aria-pressed", classic ? "true" : "false");
+    positionOrbStyleBtn(btn);
+  }
+
   function wirePlasmaSeatOrb() {
     const lava = document.getElementById("pure-lava-orbs-root");
     if (lava) {
@@ -1927,6 +2026,7 @@
       right.addEventListener("click", () => closeSeatActionMenu(), true);
     }
     try { paintSeatOrb(); } catch (_) {}
+    try { paintOrbStyleBtn(); } catch (_) {}
     try { require(path.join(ROOT, "cursor-model-bubble.js")).start(); } catch (_) {}
   }
 
@@ -2642,6 +2742,9 @@
           <div class='gd-acc-hint' style='color:var(--gd-text-dim);font-weight:600;margin-top:2px;font-size:9px'>Click to swap or reset</div>
         </span>
         <button type="button" class="gd-stop-btn" id="gd-chip-stop" title="Stop this seat">${ICONS.stop}</button>
+        <button type="button" id="grok-d-chip-toggle" title="Collapse to the avatar" aria-label="Collapse account chip">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 6 9 12 15 18"/></svg>
+        </button>
         <span class='gd-acc-tip'></span>
       `;
       chip._hasMenuListener = false;
@@ -2651,6 +2754,34 @@
       chip.style.visibility = "hidden";
     } else {
       chip.style.visibility = "visible";
+    }
+
+    // Collapsed, the chip is just the avatar — small enough to forget, and its
+    // own way back. The expand click must not fall through to the swap sheet.
+    const collapsed = chipCollapsed();
+    chip.classList.toggle("is-collapsed", collapsed);
+    chip.title = collapsed ? "Show account" : "";
+    const chipToggle = chip.querySelector("#grok-d-chip-toggle");
+    if (chipToggle && !chipToggle._gdWired) {
+      chipToggle._gdWired = true;
+      chipToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setUiPref("chipCollapsed", true);
+        paintLoginChip();
+      }, true);
+    }
+    if (!chip._gdExpandWired) {
+      chip._gdExpandWired = true;
+      chip.addEventListener("click", (e) => {
+        if (!chipCollapsed()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setUiPref("chipCollapsed", false);
+        paintLoginChip();
+      }, true);
     }
 
     const id = activeId();
@@ -3079,7 +3210,11 @@
     restoreGorgeousUi();
     // Real picker is the packed liquid-glass orbs. Do not draw a second bar.
     // Give those orbs a soap-bubble rim that reflects their own contents.
-    try { require(path.join(ROOT, "bubble-rim.js")).start(); } catch (_) {}
+    if (orbStyle() === "classic") {
+      try { require(path.join(ROOT, "bubble-rim.js")).stop(); } catch (_) {}
+    } else {
+      try { require(path.join(ROOT, "bubble-rim.js")).start(); } catch (_) {}
+    }
     try { require(path.join(ROOT, "glass-theme.js")).start(); } catch (_) {}
     try { candyGrokMarks(); } catch (_) {}
     try { require(path.join(ROOT, "cursor-model-bubble.js")).start(); } catch (_) {}
