@@ -12,8 +12,9 @@ try {
 
   try {
     const DISPLAY = 'grok"D"';
-    app.setName(DISPLAY);
-    app.name = DISPLAY;
+    // Keychain slot is "Grok Bot Safe Storage". Do not setName(DISPLAY) —
+    // quotes and a new name mint a second keychain and drop renderer secrets.
+    app.setName("Grok Bot");
     try { app.setAboutPanelOptions({ applicationName: DISPLAY }); } catch (_) {}
     try {
       if (app.dock && typeof app.dock.setIcon === "function") {

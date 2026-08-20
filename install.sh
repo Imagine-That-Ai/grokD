@@ -5,7 +5,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC=""
-DEST="$HOME/Applications/grok\"D\".app"
+DEST="$HOME/Applications/Grok Bot D.app"
 ROOT="$HOME/.grok/grokbot-d"
 REPLACE=0
 OPEN_APP=1
