@@ -107,6 +107,36 @@ loc.mkdir(parents=True, exist_ok=True)
 )
 PY
 
+# Rename helper apps to match CFBundleName so Electron finds them
+python3 - "$DEST/Contents/Frameworks" <<'PY'
+import os, pathlib, plistlib, sys
+fw = pathlib.Path(sys.argv[1])
+helpers = [
+    ("Grok Bot Helper.app", "Grok Bot D Helper.app", "Grok Bot Helper", "Grok Bot D Helper"),
+    ("Grok Bot Helper (GPU).app", "Grok Bot D Helper (GPU).app", "Grok Bot Helper (GPU)", "Grok Bot D Helper (GPU)"),
+    ("Grok Bot Helper (Plugin).app", "Grok Bot D Helper (Plugin).app", "Grok Bot Helper (Plugin)", "Grok Bot D Helper (Plugin)"),
+    ("Grok Bot Helper (Renderer).app", "Grok Bot D Helper (Renderer).app", "Grok Bot Helper (Renderer)", "Grok Bot D Helper (Renderer)"),
+]
+for old_app, new_app, old_bin, new_bin in helpers:
+    old_p = fw / old_app
+    new_p = fw / new_app
+    if old_p.exists() and old_p != new_p:
+        old_p.rename(new_p)
+    if new_p.exists():
+        bin_dir = new_p / "Contents" / "MacOS"
+        old_b = bin_dir / old_bin
+        new_b = bin_dir / new_bin
+        if old_b.exists() and old_b != new_b:
+            old_b.rename(new_b)
+        plist_path = new_p / "Contents" / "Info.plist"
+        if plist_path.exists():
+            with open(plist_path, "rb") as f:
+                info = plistlib.load(f)
+            info["CFBundleExecutable"] = new_bin
+            with open(plist_path, "wb") as f:
+                plistlib.dump(info, f, fmt=plistlib.FMT_XML, sort_keys=False)
+PY
+
 BIN="$DEST/Contents/MacOS/Grok Bot"
 REAL="$DEST/Contents/MacOS/Grok Bot.real"
 if [ ! -f "$REAL" ]; then
