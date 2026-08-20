@@ -33,6 +33,7 @@ assert(fs.existsSync(path.join(dest, "README.md")), "readme");
 assert(fs.existsSync(path.join(dest, "grokD_Welcome_Guide.pdf")), "welcome pdf");
 assert(fs.existsSync(path.join(dest, "splash", "onboarding-apple.html")), "onboarding html");
 assert(fs.existsSync(path.join(dest, "welcome_guide_source.html")), "print template");
+assert(!fs.readFileSync(path.join(dest, "PROFILES.md"), "utf8").includes("live-cursor-chat.js"), "no kitchen chat script");
 
 const readme = fs.readFileSync(path.join(dest, "README.md"), "utf8");
 assert(readme.includes('grok"D"'), "display name");
@@ -73,7 +74,9 @@ assert(dropSh.includes("Grok Bot D.app"), "public drop dest has no quotes");
 
 const ci = fs.readFileSync(path.join(dest, ".github", "workflows", "check.yml"), "utf8");
 assert(ci.includes("node test-unit.js"), "public CI door");
-assert(!/nunez/i.test(ci), "public CI must not spell identity");
+assert(ci.includes("no kitchen leftovers"), "public CI leftover door");
+assert(!ci.includes("albertonunez"), "public CI must not spell the home path");
+assert(!ci.includes("Imagine-That-Ai/grok-D"), "public CI must not spell kitchen repo");
 
 const onboard = fs.readFileSync(path.join(dest, "splash", "onboarding-apple.html"), "utf8");
 assert(!onboard.includes("Alberto · Personal"), "named seat chip");

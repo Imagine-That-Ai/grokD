@@ -53,6 +53,32 @@ jobs:
           node test-clone-handoff.js
           node test-space-holes.js
           node test-install-look.js
+      - name: no kitchen leftovers
+        run: |
+          python3 - <<'PY'
+          import subprocess, sys
+          needles = [
+              "Imagine-That-Ai/grok" + "-D",
+              "Pending " + "Elon",
+              "google-oauth2|user_",
+          ]
+          proc = subprocess.run(
+              ["git", "grep", "-I", "-n", "-e", "."],
+              capture_output=True, text=True,
+          )
+          hits = []
+          for line in (proc.stdout or "").splitlines():
+              if line.split(":", 1)[0].startswith(".git"):
+                  continue
+              for n in needles:
+                  if n in line:
+                      hits.append(line)
+                      break
+          if hits:
+              print("kitchen leftover", file=sys.stderr)
+              print("\n".join(hits[:50]), file=sys.stderr)
+              sys.exit(1)
+          PY
 EOF
 
 for f in onboard-accounts.js test-onboard-accounts.js install.sh launch-d.sh; do

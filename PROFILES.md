@@ -84,12 +84,6 @@ node ~/.grok/grokbot-d/model-lib.js set grok-4.6 openburnbar
 
 ## Live Cursor chats
 
-Switching to Grok A / B / C relaunches D on that seat’s Cursor identity (copies `sand-secrets` + chats into Seat4, unsets `:1337`). The in-window command bus can send a real composer turn.
-
-```bash
-node ~/.grok/grokbot-d/live-cursor-chat.js
-```
-
-That script restores Local D at the end and never writes Grok Bot B’s live user-data.
+Switching to Grok A relaunches D on that seat’s Cursor identity (copies `sand-secrets` + chats into Seat4, unsets `:1337`). The in-window command bus can send a real composer turn.
 
 Tests: `test-profiles.js`, `test-profile-switch-live.js`, `test-models.js`, `test-edges.js`.
