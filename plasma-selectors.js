@@ -340,16 +340,24 @@
     try {
       if (fs.existsSync(ACTIVE_PROFILE_PATH)) {
         const d = JSON.parse(fs.readFileSync(ACTIVE_PROFILE_PATH, 'utf8'));
-        return d.active || 'grok-d';
+        if (d && (d.profileId || d.active)) return d.profileId || d.active;
       }
     } catch {}
-    return 'grok-d';
+    try {
+      if (fs.existsSync(CUSTOM_PROFILES_PATH)) {
+        const d = JSON.parse(fs.readFileSync(CUSTOM_PROFILES_PATH, 'utf8'));
+        if (d && d.activeId) return d.activeId;
+      }
+    } catch {}
+    return 'local-d';
   }
 
   function getCustomProfiles() {
     try {
       if (fs.existsSync(CUSTOM_PROFILES_PATH)) {
-        return JSON.parse(fs.readFileSync(CUSTOM_PROFILES_PATH, 'utf8'));
+        const raw = JSON.parse(fs.readFileSync(CUSTOM_PROFILES_PATH, 'utf8'));
+        if (Array.isArray(raw)) return raw;
+        if (raw && Array.isArray(raw.profiles)) return raw.profiles;
       }
     } catch {}
     return [];
@@ -357,7 +365,16 @@
 
   function saveCustomProfiles(list) {
     try {
-      fs.writeFileSync(CUSTOM_PROFILES_PATH, JSON.stringify(list, null, 2));
+      let existing = {};
+      if (fs.existsSync(CUSTOM_PROFILES_PATH)) {
+        try { existing = JSON.parse(fs.readFileSync(CUSTOM_PROFILES_PATH, 'utf8')); } catch {}
+      }
+      if (Array.isArray(existing)) {
+        existing = list;
+      } else {
+        existing.profiles = list;
+      }
+      fs.writeFileSync(CUSTOM_PROFILES_PATH, JSON.stringify(existing, null, 2));
       return true;
     } catch (e) {
       console.error('saveCustomProfiles err:', e);
