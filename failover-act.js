@@ -93,7 +93,8 @@ async function act(decision, deps) {
       const switchTo = deps.switchTo || ((id, opts) => sw.switchTo(id, opts));
       const to = decision.to;
       const land = decision.action === "local-chief" || decision.action === "local-clone";
-      // Land clone/handoff on the restored local box before relaunch wipes the process.
+      // Record fire timestamp before potential process relaunch
+      markFire(decision);
       if (to && store.get(to) && store.getActive().id !== to) {
         switchTo(to, { relaunch: land ? false : deps.relaunch !== false });
       }
@@ -117,7 +118,6 @@ async function act(decision, deps) {
         if (typeof deps.relaunchD === "function") deps.relaunchD();
         else if (!sw.isolatedRoot || !sw.isolatedRoot()) sw.relaunchD();
       }
-      markFire(decision);
       return Object.assign({ ok: true, action: decision.action, to }, extra);
     }
     return { ok: false, error: "unknown action " + decision.action };

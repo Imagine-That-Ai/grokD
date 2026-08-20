@@ -72,8 +72,8 @@ function applyContinueModel(dir) {
   let local = {};
   try { if (fs.existsSync(saved)) local = JSON.parse(fs.readFileSync(saved, "utf8")); } catch {}
   const next = {
-    proxyTarget: "cliproxy",
-    apiKey: "local-cliproxy",
+    proxyTarget: local.proxyTarget || "openburnbar",
+    apiKey: local.apiKey || "local-cliproxy",
     model: live.model || local.model || "grok-4.6",
     cursorAccount: local.cursorAccount || live.cursorAccount || "Primary Cursor Account",
   };
@@ -157,7 +157,7 @@ function applyCursor(profile) {
   );
   // Encrypted official descriptors for this-Mac seats often still hold a
   // dead cursorvm.com pod. Copying that file makes D decrypt it on boot and
-  // the Mac looks offline again.
+  // the Mac looks offline again. A healthy plaintext VM is installed below.
   if (srcGd && !box.officialUsesThisMac(identity)) {
     copyFile(srcGd, path.join(SEAT4, "gateway-descriptor.json"));
   }
@@ -166,8 +166,9 @@ function applyCursor(profile) {
 
   const remote = box.chooseCursorConnection(identity, dir);
   if (remote) box.installConnection(remote, SEAT4);
-  // Official this-Mac seats have no VM file. Do not rehydrate a dead
-  // cursorvm.com snapshot — that is what made "Couldn't reach your Mac".
+  // No reachable VM: leave Seat4 empty so official reconnect can mint one.
+  // Do not fall back to this-Mac local-exec — D's local box already owns that
+  // lease and the daemon dies with "desktop ownership lost".
 
   const persistDst = path.join(SEAT4, "sand-client-persistence");
   const livePersist = identity && path.join(identity, "sand-client-persistence");
@@ -193,9 +194,17 @@ function pgrepIds(pattern) {
 }
 
 function dPids() {
-  const mains = pgrepIds("Grok Bot D.app/Contents/MacOS/Grok Bot.real --user-data-dir");
-  const wrap = pgrepIds("Grok Bot D.app/Contents/MacOS/Grok Bot$");
-  return [...new Set([...wrap, ...mains])];
+  const mains = pgrepIds("Grok Bot.real --user-data-dir");
+  const wrap = pgrepIds("Grok Bot$");
+  const seat = "GrokBotSeat4";
+  const out = [];
+  for (const pid of [...wrap, ...mains]) {
+    try {
+      const cmd = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", timeout: 2000 });
+      if (cmd.includes(seat)) out.push(pid);
+    } catch {}
+  }
+  return [...new Set(out)];
 }
 
 function noteSwitch(fromId, toId, kind) {
@@ -315,8 +324,6 @@ const ALIASES = {
   "grok-original": "local-d",
   "grok-bot": "local-d",
   "grok-a": "cursor-a",
-  "grok-b": "cursor-b",
-  "grok-c": "cursor-c",
   "grok-d": "local-d",
 };
 
@@ -393,16 +400,15 @@ if (require.main === module) {
         console.log(`${p.id === s.activeId ? "*" : " "} ${p.id}\t${p.kind}\t${p.name}`);
       }
     } else if (cmd === "add") {
-      const rosterSources = flags.family
-        ? [store.SEATS.A, store.SEATS.B, store.SEATS.C]
-        : undefined;
+      if (flags.family) throw new Error("family import of B/C is retired");
+      store.assertSeatAllowed(flags.from);
+      store.assertSeatAllowed(flags.identity);
       const p = store.add({
         name: flags.name,
         kind: flags.kind,
         fromSeat: flags.from,
         identitySeat: flags.identity,
         sourceUserData: flags.path,
-        rosterSources,
         desiredBots: flags.bots ? Number(flags.bots) : null,
       });
       console.log(JSON.stringify({ ok: true, id: p.id, kind: p.kind, name: p.name }));

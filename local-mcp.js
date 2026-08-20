@@ -244,6 +244,17 @@ const byId = new Map(Object.values(SERVERS).map((s) => [String(s.id), s]));
 const sessions = new Map();
 const toolCache = new Map();
 const pendingOAuth = new Map();
+function cleanPendingOAuth() {
+  const now = Date.now();
+  for (const [k, v] of pendingOAuth.entries()) {
+    if (v && v.createdAt && now - v.createdAt > 10 * 60 * 1000) {
+      pendingOAuth.delete(k);
+    }
+  }
+  while (pendingOAuth.size > 100) {
+    pendingOAuth.delete(pendingOAuth.keys().next().value);
+  }
+}
 const googleRefreshes = new Map();
 const invalidAuth = new Set();
 let rpcCounter = 100;
@@ -761,6 +772,8 @@ function authUrlFor(spec) {
   } else {
     return null;
   }
+  pending.createdAt = Date.now();
+  cleanPendingOAuth();
   pendingOAuth.set(state, pending);
   return u.toString();
 }
@@ -937,7 +950,7 @@ async function executeToolResponse(body) {
   }
   if (isAuthFailure(result)) {
     const hint = spec.kind === "x" ? "Connect X in Grok D first." : spec.kind === "google" ? "Authorize Google Drive/Calendar in the isolated D flow first." : "Configure the Mem0 API key.";
-    return pbMsg(1, mcpResultSuccess(`${spec.displayName} needs authorization. ${hint}`, true));
+    return pbMsg(1, mcpResultError(`${spec.displayName} needs authorization. ${hint}`));
   }
   return pbMsg(1, mcpResultError(result.error || result.raw || `MCP call failed (${result.httpStatus || "unknown"})`));
 }

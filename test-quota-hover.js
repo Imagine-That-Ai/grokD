@@ -22,7 +22,7 @@ ok("stampExhausted");
 
 {
   const wall = q.formatWall(Date.parse("2026-08-16T20:52:00-05:00"));
-  assert(typeof wall === "string" && wall.length > 6 && /\d/.test(wall), wall);
+  assert(/Aug\s+16,\s*8:52\s*PM/i.test(wall), "formatWall must format month, day, time and AM/PM: " + wall);
   assert(q.formatWall(null) == null, "bad");
 }
 ok("formatWall");

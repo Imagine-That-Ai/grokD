@@ -133,8 +133,8 @@ function getModelConfig() {
   try {
     if (fs.existsSync(MODEL_CONFIG_PATH)) {
       const cfg = JSON.parse(fs.readFileSync(MODEL_CONFIG_PATH, "utf8"));
-      const target = cfg.proxyTarget === "vibeproxy" ? "cliproxy" : (cfg.proxyTarget || "cliproxy");
-      const defaultUrl = TARGET_DEFAULT_URLS[target] || TARGET_DEFAULT_URLS.cliproxy;
+      const target = cfg.proxyTarget === "vibeproxy" ? "cliproxy" : (cfg.proxyTarget || "openburnbar");
+      const defaultUrl = TARGET_DEFAULT_URLS[target] || TARGET_DEFAULT_URLS.openburnbar;
       const defaultKey = (target === "openburnbar" || target === "cliproxy" || target === "vibeproxy") ? "local-cliproxy" : (process.env[`${target.toUpperCase()}_API_KEY`] || "local-cliproxy");
 
       return {
@@ -148,10 +148,10 @@ function getModelConfig() {
     }
   } catch (e) {}
   return {
-    proxyUrl: TARGET_DEFAULT_URLS.cliproxy,
+    proxyUrl: TARGET_DEFAULT_URLS.openburnbar,
     apiKey: "local-cliproxy",
     model: "grok-4.6",
-    proxyTarget: "cliproxy",
+    proxyTarget: "openburnbar",
     cursorAccount: "Primary Cursor Account",
     payingProfileId: null,
   };

@@ -3,7 +3,8 @@
 set -euo pipefail
 ASAR_SRC=/tmp/grokbot-asar
 PRELOAD="$ASAR_SRC/dist/electron-preload/preload.cjs"
-APP="$HOME/Applications/Grok Bot D.app"
+APP="$HOME/Applications/grok\"D\".app"
+[ -d "$APP" ] || APP="$HOME/Applications/Grok Bot D.app"
 DEST="$APP/Contents/Resources/app.asar"
 HOOK='require(require("os").homedir() + "/.grok/grokbot-d/profile-ui-inject.js")'
 
@@ -30,7 +31,9 @@ cp /tmp/grokbot-hack/app.asar "$DEST"
 # Update ElectronAsarIntegrity in Info.plist
 python3 - <<'PY'
 import hashlib, re, os
-app_path = os.path.expanduser("~/Applications/Grok Bot D.app")
+app_path = os.path.expanduser('~/Applications/grok"D".app')
+if not os.path.isdir(app_path):
+    app_path = os.path.expanduser("~/Applications/Grok Bot D.app")
 dest = os.path.join(app_path, "Contents/Resources/app.asar")
 plist = os.path.join(app_path, "Contents/Info.plist")
 with open(dest, "rb") as f:

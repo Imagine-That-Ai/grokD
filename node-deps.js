@@ -9,9 +9,11 @@ function candidates() {
   const home = os.homedir();
   const extra = process.env.GROK_D_NODE_PATH ? [process.env.GROK_D_NODE_PATH] : [];
   const apps = [
+    path.join(home, "Applications", 'grok"D".app'),
     path.join(home, "Applications", "Grok Bot D.app"),
     "/Applications/Grok Bot.app",
     path.join(home, "Applications", "Grok Bot.app"),
+    path.join("/Applications", 'grok"D".app'),
     "/Applications/Grok Bot D.app",
   ];
   return extra.concat(apps.map((app) => path.join(app, "Contents", "Resources", "app.asar.unpacked", "dist", "deps")));

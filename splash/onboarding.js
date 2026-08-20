@@ -53,7 +53,15 @@
             return models.setModel(model || models.resolveConfig().model, target);
           },
           models() { return (models && models.CURATED) || []; },
-          currentModel() { return models ? models.resolveConfig() : { model: "grok-4.6", proxyTarget: "cliproxy" }; },
+          currentModel() { return models ? models.resolveConfig() : { model: "grok-4.6", proxyTarget: "openburnbar" }; },
+          installOpenBurnBar() {
+            const inst = path.join(ROOT, "openburnbar-install.js");
+            let info = { install: { macApp: "npx -y openburnbar app install", launch: "open -a OpenBurnBar" } };
+            try { info = require(inst).info(); } catch (_) {}
+            spawn("npx", ["-y", "openburnbar", "app", "install"], { detached: true, stdio: "ignore" }).unref();
+            spawn("open", ["-a", "OpenBurnBar"], { detached: true, stdio: "ignore" }).unref();
+            return info;
+          },
           seats() {
             if (store && store.detectedCursorProfiles) return store.detectedCursorProfiles();
             return [];
@@ -123,8 +131,9 @@
           { id: "gpt-5.6-luna", name: "GPT-5.6 Luna" },
         ];
       },
-      currentModel() { return { model: "grok-4.6", proxyTarget: "cliproxy" }; },
-      seats() { return [{ id: "cursor-b", name: "Grok B", seat: "B" }]; },
+      currentModel() { return { model: "grok-4.6", proxyTarget: "openburnbar" }; },
+      installOpenBurnBar() { return { npmProxy: false, install: { macApp: "npx -y openburnbar app install" } }; },
+      seats() { return [{ id: "cursor-a", name: "Grok A", seat: "A" }]; },
       switchTo() {},
       _signIns: 0,
       addSignIn() {
@@ -379,14 +388,14 @@
       setBead(0.5);
       root.querySelector("#gd-kicker").textContent = "This Mac · proxy";
       root.querySelector("#gd-title").textContent = "Where should answers come from?";
-      root.querySelector("#gd-lede").textContent = "The local box asks one of these proxies for a model. Pick the one you actually run.";
+      root.querySelector("#gd-lede").textContent = "OpenBurnBar is the default. Install the Mac app if it is not running. npm cannot start the proxy yet — that is the Mac daemon.";
       const up = probe();
       const body = root.querySelector("#gd-body");
       body.innerHTML = "";
       const list = el("div", "gd-list");
       const choices = [
-        ["cliproxy", "CLI Proxy", ":8322", up.cliproxy],
         ["openburnbar", "OpenBurnBar", ":8320", up.openburnbar],
+        ["cliproxy", "CLI Proxy", ":8322", up.cliproxy],
         ["vibeproxy", "Vibe Proxy", ":8325", up.vibeproxy],
       ];
       choices.forEach(([id, name, port, ok]) => {
@@ -395,7 +404,11 @@
         left.innerHTML = `<strong></strong><small></small>`;
         left.querySelector("strong").textContent = name;
         left.querySelector("small").textContent = port + (ok ? " · listening" : " · not running");
-        const use = btn("Use this", "gd-ghost", () => {
+        const use = btn(id === "openburnbar" && !ok ? "Install & use" : "Use this", id === "openburnbar" ? "gd-go" : "gd-ghost", () => {
+          if (id === "openburnbar" && !ok && h.installOpenBurnBar) {
+            try { h.installOpenBurnBar(); } catch (e) { note(String(e.message || e), "bad"); }
+            note("Installing OpenBurnBar.app via npm, then launching it. The OpenAI proxy is the app daemon, not npx proxy.", "");
+          }
           state.proxyTarget = id;
           try { h.setProxy(id, state.model); } catch (e) { note(String(e.message || e), "bad"); return; }
           go("local-model");
@@ -412,6 +425,9 @@
         list.appendChild(row);
       });
       body.appendChild(list);
+      if (!up.openburnbar) {
+        note("No proxy via npm yet. Install the app: npx -y openburnbar app install — then open OpenBurnBar. GET http://127.0.0.1:1337/install/openburnbar has the same commands.", "");
+      }
       actions([btn("Back", "gd-ghost", () => go("local-box")), btn("Skip", "gd-skip", skip)]);
     }
 

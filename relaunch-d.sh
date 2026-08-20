@@ -3,7 +3,16 @@
 # Run from launchd (gui session), not from D's process tree.
 set -u
 trap '' HUP INT TERM
-APP="${GROK_D_APP:-$HOME/Applications/Grok Bot D.app}"
+if [ -z "${GROK_D_APP:-}" ]; then
+  for c in "$HOME/Applications/grok\"D\".app" "/Applications/grok\"D\".app" \
+           "$HOME/Applications/Grok Bot D.app" "/Applications/Grok Bot D.app"; do
+    if [ -e "$c" ]; then GROK_D_APP="$c"; break; fi
+  done
+fi
+APP="${GROK_D_APP:-$HOME/Applications/grok\"D\".app}"
+if command -v python3 >/dev/null 2>&1; then
+  APP=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$APP" 2>/dev/null || echo "$APP")
+fi
 LAUNCHER="$APP/Contents/MacOS/Grok Bot"
 LOCK="${GROK_SEAT4:-$HOME/Library/Application Support/GrokBotSeat4}/SingletonLock"
 LOG="${GROK_PROFILE_ROOT:-$HOME/.grok/grokbot-d}/runtime/relaunch.log"
@@ -17,7 +26,8 @@ is_d_main() {
   case "$cmd" in
     *bash*|*zsh*|*relaunch-d*|*ELECTRON_RUN_AS_NODE*) return 1 ;;
   esac
-  echo "$cmd" | grep -q "Grok Bot D.app/Contents/MacOS/Grok Bot.real --user-data-dir" || return 1
+  echo "$cmd" | grep -q "Grok Bot.real --user-data-dir" || return 1
+  echo "$cmd" | grep -q "GrokBotSeat4" || return 1
   echo "$cmd" | grep -qE '^(/Users/|/Applications/)' || return 1
   return 0
 }
@@ -58,7 +68,7 @@ fi
 # Must go through LaunchServices (`open`). Starting the binary from this
 # helper has no Aqua session, so Electron exits at once — D stays dead.
 d_up() {
-  pgrep -f "Grok Bot D.app/Contents/MacOS/Grok Bot.real --user-data-dir" >/dev/null 2>&1
+  pgrep -f "Grok Bot.real --user-data-dir" >/dev/null 2>&1 && pgrep -f "GrokBotSeat4" >/dev/null 2>&1
 }
 
 start_d() {
@@ -77,7 +87,7 @@ start_d
 sleep 1
 if ! d_up; then
   echo "$(date +%s) osascript activate" >>"$LOG"
-  osascript -e 'tell application "Grok Bot D" to activate' >>"$LOG" 2>&1 || true
+  osascript -e 'tell application id "com.imaginethat.grokbot.seatd" to activate' >>"$LOG" 2>&1 || true
 fi
 if d_up; then
   echo "$(date +%s) d is up" >>"$LOG"

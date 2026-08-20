@@ -1,7 +1,13 @@
 #!/bin/bash
 # Re-apply disk-eval hook if an xAI update replaced app.asar. Best-effort.
 set -u
-APP="${1:-$HOME/Applications/Grok Bot D.app}"
+APP="${1:-}"
+if [ -z "$APP" ]; then
+  for c in "$HOME/Applications/grok\"D\".app" "$HOME/Applications/Grok Bot D.app"; do
+    [ -d "$c" ] && { APP="$c"; break; }
+  done
+fi
+APP="${APP:-$HOME/Applications/grok\"D\".app}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ASAR="$APP/Contents/Resources/app.asar"
 [ -f "$ASAR" ] || exit 0

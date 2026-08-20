@@ -38,7 +38,11 @@ const report = patch.applyPatches({ mainPath: mainFile, preloadPath: preFile });
 assert(report.ok === true, JSON.stringify(report));
 assert(report.preloadHook === "patched", report.preloadHook);
 assert(fs.readFileSync(preFile, "utf8").includes("profile-ui-inject.js"), "hook landed");
-assert(report.IPn === "skipped" || report.IPn === "patched", report.IPn);
+assert(report.IPn === "skipped", "Expected IPn to be skipped on stock main: " + report.IPn);
+const ipnMain = path.join(tmp, "main-ipn.cjs");
+fs.writeFileSync(ipnMain, "return{identity:r,access:await t.readAccess().catch(s3s)}\n");
+const reportIpn = patch.applyPatches({ mainPath: ipnMain, preloadPath: preFile });
+assert(reportIpn.IPn === "patched", "Expected IPn patch on matching pattern: " + reportIpn.IPn);
 ok("preload-survives-missing-ipn");
 
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -1,4 +1,4 @@
-# Grok D profiles
+# grok"D" profiles
 
 D is the one app. A profile is **who you are** (local box or a Cursor identity) plus the bots that come with that seat.
 
@@ -9,7 +9,8 @@ First-run **Seat in** can add **more than one** Cursor login (sign in again, or 
 | Profile | Kind | What it opens |
 | --- | --- | --- |
 | Local D | local | The local box on `:1337` |
-| Grok A / B / C | cursor | Optional import if those apps already exist on this Mac |
+| Grok A | cursor | Optional import of official Grok Bot on this Mac |
+| Grok B / C | — | Not seats in D |
 | (new Cursor) | cursor | Sign in here — no other Grok Bot required |
 
 ## CLI
@@ -18,15 +19,12 @@ First-run **Seat in** can add **more than one** Cursor login (sign in again, or 
 node ~/.grok/grokbot-d/switch-profile.js list
 node ~/.grok/grokbot-d/switch-profile.js switch local-d
 node ~/.grok/grokbot-d/switch-profile.js switch local-d --takeover
-node ~/.grok/grokbot-d/switch-profile.js switch cursor-b
+node ~/.grok/grokbot-d/switch-profile.js switch cursor-a
 node ~/.grok/grokbot-d/switch-profile.js add --name "My Cursor" --kind cursor
-node ~/.grok/grokbot-d/switch-profile.js add --name "Work" --kind cursor --from B
-node ~/.grok/grokbot-d/switch-profile.js add --name "All on B" --kind cursor --from A --identity B --family 1
+node ~/.grok/grokbot-d/switch-profile.js add --name "Work" --kind cursor --from A
 ```
 
-`--family 1` unions A+B+C chat lists onto one Cursor identity.
-
-Plain `switch local-d` restores the local box (bots, secrets, chats, `cliproxy` / `grok-4.6`). It also drops any leftover Cursor VM connection so the sidebar is the local roster.
+Plain `switch local-d` restores the local box (bots, secrets, chats, `openburnbar` / `grok-4.6` unless that seat saved another proxy). It also drops any leftover Cursor VM connection so the sidebar is the local roster.
 
 `--takeover` (seat menu: **Continue this chat on Local D**) keeps the open Cursor thread and settings, points the computer at `:1337`, and seeds a local agent that continues that thread on local models.
 
@@ -34,22 +32,22 @@ Switching the same profile is a no-op (does not replay a stale snapshot over liv
 
 Removing a profile deletes `profile-data/<id>/`. Cursor apply fails if that seat’s `sand-secrets.json` is missing.
 
-Never kills Grok Bot B.
+Official Grok Bot B/C apps stay on the Mac. They are not seats in D.
 
 ## Stop / Resume (per seat)
 
-The seat chip stop square toggles **this seat only**. Each identity row in the seat menu has its own stop switch. Stop A leaves B running.
+The seat chip stop square toggles **this seat only**. Each identity row in the seat menu has its own stop switch.
 
-Stop parks that seat’s routines and interrupts its in-flight turns. Resume turns back on only what that seat’s Stop parked. Does not kill official Grok Bot A/B/C apps.
+Stop parks that seat’s routines and interrupts its in-flight turns. Resume turns back on only what that seat’s Stop parked. Does not kill official Grok Bot apps.
 
 ```bash
 node ~/.grok/grokbot-d/bot-pause.js status
 node ~/.grok/grokbot-d/bot-pause.js pause cursor-a
-node ~/.grok/grokbot-d/bot-pause.js pause cursor-a cursor-b
+node ~/.grok/grokbot-d/bot-pause.js pause cursor-a
 node ~/.grok/grokbot-d/bot-pause.js resume cursor-a
 ```
 
-`proxy2.js` will not fire **local** routines while Local D is paused. Cursor A/B/C pauses do not park the local box.
+`proxy2.js` will not fire **local** routines while Local D is paused. Cursor pauses do not park the local box.
 
 ## Fall over
 
@@ -75,11 +73,13 @@ Tests: `test-profiles.js`, `test-profile-switch-live.js`, `test-models.js`, `tes
 
 The official picker tries to save the default model on the computer. When the local box transport is down, that save fails and the composer shows **Will send when reconnected**.
 
-D writes the pick to `model-config.json` (cliproxy `:8322`, falling back to openburnbar `:8320` if a target is down) and flushes a queued composer send through `sendPrompt`. The Profiles bar has a MODEL menu that applies immediately.
+D writes the pick to `model-config.json` (OpenBurnBar `:8320` by default, falling back to cliproxy `:8322` if that target is down) and flushes a queued composer send through `sendPrompt`. The Profiles bar has a MODEL menu that applies immediately.
+
+The published `openburnbar` npm package does **not** start this proxy. It installs the Mac app (`npx -y openburnbar app install`). The OpenAI gateway is the app daemon (`127.0.0.1:8317`). grokD’s `openburnbar` target currently talks to `:8320`. First-run Seat in lists OpenBurnBar first, with **Install & use** when it is down. Same JSON at `GET http://127.0.0.1:1337/install/openburnbar`.
 
 ```bash
 node ~/.grok/grokbot-d/model-lib.js show
-node ~/.grok/grokbot-d/model-lib.js set grok-4.6 cliproxy
+node ~/.grok/grokbot-d/model-lib.js set grok-4.6 openburnbar
 ```
 
 ## Live Cursor chats

@@ -1,4 +1,4 @@
-# Grok Bot D
+# grok"D"
 
 One custom Grok Bot. **Local** bots on this Mac, or **your** Cursor login. Other people install the app — they do not get your chats or tokens.
 
@@ -12,9 +12,10 @@ Local mode talks to this machine, not to a signed-in cloud box.
 
 | Port | Process | Start |
 | --- | --- | --- |
-| 1337 | `gateway-shim.js` (idle-wait + broadcast retry) | `ensure-local-box.sh` |
+| 1337 | `gateway-shim.js` (idle-wait + broadcast retry). `GET /install/openburnbar` | `ensure-local-box.sh` |
 | 1338 | `runbox.js` → host-main | same |
-| 8787 | `proxy2.js` | same |
+| 8787 | `proxy2.js` (default target: OpenBurnBar) | same |
+| 8320 | grokD `openburnbar` target | Mac app daemon; npm cannot start this yet |
 | — | `routine-guard.js` | parks resurrected joke crons |
 | — | Grok Bot D.app | `SAND_HOST_GATEWAY_URL=http://127.0.0.1:1337` |
 
@@ -52,7 +53,7 @@ plasma. And the account chip bottom-left **collapses to its avatar**; click the
 puck to bring it back. Both remember across restarts (`orbStyle`,
 `chipCollapsed`).
 
-Do not kill **Grok Bot B**.
+Official Grok Bot B and C are not seats in this app. Do not kill those apps.
 
 ## Checks
 
@@ -65,7 +66,7 @@ node ~/.grok/grokbot-d/test-space-holes.js  # cover sky invariants, no DOM
 
 `bridge-lib.js` is the shared parser module. `proxy2.js` must require it.
 
-Model picks go through `model-lib.js` so they do not wait on a reconnecting computer. Queued composer sends (“Will send when reconnected”) are flushed via `sendPrompt` in local mode. Live Cursor A/B/C chats: `node ~/.grok/grokbot-d/live-cursor-chat.js`.
+Model picks go through `model-lib.js` so they do not wait on a reconnecting computer. Queued composer sends (“Will send when reconnected”) are flushed via `sendPrompt` in local mode. Live Cursor A chats: `node ~/.grok/grokbot-d/live-cursor-chat.js`.
 
 ## Known limits
 

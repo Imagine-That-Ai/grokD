@@ -12,6 +12,13 @@ const store = require("./profile-store");
 const box = require("./box-state");
 const sw = require("./switch-profile");
 
+const origProbe = box.probeRemoteUrlSync;
+box.probeRemoteUrlSync = (url) => {
+  if (/dead-pod|leftover/.test(String(url || ""))) return false;
+  if (/cursorvm\.com/.test(String(url || ""))) return true;
+  return origProbe(url);
+};
+
 const assert = (c, m) => { if (!c) throw new Error(m); };
 let n = 0;
 const ok = (name) => { n++; console.log("PASS ", name); };
@@ -107,8 +114,31 @@ fs.writeFileSync(box.connectionPath(seat4), JSON.stringify({
   token: "leftover",
 }));
 sw.applyCursor(macSeat);
-assert(!fs.existsSync(box.connectionPath(seat4)), "this-Mac official A must not keep a snapshot VM");
-ok("official-this-mac-drops-stale-vm");
+const keptDead = box.readJson(box.connectionPath(seat4));
+assert(keptDead && keptDead.baseUrl === "https://dead-pod.cursorvm.com", "saved https VM stays even if probe fails");
+ok("official-this-mac-keeps-saved-vm");
+
+fs.mkdirSync(path.join(seat4, "daemon-data"), { recursive: true });
+fs.writeFileSync(box.daemonConnectionPath(seat4), JSON.stringify({
+  baseUrl: "http://127.0.0.1:1337",
+  token: "fake-gateway-token",
+}));
+const healthyMac = store.add({
+  name: "Official Mac healthy",
+  kind: "cursor",
+  sourceUserData: officialMac,
+  identitySource: officialMac,
+});
+fs.mkdirSync(path.join(store.profileDataDir(healthyMac.id), "sand-data"), { recursive: true });
+fs.writeFileSync(box.connectionPath(store.profileDataDir(healthyMac.id)), JSON.stringify({
+  baseUrl: "https://live.cursorvm.com",
+  token: "live",
+}));
+sw.applyCursor(healthyMac);
+const keptVm = box.readJson(box.connectionPath(seat4));
+assert(keptVm && keptVm.baseUrl === "https://live.cursorvm.com", "healthy saved VM is installed for this-Mac official A");
+assert(!fs.existsSync(box.daemonConnectionPath(seat4)), "cursor apply drops leftover local daemon-data");
+ok("official-this-mac-keeps-healthy-vm");
 
 const other = store.add({ name: "Other Cursor", kind: "cursor" });
 sw.applyCursor(other);

@@ -38,11 +38,17 @@ function connectionPath(root) {
   return path.join(root, "sand-data", "local-exec-daemon-connection.json");
 }
 
+function daemonConnectionPath(root) {
+  return path.join(root, "daemon-data", "local-exec-daemon-connection.json");
+}
+
 function clearCursorHost(seat4) {
   const files = [
     "gateway-descriptor.json",
     "sand-data/local-exec-daemon-connection.json",
     "sand-data/local-exec-daemon-credential.json",
+    "daemon-data/local-exec-daemon-connection.json",
+    "daemon-data/local-exec-daemon-credential.json",
     ".env-descriptor-account-bindings.json",
   ];
   for (const rel of files) {
@@ -50,13 +56,42 @@ function clearCursorHost(seat4) {
   }
 }
 
+function isLoopbackUrl(url) {
+  return typeof url === "string" && /127\.0\.0\.1|localhost/.test(url);
+}
+
+function clearLoopbackFile(file) {
+  const j = readJson(file);
+  if (!j || !isLoopbackUrl(j.baseUrl)) return false;
+  try { fs.rmSync(file, { force: true }); } catch {}
+  return true;
+}
+
+// Cursor seats keep an https VM even when it is offline. Only wipe loopback
+// leftovers that make official start this-Mac local-exec.
+function clearLocalLeftovers(seat4) {
+  let n = 0;
+  if (clearLoopbackFile(daemonConnectionPath(seat4))) {
+    n += 1;
+    try { fs.rmSync(path.join(seat4, "daemon-data", "local-exec-daemon-credential.json"), { force: true }); } catch {}
+  }
+  if (clearLoopbackFile(connectionPath(seat4))) n += 1;
+  return n > 0;
+}
+
+function clearLocalDaemonLeftover(seat4) {
+  return clearLocalLeftovers(seat4);
+}
+
 function writeLocalHost(seat4) {
-  const p = connectionPath(seat4);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify({
+  const payload = JSON.stringify({
     baseUrl: "http://127.0.0.1:1337",
     token: "fake-gateway-token",
-  }));
+  });
+  for (const p of [connectionPath(seat4), daemonConnectionPath(seat4)]) {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, payload);
+  }
 }
 
 function credentialPath(root) {
@@ -105,10 +140,28 @@ function officialUsesThisMac(identityRoot) {
   return !isRemoteConnection(connectionPath(identityRoot));
 }
 
+function activeProbe() {
+  const fn = module.exports && module.exports.probeRemoteUrlSync;
+  return typeof fn === "function" ? fn : probeRemoteUrlSync;
+}
+
+function isHealthyRemoteFile(file) {
+  if (!isRemoteConnection(file)) return false;
+  const j = readJson(file);
+  if (!j || !j.baseUrl) return false;
+  try { return !!activeProbe()(j.baseUrl); }
+  catch { return false; }
+}
+
+// Probe ranks. Probe fail does not drop an https VM (offline is not "no computer").
 function chooseCursorConnection(identityRoot, savedRoot) {
   const official = identityRoot ? pickRemoteConnection([identityRoot]) : null;
-  if (identityRoot && officialUsesThisMac(identityRoot) && !official) return null;
-  return official || pickRemoteConnection([savedRoot]);
+  const saved = pickRemoteConnection([savedRoot]);
+  if (official && isHealthyRemoteFile(official)) return official;
+  if (saved && isHealthyRemoteFile(saved)) return saved;
+  if (official) return official;
+  if (saved) return saved;
+  return null;
 }
 
 function installConnection(fromFile, seat4) {
@@ -124,6 +177,10 @@ function installConnection(fromFile, seat4) {
     path.join(fromRoot, "sand-data", "settings.json"),
     path.join(seat4, "sand-data", "settings.json")
   );
+  // A leftover local :1337 in daemon-data makes official try this-Mac
+  // local-exec, which then dies with "desktop ownership lost".
+  try { fs.rmSync(daemonConnectionPath(seat4), { force: true }); } catch {}
+  try { fs.rmSync(path.join(seat4, "daemon-data", "local-exec-daemon-credential.json"), { force: true }); } catch {}
   return true;
 }
 
@@ -204,20 +261,15 @@ function probeRemoteUrlSync(url, timeoutMs) {
   if (!url || typeof url !== "string") return false;
   if (!/^https?:\/\//i.test(url)) return false;
   if (/127\.0\.0\.1|localhost/.test(url)) return true;
-  const script = [
-    "const http=require('http');const https=require('https');",
-    "const u=new URL(process.argv[1].replace(/\\/$/,'')+'/health');",
-    "const lib=u.protocol==='https:'?https:http;",
-    "const req=lib.get({hostname:u.hostname,port:u.port||(u.protocol==='https:'?443:80),path:u.pathname,timeout:" + ms + ",rejectUnauthorized:false},(res)=>process.exit(res.statusCode===404||res.statusCode>=500?2:0));",
-    "req.on('error',()=>process.exit(2));",
-    "req.on('timeout',()=>{req.destroy();process.exit(2)});",
-  ].join("");
+  // curl, not `node -e`. The renderer cannot spawn a nested ContextifyScript.
   try {
-    require("child_process").execFileSync(process.execPath, ["-e", script, url], {
-      timeout: ms + 800,
-      stdio: "ignore",
-    });
-    return true;
+    const out = require("child_process").execFileSync("curl", [
+      "-sS", "-o", "/dev/null", "-w", "%{http_code}",
+      "--max-time", String(Math.max(1, Math.ceil(ms / 1000))),
+      "-k", String(url).replace(/\/$/, "") + "/health",
+    ], { encoding: "utf8", timeout: ms + 800, stdio: ["ignore", "pipe", "ignore"] });
+    const code = Number(String(out).trim());
+    return Number.isFinite(code) && code > 0 && code !== 404 && code < 500;
   } catch {
     return false;
   }
@@ -230,8 +282,7 @@ function installFromDescriptor(seat4, safeStorage, extraFiles) {
   ];
   for (const file of files) {
     const conn = decryptDescriptor(file, safeStorage);
-    if (!conn) continue;
-    if (!probeRemoteUrlSync(conn.baseUrl)) continue;
+    if (!conn || !isRemoteConnection(conn)) continue;
     const dest = connectionPath(seat4);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, JSON.stringify(conn));
@@ -246,13 +297,17 @@ module.exports = {
   readJson,
   isRemoteConnection,
   connectionPath,
+  daemonConnectionPath,
   clearCursorHost,
+  clearLocalLeftovers,
+  clearLocalDaemonLeftover,
   writeLocalHost,
   credentialPath,
   findLocalCredential,
   installLocalCredential,
   pickRemoteConnection,
   officialUsesThisMac,
+  isHealthyRemoteFile,
   chooseCursorConnection,
   installConnection,
   snapshotHost,

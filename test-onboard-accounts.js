@@ -29,10 +29,10 @@ assert(upd.cursorProfiles[0].name === "you@x.com", "rename in place");
 ok("remember");
 
 const left = acc.unusedImports(
-  [{ id: "cursor-a", name: "Grok A" }, { id: "cursor-b", name: "Grok B" }],
+  [{ id: "cursor-a", name: "Grok A" }, { id: "extra", name: "Other" }],
   ["cursor-a"]
 );
-assert(left.length === 1 && left[0].id === "cursor-b", "unused import");
+assert(left.length === 1 && left[0].id === "extra", "unused import");
 ok("unused-imports");
 
 assert(acc.displayName({ email: "a@b.com", name: "Nope" }) === "a@b.com", "email wins");

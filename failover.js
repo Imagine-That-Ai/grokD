@@ -13,7 +13,7 @@ const os = require("os");
 function rootDir() {
   return process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
 }
-const SEAT_ORDER = ["cursor-a", "cursor-b", "cursor-c"];
+const SEAT_ORDER = ["cursor-a"];
 
 function defaultConfig(over) {
   return Object.assign({
@@ -86,15 +86,19 @@ function isSeatPaused(input, id) {
 }
 
 function nextCursor(profiles, quotas, fromId, threshold, now, cacheMaxAgeMs, input) {
+  let unmeasured = null;
   for (const p of cursorOrder(profiles)) {
     if (p.id === fromId) continue;
     if (isSeatPaused(input, p.id)) continue;
     if (isExhausted(quotas && quotas[p.id], threshold, now, cacheMaxAgeMs)) continue;
     const q = quotas && quotas[p.id];
-    if (!q || q.percentUsed == null) continue;
+    if (!q || q.percentUsed == null) {
+      if (!unmeasured) unmeasured = p;
+      continue;
+    }
     return p;
   }
-  return null;
+  return unmeasured;
 }
 
 function evaluate(input) {

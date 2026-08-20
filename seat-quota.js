@@ -58,7 +58,7 @@ function formatWall(ms) {
   const t = Number(ms);
   if (!Number.isFinite(t) || t <= 0) return null;
   try {
-    return new Date(t).toLocaleString(undefined, {
+    return new Date(t).toLocaleString("en-US", {
       weekday: "short",
       month: "short",
       day: "numeric",

@@ -10,7 +10,9 @@ if (!fs.existsSync(path.join(host, "host-main.cjs"))) {
   console.log("SKIP  host-workers (extract host-main.cjs from official Grok Bot)");
   process.exit(0);
 }
-assert(fs.existsSync(worker), "agent-store-worker next to host-main");
-assert(fs.existsSync(mirror), "transcript-mirror-worker");
-assert(fs.statSync(worker).size > 1000, "worker not empty");
+assert(fs.existsSync(worker) && fs.statSync(worker).size > 1000, "agent-store-worker missing or empty");
+assert(fs.existsSync(mirror) && fs.statSync(mirror).size > 1000, "transcript-mirror-worker missing or empty");
+const { execFileSync } = require("child_process");
+execFileSync(process.execPath, ["-c", worker]);
+execFileSync(process.execPath, ["-c", mirror]);
 console.log("PASS  host-workers");

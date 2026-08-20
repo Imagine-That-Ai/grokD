@@ -493,11 +493,13 @@ async function testSuiteProxies() {
 
   // 4. Model Config Resolution & Fallback Logic
   await runStep("Dynamic Proxy Fallback & Target Resolution Logic", async () => {
+    const cliproxyExpected = MODEL_LIB.portOpen(8322) ? "cliproxy" : (MODEL_LIB.portOpen(8320) ? "openburnbar" : "vibeproxy");
     const cliproxyTarget = MODEL_LIB.resolveTarget("cliproxy");
-    assert(cliproxyTarget === "cliproxy" || cliproxyTarget === "openburnbar" || cliproxyTarget === "vibeproxy", `Resolved target: ${cliproxyTarget}`);
+    assert(cliproxyTarget === cliproxyExpected, `Expected resolved target '${cliproxyExpected}', got '${cliproxyTarget}'`);
 
+    const obbExpected = MODEL_LIB.portOpen(8320) ? "openburnbar" : (MODEL_LIB.portOpen(8322) ? "cliproxy" : "vibeproxy");
     const obbTarget = MODEL_LIB.resolveTarget("openburnbar");
-    assert(obbTarget === "openburnbar" || obbTarget === "cliproxy" || obbTarget === "vibeproxy", `Resolved target: ${obbTarget}`);
+    assert(obbTarget === obbExpected, `Expected resolved target '${obbExpected}', got '${obbTarget}'`);
   });
 
   // 5. Proxy2 (:8787) Backend Synthetic Endpoints Check
@@ -706,18 +708,16 @@ async function testSuiteTeammates() {
     const broadcastToken = `BROADCAST-PING-${Date.now()}`;
     const fresh = await gatewayApi("listAgents");
     const dest = pickIdle(fresh, ["Robust Bench", 'grok"D"', "grok d"]);
-    const res = await gatewayApi("broadcastToAgents", {
-      message: `System sync: ${broadcastToken}`,
-      targets: dest && dest.id ? [dest.id] : undefined,
-      excludeSelf: false,
-    }).catch(() => ({ ok: true }));
-    assert(res, "Broadcast dispatch completed");
-    if (dest && dest.id && ((res.scheduled ?? 0) >= 1 || (res.total ?? 0) >= 1 || res.ok !== false)) {
+    if (dest && dest.id) {
+      const res = await gatewayApi("broadcastToAgents", {
+        message: `System sync: ${broadcastToken}`,
+        targets: [dest.id],
+        excludeSelf: false,
+      });
+      assert(res && (res.scheduled >= 1 || res.ok === true), `Broadcast failed to schedule: ${JSON.stringify(res)}`);
       await waitFor(() => transcriptHas(dest.id, broadcastToken), {
         timeoutMs: 25000,
         label: `broadcast ${broadcastToken} -> ${dest.name}`,
-      }).catch(() => {
-        warnStep("Broadcast Land", "scheduled but token not in transcript yet");
       });
     }
   });
@@ -1069,10 +1069,7 @@ async function testSuiteStop() {
       if (PAUSE.isPaused(seat)) { stopped = true; break; }
       await sleep(100);
     }
-    if (!stopped) {
-      await PAUSE.setSeatPaused(seat, true, { computers: [], waitRemote: false });
-      assert(PAUSE.isPaused(seat) === true, "fallback pause after menu click did not take");
-    }
+    assert(stopped, `Clicking seat-menu stop square for ${seat} failed to pause the seat`);
 
     cdpEval(`(() => {
       const chip = document.getElementById("grok-d-login-chip");
@@ -1086,9 +1083,7 @@ async function testSuiteStop() {
       if (!PAUSE.isPaused(seat)) { running = true; break; }
       await sleep(100);
     }
-    if (!running) {
-      await PAUSE.setSeatPaused(seat, false, { computers: [] });
-    }
+    assert(running, "Clicking seat-menu stop square again failed to resume local-d");
     assert(PAUSE.isPaused(seat) === false, "local-d still stopped after menu resume");
   });
 }

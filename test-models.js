@@ -10,10 +10,10 @@ const models = require("./model-lib");
 let n = 0;
 const ok = (name) => { n++; console.log("PASS ", name); };
 
-const raw = models.readRaw();
+assert(models.defaultConfig().proxyTarget === "openburnbar", "default proxy is openburnbar");
 const resolved = models.resolveConfig();
-assert(resolved.model, "has model");
-assert(resolved.proxyTarget, "has target");
+assert(typeof resolved.model === "string" && (resolved.model.startsWith("grok-") || resolved.model.startsWith("gpt-") || resolved.model.startsWith("cursor/")), "valid model identifier format: " + resolved.model);
+assert(["openburnbar", "cliproxy", "vibeproxy"].includes(resolved.proxyTarget), "valid proxyTarget: " + resolved.proxyTarget);
 assert(resolved.proxyUrl.includes("127.0.0.1"), resolved.proxyUrl);
 assert(resolved.proxyTarget !== "vibeproxy" || models.portOpen(8325), "must not stay on dead vibeproxy");
 if (!models.portOpen(8325)) {
@@ -21,6 +21,7 @@ if (!models.portOpen(8325)) {
 }
 ok("resolve-skips-dead-vibeproxy");
 
+const raw = models.readRaw();
 const prev = raw.model;
 const next = prev === "grok-4.6" ? "gpt-5.6-luna" : "grok-4.6";
 const written = models.setModel(next);

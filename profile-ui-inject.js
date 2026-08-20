@@ -199,7 +199,6 @@
     const args = [SWITCH, "add", "--name", opts.name, "--kind", opts.kind];
     if (opts.from) args.push("--from", opts.from);
     if (opts.identity) args.push("--identity", opts.identity);
-    if (opts.family) args.push("--family", "1");
     if (opts.bots) args.push("--bots", String(opts.bots));
     execFileSync(process.execPath, args, { timeout: 30000, env: nodeEnv() });
   }
@@ -249,6 +248,26 @@
     return n;
   }
 
+  function profileDisplayName(id) {
+    if (!id) return "Account";
+    try {
+      const storeData = readStore();
+      const p = (storeData && storeData.profiles || []).find((x) => x.id === id);
+      if (p && p.name) return p.name;
+    } catch (_) {}
+    if (id === "local-d") return "Local D";
+    const m = /^cursor-([a-z0-9])$/i.exec(id);
+    if (m) return "Seat " + m[1].toUpperCase();
+    return String(id);
+  }
+
+  function logRendererError(ctx, err) {
+    try {
+      const line = `[renderer:${ctx}] ${new Date().toISOString()} ${err && err.stack || err && err.message || err}\n`;
+      fs.appendFileSync("/tmp/grokbot-renderer.log", line);
+    } catch (_) {}
+  }
+
   function toast(msg) {
     let n = document.getElementById("grok-d-toast");
     if (!n) {
@@ -282,6 +301,7 @@
     dismiss: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
     swap: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>`,
     plus: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+    palette: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2"/><circle cx="17.5" cy="10.5" r="2"/><circle cx="8.5" cy="7.5" r="2"/><circle cx="6.5" cy="12.5" r="2"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.4-1.02-.23-.27-.37-.62-.37-.98 0-.83.67-1.5 1.5-1.5H16c3.31 0 6-2.69 6-6 0-4.97-4.5-9-10-9z"/></svg>`,
   };
 
   function ensureStyles() {
@@ -692,8 +712,6 @@
   function getProfileMascotSvg(profile, id) {
     const defaultIcons = {
       "cursor-a": "icon_03_lightning.svg",
-      "cursor-b": "icon_04_flame.svg",
-      "cursor-c": "icon_08_sunflare.svg",
       "local-d": "icon_12_hexagon.svg"
     };
     const targetFile = (profile && profile.icon) || defaultIcons[id] || "icon_03_lightning.svg";
@@ -773,7 +791,7 @@
         <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--gd-border-subtle);padding-bottom:12px">
           <div>
             <div style="font-weight:700;font-size:16px;color:var(--gd-text)">Customize ${profile.name}</div>
-            <div style="font-size:12px;color:var(--gd-text-muted);margin-top:2px">Select your bot's glowing glassy orb avatar and identity color</div>
+            <div style="font-size:12px;color:var(--gd-text-muted);margin-top:2px">Choose an avatar and accent color for this account</div>
           </div>
           <button type="button" id="gip-close" style="background:none;border:none;color:var(--gd-text-dim);cursor:pointer;padding:4px;display:flex;align-items:center">
             ${ICONS.dismiss}
@@ -782,15 +800,15 @@
 
         <!-- Color Palette Picker -->
         <div style="background:var(--gd-pill-bar);padding:10px 14px;border-radius:14px;border:1px solid var(--gd-border-subtle);display:flex;align-items:center;justify-content:space-between">
-          <div style="font-size:12px;font-weight:600;color:var(--gd-text)">Identity Color Glow:</div>
+          <div style="font-size:12px;font-weight:600;color:var(--gd-text)">Accent color:</div>
           <div style="display:flex;align-items:center;gap:8px">
             ${colorSwatchesHtml}
           </div>
         </div>
 
-        <!-- 50 Vector Icon Gallery Grid -->
+        <!-- Vector Icon Gallery Grid -->
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--gd-text-dim);margin-top:2px">
-          Choose Vector Mascot Icon (50 Options):
+          Mascot Icon
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(72px, 1fr));gap:9px;overflow-y:auto;max-height:50vh;padding:4px">
           ${iconGrid}
@@ -810,7 +828,10 @@
           try {
             fs.writeFileSync(STORE, JSON.stringify(storeData, null, 2) + "\n");
             toast("Updated color theme for " + profile.name);
-          } catch (_) {}
+          } catch (err) {
+            logRendererError("save-color", err);
+            toast("Unable to save color theme");
+          }
           openGalleryIconPicker(targetProfileId);
           paintLoginChip();
           const v = document.getElementById("grok-profile-veil");
@@ -827,7 +848,10 @@
           try {
             fs.writeFileSync(STORE, JSON.stringify(storeData, null, 2) + "\n");
             toast("Updated mascot icon for " + profile.name);
-          } catch (_) {}
+          } catch (err) {
+            logRendererError("save-icon", err);
+            toast("Unable to save mascot icon");
+          }
           closeIconPicker();
           paintLoginChip();
           const v = document.getElementById("grok-profile-veil");
@@ -1015,7 +1039,7 @@
         const targetId = b.getAttribute("data-id");
         if (targetId && targetId !== id) {
           unveil();
-          toast("Swapping to " + targetId + "…");
+          toast("Swapping to " + profileDisplayName(targetId) + "…");
           switchTo(targetId);
         }
       });
@@ -1027,12 +1051,18 @@
       openGalleryIconPicker(id);
     });
     v.querySelector("#gv-btn-reset").addEventListener("click", () => {
-      toast("Wiping browser session for " + id + "…");
+      toast("Resetting browser session for " + profileDisplayName(id) + "…");
       try { require(path.join(ROOT, "browser-login.js")).resetProfile(id); } catch {}
-      loginClean({ reset: true }).catch((e) => toast("Reset failed: " + (e.message || e)));
+      loginClean({ reset: true }).catch((e) => {
+        logRendererError("reset", e);
+        toast("Reset failed. Please retry.");
+      });
     });
     v.querySelector("#gv-btn-reopen").addEventListener("click", () => {
-      loginClean({ reset: false }).catch((e) => toast("Sign-in failed: " + (e.message || e)));
+      loginClean({ reset: false }).catch((e) => {
+        logRendererError("login", e);
+        toast("Sign-in could not be started. Please retry.");
+      });
     });
 
     identity().then((st) => {
@@ -1092,6 +1122,40 @@
     } catch {
       return false;
     }
+  }
+
+  function hasHealthyComputer() {
+    try {
+      const box = require(path.join(ROOT, "box-state.js"));
+      return box.isHealthyRemoteFile(remoteConnPath());
+    } catch {
+      return false;
+    }
+  }
+
+  function coverLib() {
+    const p = path.join(ROOT, "computer-cover.js");
+    try { delete require.cache[require.resolve(p)]; } catch {}
+    try { return require(p); }
+    catch { return null; }
+  }
+
+  function computerKeepState() {
+    const seat = activeId();
+    const cur = window.__gdComputerKeep || { seat: "", last: 0, retries: 0, recovered: false };
+    if (cur.seat !== seat) {
+      window.__gdComputerKeep = { seat, last: 0, retries: 0, recovered: false, unauth: false };
+    } else {
+      window.__gdComputerKeep = cur;
+    }
+    return window.__gdComputerKeep;
+  }
+
+  function dressComputerLost() {
+    const lib = coverLib();
+    if (!lib || !lib.restyleLostDialog) return;
+    try { lib.restyleLostDialog(document, { paused: botsPaused(activeId()) }); }
+    catch (_) {}
   }
 
   function snapshotActiveBox() {
@@ -1222,7 +1286,7 @@
     const reset = !!(opts && opts.reset);
     const id = activeId();
     if (window.__gdLoggingIn) {
-      toast("Sign-in is already open in the clean browser for " + id);
+      toast("Sign-in is already open in the browser for " + profileDisplayName(id));
       return { id, action: "in-flight" };
     }
     window.__gdLoggingIn = true;
@@ -1239,7 +1303,7 @@
           if (btn) { btn.click(); return "reopen"; }
           return "logging-in";
         `);
-        veil("Finish sign-in in the clean Chrome window. D is already waiting.");
+        veil("Complete sign-in in the browser window to continue.");
         toast("Use that Chrome window — do not start another sign-in");
         return { id, action: reopened && reopened.value || "logging-in" };
       }
@@ -1251,7 +1315,7 @@
       }
       veil("Opening a clean browser for this seat. Sign in there — not in your regular Chrome.");
       const login = await pageCall("return await window.desktop.cursorAccount.login()");
-      toast("Finish sign-in in the clean Chrome window for " + id);
+      toast("Finish sign-in in the clean Chrome window for " + profileDisplayName(id));
       if ((await identity()).kind === "logged-in") unveil();
       return { id, action: "login", login };
     } finally {
@@ -1277,23 +1341,29 @@
     const waitFor = async (ms) => {
       const t0 = Date.now();
       while (Date.now() - t0 < ms) {
-        if (hasRemoteComputer()) return true;
+        if (hasHealthyComputer()) return true;
         const fromDesc = tryInstallFromDescriptor();
-        if (fromDesc && hasRemoteComputer()) return true;
+        if (fromDesc && hasHealthyComputer()) return true;
         await sleep(400);
       }
-      return hasRemoteComputer();
+      return hasHealthyComputer();
     };
     try {
-      if (hasRemoteComputer()) {
+      if (hasHealthyComputer()) {
         snapshotActiveBox();
         return { action: "already" };
       }
+      if (botsPaused(activeId())) {
+        return { action: "paused" };
+      }
+      try {
+        require(path.join(ROOT, "box-state.js")).clearLocalLeftovers(seat4Root());
+      } catch {}
       alignSettings();
       seedOfficialDescriptor();
       const probe = probeAuthToDisk();
       const fromDesc = tryInstallFromDescriptor();
-      if (hasRemoteComputer()) {
+      if (hasHealthyComputer()) {
         snapshotActiveBox();
         unveil();
         toast("Computer is ready");
@@ -1332,7 +1402,7 @@
         alignSettings();
         seedOfficialDescriptor();
         tryInstallFromDescriptor();
-        if (hasRemoteComputer()) {
+        if (hasHealthyComputer()) {
           snapshotActiveBox();
           unveil();
           toast("Computer is ready");
@@ -1347,24 +1417,28 @@
         return { action: "official-connect", probe };
       }
       const usage = await usageAccepted();
-      const recon = await pageCall("return await window.desktop.forceGatewayReconnect()");
-      if (await waitFor(180000)) {
-        unveil();
-        snapshotActiveBox();
-        toast("Computer is ready");
-        return { action: "reconnect", recon, usage, probe };
+      let recon = null;
+      if (hasRemoteComputer()) {
+        recon = await pageCall("return await window.desktop.forceGatewayReconnect()");
+        if (await waitFor(12000)) {
+          unveil();
+          snapshotActiveBox();
+          toast("Computer is ready");
+          return { action: "reconnect", recon, usage, probe };
+        }
       }
-      if (usage.unauth) {
-        unveil();
-        toast("This login cannot open a computer. Sign in again from the chip — it opens a clean browser.");
-        return { action: "unauthenticated", recon, usage, probe };
-      }
+      const reconErr = String((recon && recon.error) || (usage && usage.error) || "");
+      const unauth = !!(usage && usage.unauth) || /unauth/i.test(reconErr);
       unveil();
-      toast("This Cursor seat still has no computer. Sign in again from the orb.");
-      return { action: "failed", recon, usage, probe };
+      if (unauth) {
+        toast("This computer needs a fresh sign-in. Use the chip — it opens a clean browser.");
+        return { action: unauth && !(await loggedIn()) ? "unauthenticated" : "pending", recon, usage, probe };
+      }
+      return { action: "pending", recon, usage, probe };
     } catch (e) {
       unveil();
-      toast("Could not get a computer: " + (e.message || e));
+      logRendererError("ensure-computer", e);
+      toast("Unable to connect to computer environment. Please retry.");
       return { action: "error", error: String(e.message || e) };
     } finally {
       window.__gdEnsuringBox = false;
@@ -1392,27 +1466,24 @@
       <input id="gp-name" value="New profile" style="width:100%;box-sizing:border-box;padding:7px 9px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#111;color:#fff;font:inherit">
       <label style="display:block;opacity:.7;margin:10px 0 4px">Kind</label>
       <div style="display:flex;gap:6px">
-        <button type="button" data-kind="local" class="gp-kind" style="flex:1;padding:7px;border-radius:10px;border:1px solid #c4b5fd;background:rgba(196,181,253,.15);color:#fff;font:inherit;cursor:pointer">Local box</button>
+        <button type="button" data-kind="local" class="gp-kind" style="flex:1;padding:7px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.12);color:#fff;font:inherit;cursor:pointer">Local box</button>
         <button type="button" data-kind="cursor" class="gp-kind" style="flex:1;padding:7px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#ddd;font:inherit;cursor:pointer">Cursor ID</button>
       </div>
       <div id="gp-cursor-fields" style="display:none">
         <label style="display:block;opacity:.7;margin:10px 0 4px">Import chats from seat</label>
         <select id="gp-from" style="width:100%;padding:7px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#111;color:#fff;font:inherit">
           <option value="">Sign in here (no import)</option>
-          <option value="A">Grok A</option><option value="B">Grok B</option><option value="C">Grok C</option>
+          <option value="A">Grok A</option>
         </select>
         <label style="display:block;opacity:.7;margin:10px 0 4px">Sign in as (Cursor identity)</label>
         <select id="gp-identity" style="width:100%;padding:7px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#111;color:#fff;font:inherit">
           <option value="">Same as import / sign in here</option>
-          <option value="A">A’s Cursor</option><option value="B">B’s Cursor</option><option value="C">C’s Cursor</option>
+          <option value="A">A’s Cursor</option>
         </select>
-        <label style="display:flex;gap:8px;align-items:center;margin-top:10px;cursor:pointer">
-          <input id="gp-family" type="checkbox"> Pull A + B + C chat lists onto this identity
-        </label>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
         <button type="button" id="gp-cancel" style="padding:6px 10px;border-radius:9px;border:0;background:transparent;color:#aaa;font:inherit;cursor:pointer">Cancel</button>
-        <button type="button" id="gp-save" style="padding:6px 12px;border-radius:9px;border:0;background:#a78bfa;color:#111;font:700 12px inherit;cursor:pointer">Create</button>
+        <button type="button" id="gp-save" style="padding:6px 12px;border-radius:9px;border:0;background:#ffffff;color:#000000;font:700 12px inherit;cursor:pointer">Create</button>
       </div>
     `;
     document.body.appendChild(sheet);
@@ -1436,7 +1507,6 @@
           kind,
           from: kind === "cursor" ? (sheet.querySelector("#gp-from").value || undefined) : undefined,
           identity: kind === "cursor" ? (sheet.querySelector("#gp-identity").value || undefined) : undefined,
-          family: kind === "cursor" && sheet.querySelector("#gp-family").checked,
         });
         closeSheet();
         location.reload();
@@ -1584,7 +1654,7 @@
         } else if (t.includes("isn’t available on this account") || t.includes("isn't available on this account")) {
           el.textContent = "Seat not active — switch seat or connect a non-Grok account";
         } else if (t.includes("Check what this account needs")) {
-          el.textContent = "Use the profile switcher to cycle seats A/B/C/D or plug in non-Grok identities with full concurrency.";
+          el.textContent = "Use the profile switcher to change seats or plug in another Cursor login.";
         }
       }
     });
@@ -1601,9 +1671,51 @@
     }
   }
 
+  async function keepCursorComputer() {
+    if (mode() !== "cursor") return;
+    if (window.__gdEnsuringBox) return;
+    const lib = coverLib();
+    if (!lib) return;
+    dressComputerLost();
+    const overlay = lib.overlayShowing(document);
+    const healthy = hasHealthyComputer();
+    const st = computerKeepState();
+    if (healthy) {
+      snapshotActiveBox();
+      st.retries = 0;
+      return;
+    }
+    if (botsPaused(st.seat)) return;
+    const now = Date.now();
+    if (now - st.last < 8000) return;
+    st.last = now;
+    const hasRemote = hasRemoteComputer();
+    const action = lib.pickAction({
+      overlay: overlay,
+      healthy: false,
+      hasRemote,
+      retries: st.retries,
+      recovered: st.recovered,
+    });
+    st.retries += 1;
+    try {
+      fs.appendFileSync("/tmp/grokbot-renderer.log",
+        "[computer-keep] " + JSON.stringify({
+          action, overlay, retries: st.retries, seat: st.seat, hasRemote,
+        }) + "\n");
+    } catch (_) {}
+    if (action === "retry" && hasRemote) {
+      try { await pageCall("return await window.desktop.forceGatewayReconnect()"); } catch (_) {}
+      const btn = lib.findRetry(document);
+      if (btn && typeof btn.click === "function") btn.click();
+    }
+    if (hasHealthyComputer()) snapshotActiveBox();
+  }
+
   function restoreGorgeousUi() {
     try {
       enhanceCoverScreen();
+      dressComputerLost();
       const bar = document.getElementById("grok-profile-bar");
       if (bar) bar.remove();
       const lava = document.getElementById("pure-lava-orbs-root");
@@ -1712,9 +1824,14 @@
         agents,
         sendPrompt,
       });
-      if (r && r.ok) toast("Fall over · " + decision.action + (decision.to ? " → " + decision.to : ""));
+      if (r && r.ok) {
+        const dest = r.to ? (" → " + profileDisplayName(r.to)) : "";
+        const actionLabel = r.action === "cursor" ? "Account rotation" : r.action === "local-chief" ? "Chief handoff" : r.action === "local-clone" ? "Continue locally" : (r.action || "Triggered");
+        toast("Failover · " + actionLabel + dest);
+      }
     } catch (e) {
-      toast("Fall over failed: " + (e && e.message || e));
+      logRendererError("failover-act", e);
+      toast("Failover could not complete. Check logs.");
     } finally {
       _foBusy = false;
     }
@@ -2210,40 +2327,25 @@
     const st = document.createElement("style");
     st.id = "gd-seat-bubble-css";
     st.textContent = `
-      @keyframes gdGhostlyBubbleMorph {
-        0%, 100% { border-radius: 28% 32% 30% 26% / 16% 18% 16% 18%; transform: translate(0, 0) rotate(0deg) scale(1, 1); }
-        20% { border-radius: 32% 26% 28% 30% / 18% 16% 20% 14%; transform: translate(1px, -2px) rotate(0.6deg) scale(1.012, 0.99); }
-        40% { border-radius: 26% 30% 24% 32% / 15% 20% 14% 18%; transform: translate(-2px, 1px) rotate(-0.5deg) scale(0.99, 1.012); }
-        65% { border-radius: 30% 24% 32% 26% / 18% 14% 18% 16%; transform: translate(2px, 1px) rotate(0.7deg) scale(1.01, 0.992); }
-        85% { border-radius: 27% 31% 29% 25% / 14% 18% 16% 19%; transform: translate(-1px, -1px) rotate(-0.4deg) scale(0.996, 1.006); }
-      }
-      @keyframes gdSeatItemIn {
-        0% { opacity: 0; transform: translateY(28px) scale(0.9); }
-        60% { opacity: 0.95; transform: translateY(-4px) scale(1.02); }
-        80% { transform: translateY(2px) scale(0.99); }
-        100% { opacity: 1; transform: translateY(0) scale(1); }
-      }
       #grok-seat-action-menu.gd-seat-bubble {
         position: fixed;
         z-index: 1000003;
-        width: 300px;
-        min-width: 300px;
-        max-width: min(300px, calc(100vw - 20px));
-        max-height: min(86vh, 720px);
+        width: 272px;
+        max-width: min(272px, calc(100vw - 24px));
+        max-height: min(80vh, 620px);
         display: flex;
         flex-direction: column;
-        align-items: stretch;
-        padding: 24px 20px 38px;
+        padding: 10px 10px 8px;
         box-sizing: border-box;
         overflow: hidden;
-        font: 500 12px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-        color: #fff;
-        background: radial-gradient(135% 135% at 30% 8%, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.02) 35%, rgba(10,10,18,0.6) 75%, rgba(4,4,8,0.82) 100%);
-        backdrop-filter: blur(50px) saturate(190%) contrast(115%);
-        -webkit-backdrop-filter: blur(50px) saturate(190%) contrast(115%);
-        border: 1px solid rgba(255,255,255,0.16);
-        box-shadow: 0 32px 85px rgba(0,0,0,0.88), inset 0 -8px 24px rgba(0,0,0,0.5), inset 0 0 20px rgba(255,255,255,0.03), 0 0 35px rgba(255,255,255,0.04);
-        animation: gdGhostlyBubbleMorph 11s infinite ease-in-out;
+        font: 500 12px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        color: #e8e8ed;
+        background: rgba(18, 18, 22, 0.94);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 12px;
+        box-shadow: 0 12px 32px rgba(0,0,0,0.4);
         user-select: none;
       }
       #grok-seat-action-menu.gd-seat-bubble .gd-seat-scroll {
@@ -2255,93 +2357,87 @@
         scrollbar-width: none;
         display: flex;
         flex-direction: column;
-        align-items: stretch;
-        gap: 0;
       }
       #grok-seat-action-menu.gd-seat-bubble .gd-seat-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
       #grok-seat-action-menu.gd-seat-bubble .gd-idcard,
-      #grok-seat-action-menu.gd-seat-bubble .whimsical-model-tray,
-      #grok-seat-action-menu.gd-seat-bubble .liquid-constellation-grid,
-      #grok-seat-action-menu.gd-seat-bubble .gd-railwrap { width: 100%; box-sizing: border-box; }
+      #grok-seat-action-menu.gd-seat-bubble .whimsical-model-tray { width: 100%; box-sizing: border-box; }
       #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item {
         display: flex;
         align-items: center;
-        gap: 9px;
+        gap: 8px;
         width: 100%;
-        padding: 6px 10px;
-        border-radius: 16px;
-        background: radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 50%, rgba(12,12,24,0.6) 100%);
-        border: 1px solid rgba(255,255,255,0.12);
-        backdrop-filter: blur(30px);
-        -webkit-backdrop-filter: blur(30px);
+        padding: 6px 8px;
+        border-radius: 8px;
+        background: transparent !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        backdrop-filter: none !important;
         cursor: pointer;
-        color: #fff;
+        color: inherit !important;
         font: inherit;
         text-align: left;
         box-sizing: border-box;
-        margin: 0 0 4px;
-        animation: gdSeatItemIn 0.65s cubic-bezier(0.19, 1, 0.22, 1) forwards;
-        transition: transform 0.35s cubic-bezier(0.19, 1, 0.22, 1), border-color 0.35s, box-shadow 0.35s, background 0.35s;
+        margin: 0;
+        transform: none !important;
+        animation: none !important;
       }
-      #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item:nth-child(1) { animation-delay: 0.03s; }
-      #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item:nth-child(2) { animation-delay: 0.07s; }
-      #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item:nth-child(3) { animation-delay: 0.11s; }
-      #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item:nth-child(4) { animation-delay: 0.15s; }
-      #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item:nth-child(5) { animation-delay: 0.19s; }
       #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item:hover {
-        background: radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.05) 50%, rgba(20,20,36,0.8) 100%) !important;
-        border-color: rgba(255,255,255,0.35) !important;
-        transform: translateY(-2px) scale(1.02);
-        box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+        background: rgba(255,255,255,0.06) !important;
+        transform: none !important;
+        box-shadow: none !important;
       }
       #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item.is-active-model {
-        background: radial-gradient(120% 120% at 30% 20%, rgba(56,189,248,0.22) 0%, rgba(56,189,248,0.06) 60%, rgba(10,16,28,0.85) 100%) !important;
-        border-color: rgba(56,189,248,0.55) !important;
-        box-shadow: 0 0 16px rgba(56,189,248,0.35);
+        background: rgba(255,255,255,0.08) !important;
+        box-shadow: none !important;
       }
-      #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item.is-stopped {
-        border-color: rgba(248,113,113,0.35);
-      }
+      #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item.is-stopped { opacity: 0.55; }
       #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item .gd-sw {
         pointer-events: auto;
         margin-left: 4px;
         flex: 0 0 36px;
       }
-      #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item.is-danger {
-        background: radial-gradient(120% 120% at 30% 20%, rgba(239,68,68,0.16) 0%, rgba(239,68,68,0.04) 60%, rgba(20,10,12,0.8) 100%);
-        border-color: rgba(239,68,68,0.35);
-        color: #fca5a5;
-      }
+      #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item.is-danger { color: #f0a8a8 !important; }
       #grok-seat-action-menu.gd-seat-bubble .active-provider-hero-pill {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 7px 10px;
-        border-radius: 18px;
-        background: radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.03) 50%, rgba(14,14,28,0.75) 100%);
-        border: 1px solid rgba(255,255,255,0.22);
-        box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 0 16px var(--glow-color, rgba(255,255,255,0.3));
+        padding: 2px 2px 8px;
+        margin-bottom: 4px;
+        border: 0;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
         width: 100%;
         box-sizing: border-box;
       }
-      #grok-seat-action-menu.gd-seat-bubble .gd-seat-kicker {
-        font-size: 10px;
-        font-weight: 800;
-        color: rgba(255,255,255,0.6);
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        margin: 2px 0 8px;
-        text-align: center;
+      #grok-seat-action-menu.gd-seat-bubble .gd-seat-more {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        margin-top: 6px;
+        padding: 6px 8px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: inherit;
+        font: 600 11px/1.3 inherit;
+        cursor: pointer;
+        opacity: 0.65;
       }
-      #grok-seat-action-menu.gd-seat-bubble .gd-seat-kicker.is-sub {
-        margin: 10px 0 6px;
-        font-size: 9.5px;
-        letter-spacing: 0.6px;
-        opacity: 0.7;
-      }
-      @media (prefers-reduced-motion: reduce) {
-        #grok-seat-action-menu.gd-seat-bubble { animation: none; }
-        #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item { animation: none; }
+      #grok-seat-action-menu.gd-seat-bubble .gd-seat-more:hover { opacity: 1; background: rgba(255,255,255,0.05); }
+      #grok-seat-action-menu.gd-seat-bubble .gd-railacts { justify-content: flex-start; border: none; padding: 4px 4px 8px; gap: 6px; }
+      @media (prefers-color-scheme: light) {
+        #grok-seat-action-menu.gd-seat-bubble {
+          background: rgba(250, 250, 252, 0.96);
+          color: #1c1c20;
+          border-color: rgba(0,0,0,0.1);
+          box-shadow: 0 12px 32px rgba(0,0,0,0.12);
+        }
+        #grok-seat-action-menu.gd-seat-bubble .whimsical-model-item.is-active-model {
+          background: rgba(0,0,0,0.05) !important;
+        }
       }
     `;
     document.head.appendChild(st);
@@ -2361,8 +2457,8 @@
     let idCollapsed = true;
     try { idCollapsed = localStorage.getItem("gd-idcard-collapsed") !== "0"; } catch (_) {}
     const signedNow = !!(fmt.signedIn || fmt.email || (st && (st.kind === "logged-in" || st.email)));
-    const statusDot = signedNow ? "background:var(--gd-green);box-shadow:0 0 8px var(--gd-green)" : (st && st.kind === "logging-in" ? "background:var(--gd-amber);box-shadow:0 0 8px var(--gd-amber)" : "background:var(--gd-text-dim)");
-    const statusText = signedNow ? "Connected & Active" : (st && st.kind === "logging-in" ? "Signing in…" : "Signed out / Standby");
+    const statusDot = signedNow ? "background:var(--gd-green)" : (st && st.kind === "logging-in" ? "background:var(--gd-amber)" : "background:var(--gd-text-dim)");
+    const statusText = signedNow ? "Connected" : (st && st.kind === "logging-in" ? "Signing in…" : "Signed out");
 
     const seatFace = (p, snap, size) => {
       const px = size || 28;
@@ -2376,7 +2472,7 @@
       if (mascot) {
         return `<span class="gd-seat-face" style="${box}">${mascot}</span>`;
       }
-      return `<span class="gd-seat-face" style="${box};background:${p.color || "#8b5cf6"};color:#fff;font:700 ${Math.max(10, px * 0.42)}px/${px}px -apple-system,sans-serif">${letter}</span>`;
+      return `<span class="gd-seat-face" style="${box};background:${p.color || "#52525b"};color:#fff;font:700 ${Math.max(10, px * 0.42)}px/${px}px -apple-system,sans-serif">${letter}</span>`;
     };
 
     const quotaBar = (pid, kind) => {
@@ -2418,76 +2514,64 @@
       `;
     }).join("");
 
-    const heroGlow = getProfileColorInfo(profile && profile.color).glow;
     menu.innerHTML = `
       <div class="gd-seat-scroll">
-        <div class="gd-seat-kicker">Seats</div>
-        <div class="active-provider-hero-pill" style="--glow-color:${heroGlow};margin-bottom:8px">
-          <span style="width:8px;height:8px;border-radius:50%;${statusDot};flex:0 0 8px"></span>
-          <span style="font-size:11.5px;font-weight:800;color:#ffffff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${profile ? profile.name : fmt.title}</span>
-          <span style="font-size:9px;color:rgba(255,255,255,0.45);margin-left:auto;white-space:nowrap">${statusText}</span>
-          <button type="button" id="grok-idcard-toggle" class="gd-idtoggle${idCollapsed ? " is-collapsed" : ""}" title="Show/hide account details" aria-expanded="${idCollapsed ? "false" : "true"}">
+        <div class="active-provider-hero-pill">
+          <span style="width:7px;height:7px;border-radius:50%;${statusDot};flex:0 0 7px"></span>
+          <span style="font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${profile ? profile.name : fmt.title}</span>
+          <span style="font-size:10px;opacity:.55;margin-left:auto;white-space:nowrap">${statusText}</span>
+          <button type="button" id="grok-idcard-toggle" class="gd-idtoggle${idCollapsed ? " is-collapsed" : ""}" title="Account details" aria-expanded="${idCollapsed ? "false" : "true"}">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
-          <button type="button" id="grok-menu-close" style="background:none;border:none;color:rgba(255,255,255,0.55);cursor:pointer;padding:0 2px;display:flex;align-items:center">
+          <button type="button" id="grok-menu-close" style="background:none;border:none;color:inherit;opacity:.55;cursor:pointer;padding:0 2px;display:flex;align-items:center">
             ${ICONS.dismiss}
           </button>
         </div>
 
         <div class="gd-idcard${idCollapsed ? " is-collapsed" : ""}" id="grok-idcard">
           <div class="gd-idrow">
-            <span class="gd-idk">Status</span>
-            <span class="gd-idpill ${signedNow ? "is-on" : (st && st.kind === "logging-in" ? "is-wait" : "is-off")}"><i></i>${statusText}</span>
-          </div>
-          <div class="gd-idrow">
             <span class="gd-idk">Account</span>
             <span class="gd-idv ${fmt.email || fmt.hover ? "" : "is-dim"}" title="${fmt.email || fmt.hover || fmt.full || ""}">${fmt.email || fmt.hover || "No account bound"}</span>
           </div>
           <div class="gd-idrow">
-            <span class="gd-idk">Active Seat</span>
-            <span class="gd-idseat">${id.toUpperCase()}</span>
+            <span class="gd-idk">Seat</span>
+            <span class="gd-idseat">${id}</span>
           </div>
         </div>
 
-        <div class="gd-seat-kicker is-sub">Swap Seat / Identity</div>
         <div class="whimsical-model-tray no-scrollbar">
           ${swapButtonsHtml}
         </div>
-        ${(profile && profile.kind === "cursor") ? `
-        <button type="button" id="grok-continue-local" class="whimsical-model-item" title="Keep this chat and settings. Local models pick up here.">
-          <span style="font-size:11px;font-weight:700;color:#fff">Continue this chat on Local D</span>
-          <span style="font-size:9px;color:rgba(255,255,255,0.5);margin-left:auto">same thread</span>
-        </button>
-        ` : ""}
-        <button type="button" id="grok-menu-new-bot" class="whimsical-model-item" title="Create a bot on this computer">
-          <span style="font-size:11px;font-weight:700;color:#fff">Create new Bot</span>
-        </button>
-        <div class="whimsical-model-item" id="grok-orb-avatar" role="switch"
-             aria-checked="${orbAvatarOn() ? "true" : "false"}" tabindex="0"
-             title="Put the active seat's photo on the left orb">
-          ${seatFace(profile || { id }, seatSnapshot(id), 20)}
-          <span style="min-width:0;flex:1">
-            <span style="display:block;font-size:11px;font-weight:700;color:#fff">Seat photo on the orb</span>
-            <span style="display:block;font-size:9.5px;color:rgba(255,255,255,0.5)">Follows the active seat</span>
-          </span>
-          ${switchBtn(orbAvatarOn(), "", 'data-orb-avatar="1"')}
-        </div>
-        <div class="gd-railacts" style="justify-content:center;border:none;padding:4px 0 8px;gap:8px">
-          <button type="button" id="grok-menu-add-seat" class="gd-iconbtn is-primary" title="Add seat">${ICONS.plus}</button>
-          <button type="button" id="grok-menu-clean-login" class="gd-iconbtn" title="Open Sign-In">${ICONS.browser}</button>
-          <button type="button" id="grok-menu-pick-icon" class="gd-iconbtn" title="Change icon"><span style="font-size:13px;line-height:1">🎨</span></button>
-        </div>
-
-        <button type="button" id="grok-seat-more" class="whimsical-model-item" style="justify-content:center">
-          <span style="font-size:10.5px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;opacity:.7">Auto Failover</span>
-        </button>
+        <button type="button" id="grok-seat-more" class="gd-seat-more" aria-expanded="false">More</button>
         <div id="grok-seat-more-body" style="display:none">
+          ${(profile && profile.kind === "cursor") ? `
+          <button type="button" id="grok-continue-local" class="whimsical-model-item" title="Keep this chat and settings. Local models pick up here.">
+            <span style="font-size:11px;font-weight:650">Continue on Local D</span>
+          </button>
+          ` : ""}
+          <button type="button" id="grok-menu-new-bot" class="whimsical-model-item" title="Create a bot on this computer">
+            <span style="font-size:11px;font-weight:650">Create new Bot</span>
+          </button>
+          <div class="whimsical-model-item" id="grok-orb-avatar" role="switch"
+               aria-checked="${orbAvatarOn() ? "true" : "false"}" tabindex="0"
+               title="Put the active seat's photo on the left orb">
+            ${seatFace(profile || { id }, seatSnapshot(id), 20)}
+            <span style="min-width:0;flex:1">
+              <span style="display:block;font-size:11px;font-weight:650">Seat photo on the orb</span>
+            </span>
+            ${switchBtn(orbAvatarOn(), "", 'data-orb-avatar="1"')}
+          </div>
+          <div class="gd-railacts">
+            <button type="button" id="grok-menu-add-seat" class="gd-iconbtn is-primary" title="Add seat">${ICONS.plus}</button>
+            <button type="button" id="grok-menu-clean-login" class="gd-iconbtn" title="Open Sign-In">${ICONS.browser}</button>
+            <button type="button" id="grok-menu-pick-icon" class="gd-iconbtn" title="Change icon">${ICONS.palette}</button>
+          </div>
           ${fallOverBlock()}
+          <button type="button" id="grok-menu-reset-login" class="whimsical-model-item is-danger">
+            ${ICONS.reset}
+            <span style="font-size:11px;font-weight:650">Reset session</span>
+          </button>
         </div>
-        <button type="button" id="grok-menu-reset-login" class="whimsical-model-item is-danger">
-          ${ICONS.reset}
-          <span style="font-size:11px;font-weight:700">Reset Session &amp; Clean Login</span>
-        </button>
       </div>
     `;
 
@@ -2506,6 +2590,8 @@
         e.stopPropagation();
         const open = moreBody.style.display !== "none";
         moreBody.style.display = open ? "none" : "block";
+        moreBtn.setAttribute("aria-expanded", open ? "false" : "true");
+        moreBtn.textContent = open ? "More" : "Less";
         requestAnimationFrame(() => positionSeatBubble(menu));
       });
     }
@@ -2525,11 +2611,14 @@
         e.stopImmediatePropagation();
         const seat = btn.getAttribute("data-seat-stop");
         const next = !botsPaused(seat);
-        toast(next ? ("Stopping " + seat + "…") : ("Resuming " + seat + "…"));
+        toast(next ? ("Stopping " + profileDisplayName(seat) + "…") : ("Resuming " + profileDisplayName(seat) + "…"));
         setBotsPaused(next, seat).then(() => {
-          toast(next ? (seat + " stopped") : (seat + " running"));
+          toast(next ? (profileDisplayName(seat) + " stopped") : (profileDisplayName(seat) + " running"));
           openSeatActionMenu(st, fmt, profile, id);
-        }).catch((err) => toast("Stop failed: " + (err.message || err)));
+        }).catch((err) => {
+          logRendererError("stop-seat", err);
+          toast("Unable to update pause state. Please retry.");
+        });
       });
     });
     const orbRow = menu.querySelector("#grok-orb-avatar");
@@ -2569,7 +2658,8 @@
           saved = true;
         }
       } catch (err) {
-        toast("Fall over save failed: " + (err && err.message || err));
+        logRendererError("save-failover", err);
+        toast("Unable to save failover settings");
         return;
       }
       if (!saved) {
@@ -2611,7 +2701,7 @@
         const targetId = b.getAttribute("data-id");
         closeSeatActionMenu();
         if (targetId && targetId !== id) {
-          toast("Swapping to " + targetId + "…");
+          toast("Swapping to " + profileDisplayName(targetId) + "…");
           switchTo(targetId);
         }
       });
@@ -2628,12 +2718,18 @@
     }
     menu.querySelector("#grok-menu-reset-login").addEventListener("click", () => {
       closeSeatActionMenu();
-      toast("Resetting browser profile for " + id + "…");
-      loginClean({ reset: true }).catch((e) => toast("Reset failed: " + (e.message || e)));
+      toast("Resetting browser profile for " + profileDisplayName(id) + "…");
+      loginClean({ reset: true }).catch((e) => {
+        logRendererError("reset", e);
+        toast("Reset failed. Please retry.");
+      });
     });
     menu.querySelector("#grok-menu-clean-login").addEventListener("click", () => {
       closeSeatActionMenu();
-      loginClean({ reset: false }).catch((e) => toast("Sign-in failed: " + (e.message || e)));
+      loginClean({ reset: false }).catch((e) => {
+        logRendererError("login", e);
+        toast("Sign-in could not be started. Please retry.");
+      });
     });
     menu.querySelector("#grok-menu-pick-icon").addEventListener("click", () => {
       closeSeatActionMenu();
@@ -2653,7 +2749,8 @@
           toast("Created " + nm);
           try { pageCall("return await window.desktop.forceGatewayReconnect()"); } catch {}
         } catch (e) {
-          toast("Create bot failed: " + (e.message || e));
+          logRendererError("create-bot", e);
+          toast("Unable to create bot. Please retry.");
         }
       });
     }
@@ -2832,11 +2929,14 @@
             if (e.stopImmediatePropagation) e.stopImmediatePropagation();
             const seat = activeId();
             const next = !botsPaused(seat);
-            toast(next ? ("Stopping " + seat + "…") : ("Resuming " + seat + "…"));
+            toast(next ? ("Stopping " + profileDisplayName(seat) + "…") : ("Resuming " + profileDisplayName(seat) + "…"));
             setBotsPaused(next, seat).then(() => {
-              toast(next ? (seat + " stopped") : (seat + " running"));
+              toast(next ? (profileDisplayName(seat) + " stopped") : (profileDisplayName(seat) + " running"));
               paintLoginChip();
-            }).catch((err) => toast("Stop failed: " + (err.message || err)));
+            }).catch((err) => {
+              logRendererError("chip-stop", err);
+              toast("Unable to update pause state. Please retry.");
+            });
           };
           stopEl.addEventListener("click", go);
           stopEl.addEventListener("keydown", (e) => {
@@ -2924,7 +3024,8 @@
     }
     const sel = document.getElementById("grok-model-select");
     if (sel && sel.value !== id) sel.value = id;
-    toast("Using " + id);
+    const modelClean = id.replace(/^cursor\//, "").replace(/-/g, " ");
+    toast("Model set: " + modelClean);
     return id;
   }
 
@@ -3067,7 +3168,8 @@
         return true;
       }
     } catch (e) {
-      toast("Send failed: " + e.message);
+      logRendererError("flush-queued", e);
+      toast("Send failed. Check local box connection.");
     } finally {
       setTimeout(() => { window.__grokdFlushing = false; }, 800);
     }
@@ -3136,7 +3238,7 @@
         out.ok = true;
       } else if (cmd.op === "ensure-box") {
         out.ensure = await ensureCursorComputer();
-        out.ok = !!(out.ensure && /^(already|official-connect|reconnect|recreate|descriptor|login-descriptor|not-cursor)$/.test(out.ensure.action));
+        out.ok = !!(out.ensure && /^(already|official-connect|reconnect|recreate|descriptor|login-descriptor|not-cursor|pending|paused)$/.test(out.ensure.action));
       } else if (cmd.op === "splash") {
         window.__grokd_splash_done = false;
         window.__grokdSplashPlaying = false;
@@ -3228,7 +3330,7 @@
 
   function looksLikeExistingUser() {
     if (fs.existsSync(path.join(ROOT, "runtime", "last-switch.json"))) return true;
-    if (fs.existsSync(path.join(ROOT, "profile-data", "cursor-b", "sand-data", "local-exec-daemon-connection.json"))) return true;
+    if (fs.existsSync(path.join(ROOT, "profile-data", "cursor-a", "sand-data", "local-exec-daemon-connection.json"))) return true;
     try {
       const st = fs.statSync(path.join(ROOT, "profiles.json"));
       if (Date.now() - Number(st.birthtimeMs || st.ctimeMs || 0) > 6 * 3600 * 1000) return true;
@@ -3449,7 +3551,10 @@
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", onBoot);
   else onBoot();
-  setInterval(() => {
+  if (window.__gdUiLoop) {
+    try { clearInterval(window.__gdUiLoop); } catch (_) {}
+  }
+  window.__gdUiLoop = setInterval(() => {
     if (!document.body) return;
     try { syncTitle(); } catch {}
     try { restoreGorgeousUi(); } catch {}
@@ -3457,6 +3562,7 @@
     try { writeReady(); } catch {}
     try { pollCommand(); } catch {}
     try { flushQueued(); } catch {}
+    try { keepCursorComputer().catch(() => {}); } catch {}
     if (document.getElementById("grok-profile-veil")) {
       identity().then((s) => { if (s && s.kind === "logged-in") unveil(); }).catch(() => {});
     }

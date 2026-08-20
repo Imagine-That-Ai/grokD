@@ -54,7 +54,9 @@ resolve_node_deps() {
   fi
   local app unpacked
   for app in \
+    "$HOME/Applications/grok\"D\".app" \
     "$HOME/Applications/Grok Bot D.app" \
+    "$DURABLE/dist/grok\"D\".app" \
     "$DURABLE/dist/Grok Bot D.app" \
     "$DURABLE/dist/Grok Bot.app" \
     "/Applications/Grok Bot D.app" \

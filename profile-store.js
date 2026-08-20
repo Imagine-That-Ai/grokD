@@ -16,22 +16,33 @@ const SEATS = {
   C: path.join(os.homedir(), "Library/Application Support/GrokBotC"),
 };
 
+// Official Grok B / C stay on the Mac. D no longer imports or lists them.
+const RETIRED_IDS = ["cursor-b", "cursor-c"];
+const DETECT_SEATS = ["A"];
+const RETIRED_SEATS = ["B", "C"];
+
+function assertSeatAllowed(seat) {
+  if (!seat) return;
+  const s = String(seat).toUpperCase();
+  if (RETIRED_SEATS.indexOf(s) >= 0) throw new Error("retired seat " + s);
+}
+
 function ensureDirs() {
   fs.mkdirSync(ROOT, { recursive: true });
   fs.mkdirSync(DATA, { recursive: true });
 }
 
 function detectedCursorProfiles() {
-  const colors = { A: "#f4f4f5", B: "#fb7185", C: "#fb923c" };
+  const colors = { A: "#f4f4f5" };
   const out = [];
-  for (const seat of ["A", "B", "C"]) {
+  for (const seat of DETECT_SEATS) {
     const dir = SEATS[seat];
     if (!dir || !fs.existsSync(path.join(dir, "sand-secrets.json"))) continue;
     out.push({
       id: `cursor-${seat.toLowerCase()}`,
       name: `Grok ${seat}`,
       kind: "cursor",
-      color: colors[seat],
+      color: colors[seat] || "#f4f4f5",
       seat,
       sourceUserData: dir,
       identitySource: dir,
@@ -39,6 +50,28 @@ function detectedCursorProfiles() {
     });
   }
   return out;
+}
+
+function pruneRetired(s) {
+  const drop = new Set(RETIRED_IDS);
+  let changed = false;
+  const kept = (s.profiles || []).filter((p) => p && !drop.has(p.id));
+  if (kept.length !== (s.profiles || []).length) {
+    s.profiles = kept;
+    changed = true;
+  }
+  if (drop.has(s.activeId)) {
+    s.activeId = kept.some((p) => p.id === "cursor-a") ? "cursor-a"
+      : ((kept[0] && kept[0].id) || "local-d");
+    changed = true;
+  }
+  return changed;
+}
+
+function forgetRetiredData() {
+  for (const id of RETIRED_IDS) {
+    try { fs.rmSync(path.join(DATA, id), { recursive: true, force: true }); } catch {}
+  }
 }
 
 function defaultState() {
@@ -66,15 +99,32 @@ function load() {
     save(s);
     return s;
   }
-  const s = JSON.parse(fs.readFileSync(STORE, "utf8"));
-  if (!s || !Array.isArray(s.profiles) || !s.profiles.length) return defaultState();
+  let s = null;
+  try {
+    s = JSON.parse(fs.readFileSync(STORE, "utf8"));
+  } catch (err) {
+    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[profile-store] Corrupted profiles.json: " + (err.message || err) + "\n"); } catch (_) {}
+    s = defaultState();
+    save(s);
+    return s;
+  }
+  if (!s || !Array.isArray(s.profiles) || !s.profiles.length) {
+    s = defaultState();
+    save(s);
+    return s;
+  }
+  if (pruneRetired(s)) {
+    if (!s.profiles.some((p) => p.id === s.activeId)) s.activeId = s.profiles[0].id;
+    save(s);
+    forgetRetiredData();
+  }
   if (!s.profiles.some((p) => p.id === s.activeId)) s.activeId = s.profiles[0].id;
   return s;
 }
 
 function save(state) {
   ensureDirs();
-  const tmp = STORE + ".tmp";
+  const tmp = `${STORE}.tmp.${process.pid}.${Date.now()}`;
   fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n");
   fs.renameSync(tmp, STORE);
 }
@@ -111,8 +161,11 @@ function profileDataDir(id) {
 function add(opts) {
   const s = load();
   const id = String(opts.id || `p-${crypto.randomBytes(4).toString("hex")}`);
+  if (RETIRED_IDS.includes(id)) throw new Error(`retired profile ${id}`);
   if (s.profiles.some((p) => p.id === id)) throw new Error(`profile exists ${id}`);
   const kind = opts.kind === "cursor" ? "cursor" : "local";
+  assertSeatAllowed(opts.fromSeat);
+  assertSeatAllowed(opts.identitySeat);
   let sourceUserData = opts.sourceUserData || null;
   let identitySource = opts.identitySource || sourceUserData || null;
   if (opts.fromSeat && SEATS[opts.fromSeat]) {
@@ -153,6 +206,7 @@ function add(opts) {
 }
 
 function importDetected(id) {
+  if (RETIRED_IDS.includes(id)) throw new Error(`unknown import ${id}`);
   const existing = get(id);
   if (existing) return existing;
   const found = detectedCursorProfiles().find((p) => p.id === id);
@@ -215,8 +269,8 @@ function readActiveEnv() {
 }
 
 module.exports = {
-  ROOT, STORE, DATA, SEATS,
+  ROOT, STORE, DATA, SEATS, RETIRED_IDS, RETIRED_SEATS, DETECT_SEATS, assertSeatAllowed,
   load, save, list, get, getActive, setActive, add, rename, remove, importDetected,
   profileDataDir, writeActiveEnv, readActiveEnv, defaultState, ensureDirs,
-  detectedCursorProfiles,
+  detectedCursorProfiles, pruneRetired,
 };

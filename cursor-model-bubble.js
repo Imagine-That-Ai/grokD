@@ -14,10 +14,13 @@ function activeId() {
   try {
     const env = JSON.parse(fs.readFileSync(path.join(ROOT, "active-env.json"), "utf8"));
     if (env && env.profileId) return env.profileId;
-  } catch {}
+  } catch (err) {
+    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[cursor-bubble] active-env read err: " + (err.message || err) + "\n"); } catch (_) {}
+  }
   try {
     return JSON.parse(fs.readFileSync(path.join(ROOT, "profiles.json"), "utf8")).activeId || "";
-  } catch {
+  } catch (err) {
+    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[cursor-bubble] profiles.json read err: " + (err.message || err) + "\n"); } catch (_) {}
     return "";
   }
 }
@@ -29,7 +32,8 @@ function isCursorSeat() {
     const p = (JSON.parse(fs.readFileSync(path.join(ROOT, "profiles.json"), "utf8")).profiles || [])
       .find((x) => x.id === id);
     return !!(p && p.kind === "cursor");
-  } catch {
+  } catch (err) {
+    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[cursor-bubble] isCursorSeat err: " + (err.message || err) + "\n"); } catch (_) {}
     return false;
   }
 }
@@ -46,17 +50,30 @@ function svgUrl(rel, fill) {
 }
 
 function currentModel() {
-  try { return require(path.join(ROOT, "model-lib.js")).resolveConfig().model; }
-  catch { return "grok-4.6"; }
+  try {
+    return require(path.join(ROOT, "model-lib.js")).resolveConfig().model || "grok-4.6";
+  } catch (err) {
+    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[cursor-bubble] currentModel resolve err: " + (err.message || err) + "\n"); } catch (_) {}
+    return "grok-4.6";
+  }
 }
 
 function applyModel(id) {
-  try { require(path.join(ROOT, "model-lib.js")).setModel(id); } catch {}
+  let ok = true;
+  try {
+    require(path.join(ROOT, "model-lib.js")).setModel(id);
+  } catch (err) {
+    ok = false;
+    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[cursor-bubble] setModel err: " + (err.message || err) + "\n"); } catch (_) {}
+  }
   try {
     if (window.desktop && window.desktop.agent && window.desktop.agent.setDefaultModel) {
       window.desktop.agent.setDefaultModel({ modelId: id, maxMode: true, parameters: [] });
     }
-  } catch {}
+  } catch (err) {
+    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[cursor-bubble] desktop setDefaultModel err: " + (err.message || err) + "\n"); } catch (_) {}
+  }
+  return ok;
 }
 
 const PROVIDERS = [
@@ -171,7 +188,7 @@ function render(openId) {
       <span style="font-size:14px;color:#fff;font-weight:900">‹</span>
       <span class="gd-hero-mark" style="width:20px;height:20px;display:flex;align-items:center;justify-content:center"></span>
       <span style="font-size:11.5px;font-weight:800;color:#fff">${open.name}</span>
-      <span style="font-size:9px;color:rgba(255,255,255,0.4);margin-left:auto">undo</span>
+      <span style="font-size:9px;color:rgba(255,255,255,0.4);margin-left:auto">Back</span>
     `;
     hero.addEventListener("click", (e) => {
       e.stopPropagation();

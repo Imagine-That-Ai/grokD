@@ -19,7 +19,7 @@ Install grok"D" from official Grok Bot already on this Mac.
   ./install.sh --src "/Applications/Grok Bot.app" --dest "$HOME/Applications/Grok Bot D.app"
 
   --src PATH     official Grok Bot.app (auto-detected if omitted)
-  --dest PATH    where to write Grok Bot D.app
+  --dest PATH    where to write grok"D" (folder can stay Grok Bot D.app)
   --root PATH    overlay home (default ~/.grok/grokbot-d)
   --replace      overwrite dest if it already exists
   --no-open      do not launch D when done
@@ -58,7 +58,7 @@ fi
 [ -d "$SRC" ] || die "Official Grok Bot not found. Install it from xAI, then run this again."
 [ -f "$SRC/Contents/Resources/app.asar" ] || die "That app has no app.asar — is it official Grok Bot?"
 case "$SRC" in
-  *"Grok Bot D.app"|*"Grok Bot B.app"|*"Grok Bot C.app")
+  *"Grok Bot D.app"|*grok\"D\".app|*"Grok Bot B.app"|*"Grok Bot C.app")
     die "Use official Grok Bot.app as --src, not a seat copy."
     ;;
 esac
@@ -66,10 +66,10 @@ esac
 if [ -e "$DEST" ] && [ "$REPLACE" -ne 1 ]; then
   die "dest already exists: $DEST  (pass --replace to overwrite, or pick another --dest)"
 fi
-if pgrep -f "Grok Bot D.app/Contents/MacOS/Grok Bot.real --user-data-dir" >/dev/null 2>&1; then
+if pgrep -f "Grok Bot.real --user-data-dir" >/dev/null 2>&1 && pgrep -f "GrokBotSeat4" >/dev/null 2>&1; then
   case "$DEST" in
-    "$HOME/Applications/Grok Bot D.app"|/Applications/"Grok Bot D.app")
-      die "Grok Bot D is running. Quit it first, or pass a different --dest."
+    "$HOME/Applications/Grok Bot D.app"|/Applications/"Grok Bot D.app"|$HOME/Applications/grok\"D\".app|/Applications/grok\"D\".app)
+      die 'grok"D" is running. Quit it first, or pass a different --dest.'
       ;;
   esac
 fi
@@ -94,8 +94,17 @@ with open(path, "rb") as f:
 info["CFBundleDisplayName"] = 'grok"D"'
 info["CFBundleName"] = "Grok Bot D"
 info["CFBundleIdentifier"] = "com.imaginethat.grokbot.seatd"
+info["LSHasLocalizedDisplayName"] = True
 with open(path, "wb") as f:
     plistlib.dump(info, f, fmt=plistlib.FMT_XML, sort_keys=False)
+# Dock/Finder ignore CFBundleDisplayName unless this file exists.
+import pathlib
+loc = pathlib.Path(path).parent / "Resources" / "en.lproj"
+loc.mkdir(parents=True, exist_ok=True)
+(loc / "InfoPlist.strings").write_text(
+    'CFBundleDisplayName = "grok\\"D\\"";\n',
+    encoding="utf-8",
+)
 PY
 
 BIN="$DEST/Contents/MacOS/Grok Bot"

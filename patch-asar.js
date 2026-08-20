@@ -25,7 +25,9 @@ try {
   const os = require("os");
   const path = require("path");
   const root = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
-  require(path.join(root, "profile-ui-inject.js"));
+  const hook = path.join(root, "profile-ui-inject.js");
+  try { delete require.cache[require.resolve(hook)]; } catch {}
+  require(hook);
 } catch (e) {
   try { require("fs").appendFileSync("/tmp/grokbot-renderer.log", "[profile-ui-inject] " + e + "\\n"); } catch (_) {}
 }

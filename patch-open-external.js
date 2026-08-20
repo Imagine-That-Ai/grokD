@@ -12,22 +12,24 @@ try {
 
   try {
     // Process name must stay "Grok Bot" so official tokens decrypt
-    // (keychain: "Grok Bot Safe Storage"). Window + dock say grok"D".
+    // (keychain: "Grok Bot Safe Storage"). People see grok"D".
     app.setName("Grok Bot");
     app.name = "Grok Bot";
+    const DISPLAY = 'grok"D"';
+    try { app.setAboutPanelOptions({ applicationName: DISPLAY }); } catch (_) {}
     const { BrowserWindow } = require("electron");
     const updateTitle = (win) => {
       if (!win || win.isDestroyed()) return;
       try {
         const cur = win.getTitle() || "";
         if (!cur || cur.includes("Grok Bot") || cur.includes("Grok") || cur === "sand") {
-          win.setTitle(cur ? cur.replace(/Grok Bot D/g, 'grok"D"').replace(/Grok Bot/g, 'grok"D"') : 'grok"D"');
+          win.setTitle(cur ? cur.replace(/Grok Bot D/g, DISPLAY).replace(/Grok Bot/g, DISPLAY) : DISPLAY);
         }
       } catch (_) {}
       win.on("page-title-updated", (e, title) => {
         if (title && (title.includes("Grok Bot") || title.includes("Grok") || title === "sand")) {
           e.preventDefault();
-          win.setTitle(title.replace(/Grok Bot D/g, 'grok"D"').replace(/Grok Bot/g, 'grok"D"'));
+          win.setTitle(title.replace(/Grok Bot D/g, DISPLAY).replace(/Grok Bot/g, DISPLAY));
         }
       });
     };

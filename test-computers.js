@@ -42,10 +42,10 @@ function cdp(expr, timeoutMs = 8000) {
   const page = pages.find((p) => p.type === "page" && p.webSocketDebuggerUrl);
   if (!page) throw new Error("no CDP page");
   const script = `
-    const { WebSocket } = require("ws");
-    const ws = new WebSocket(${JSON.stringify(page.webSocketDebuggerUrl)});
-    ws.on("error", (e) => { console.error(e); process.exit(1); });
-    ws.on("open", () => {
+    const WS = typeof WebSocket !== "undefined" ? WebSocket : require("ws");
+    const ws = new WS(${JSON.stringify(page.webSocketDebuggerUrl)});
+    ws.addEventListener("error", (e) => { console.error(e); process.exit(1); });
+    ws.addEventListener("open", () => {
       ws.send(JSON.stringify({
         id: 1,
         method: "Runtime.evaluate",
@@ -53,7 +53,8 @@ function cdp(expr, timeoutMs = 8000) {
       }));
     });
     const t = setTimeout(() => { console.error("cdp-timeout"); process.exit(1); }, ${timeoutMs});
-    ws.on("message", (raw) => {
+    ws.addEventListener("message", (ev) => {
+      const raw = typeof ev.data === "string" ? ev.data : ev;
       const msg = JSON.parse(raw);
       if (msg.id !== 1) return;
       clearTimeout(t);
@@ -88,13 +89,12 @@ async function main() {
       catch (e) { usage = String(e && e.message || e); }
       const t = document.body.innerText || "";
       const rec = [...document.querySelectorAll("button")].find((b) => /Recover Grok Bot/i.test(b.textContent || ""));
-      if (rec) rec.click();
-      try { await window.desktop.forceGatewayReconnect(); } catch {}
       return {
         kind: s && s.kind, authId: s && s.authId,
         usage: typeof usage === "string" ? usage.slice(0, 120) : usage,
         recover: /Couldn.?t Reach|Recover Grok Bot/i.test(t),
-        clicked: !!rec,
+        clicked: false,
+        recoverVisible: !!rec,
       };
     })()`, 20000);
   } catch (e) {

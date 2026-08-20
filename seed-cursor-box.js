@@ -42,7 +42,7 @@ function seed(seat) {
 }
 
 if (require.main === module) {
-  const r = seed(process.argv[2] || "B");
+  const r = seed(process.argv[2] || "A");
   console.log(JSON.stringify(r, null, 2));
 }
 

@@ -245,7 +245,11 @@ function offlineFallback(method, parsedBody, err) {
   }
   if (method === "getAgent") {
     const agents = getLocalAgents();
-    const match = agents.find((a) => a.id === parsedBody.agentId) || agents[0] || null;
+    const match = agents.find((a) => a.id === parsedBody.agentId) || null;
+    if (!match) {
+      const err = { ok: false, error: "agent not found" };
+      return { status: 404, text: JSON.stringify(err), json: err, type: "application/json" };
+    }
     return { status: 200, text: JSON.stringify(match), json: match, type: "application/json" };
   }
   if (method === "getStatus") {
@@ -325,7 +329,7 @@ async function proxyRaw(req, res, raw) {
   const headers = { ...req.headers, host: "127.0.0.1:1338" };
   delete headers.connection;
   try {
-    const r = await fetch(`http://127.0.0.1:1338${u.pathname}${u.search}`, {
+    const r = await fetch(`${UP}${u.pathname}${u.search}`, {
       method: req.method || "GET",
       headers,
       body: (req.method === "GET" || req.method === "HEAD") ? undefined : raw,
@@ -339,14 +343,20 @@ async function proxyRaw(req, res, raw) {
     res.writeHead(r.status, outHeaders);
     res.end(buf);
   } catch (e) {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, fallback: true }));
+    res.writeHead(502, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: String(e && e.message || e || "upstream offline") }));
   }
 }
 
 async function onRequest(req, res) {
   try {
     const u = new URL(req.url || "/", "http://127.0.0.1");
+    if (u.pathname === "/install/openburnbar" && (req.method === "GET" || req.method === "HEAD")) {
+      let payload = { npmProxy: false };
+      try { payload = require("./openburnbar-install").info(); } catch (_) {}
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      return void res.end(req.method === "HEAD" ? "" : JSON.stringify(payload));
+    }
     const raw = await readBody(req);
     const m = /^\/api\/([^/]+)$/.exec(u.pathname);
     if (m && req.method === "POST") {

@@ -14,27 +14,43 @@ const ok = (name) => { n++; console.log("PASS ", name); };
 
 store.ensureDirs();
 let s = store.load();
-assert(s.profiles.length >= 4, "seeded");
+assert(store.get("local-d"), "local-d");
 assert(s.activeId === "local-d", "default active");
-assert(store.get("cursor-b").kind === "cursor", "b cursor");
-assert(store.get("cursor-b").sourceUserData.includes("GrokBotB"), "b path");
+assert(!store.get("cursor-b"), "no grok b");
+assert(!store.get("cursor-c"), "no grok c");
 ok("seed");
+
+let retired = false;
+try { store.add({ id: "cursor-b", name: "Grok B", kind: "cursor" }); }
+catch (e) { retired = /retired/.test(String(e.message || e)); }
+assert(retired, "cannot add retired B");
+let retiredImport = false;
+try { store.importDetected("cursor-b"); }
+catch { retiredImport = true; }
+assert(retiredImport, "cannot import retired B");
+const dirty = store.load();
+dirty.profiles.push({ id: "cursor-b", name: "Grok B", kind: "cursor" });
+dirty.profiles.push({ id: "cursor-c", name: "Grok C", kind: "cursor" });
+store.save(dirty);
+assert(!store.get("cursor-b") && !store.get("cursor-c"), "load prunes retired");
+ok("retired-bc");
 
 const extra = store.add({ name: "Lab", kind: "local" });
 assert(extra.id.startsWith("p-"), extra.id);
 assert(store.list().some((p) => p.id === extra.id), "listed");
 ok("add-local");
 
-const fam = store.add({
-  name: "All on B",
-  kind: "cursor",
-  fromSeat: "A",
-  identitySeat: "B",
-  rosterSources: [store.SEATS.A, store.SEATS.B, store.SEATS.C],
-});
-assert(fam.identitySource === store.SEATS.B, fam.identitySource);
-assert(fam.rosterSources.length === 3, "family roster");
-ok("add-family-cursor");
+let blockedB = false;
+try { store.add({ name: "From B", kind: "cursor", fromSeat: "B" }); }
+catch (e) { blockedB = /retired seat B/.test(String(e.message || e)); }
+assert(blockedB, "fromSeat B blocked");
+let blockedId = false;
+try { store.add({ name: "Id B", kind: "cursor", fromSeat: "A", identitySeat: "B" }); }
+catch (e) { blockedId = /retired seat B/.test(String(e.message || e)); }
+assert(blockedId, "identitySeat B blocked");
+const fromA = store.add({ name: "From A", kind: "cursor", fromSeat: "A" });
+assert(fromA.identitySource === store.SEATS.A, fromA.identitySource);
+ok("block-bc-import");
 
 const own = store.add({ name: "Sign in", kind: "cursor" });
 assert(own.kind === "cursor", "sign-in kind");
@@ -53,9 +69,9 @@ try { store.importDetected("cursor-z"); } catch { unknown = true; }
 assert(unknown, "unknown import fails closed");
 ok("import-detected");
 
-store.setActive("cursor-b");
-assert(store.getActive().id === "cursor-b", "active b");
-const envC = store.writeActiveEnv(store.get("cursor-b"));
+store.setActive(own.id);
+assert(store.getActive().id === own.id, "active sign-in");
+const envC = store.writeActiveEnv(store.get(own.id));
 assert(envC.mode === "cursor", "cursor env");
 assert(!envC.SAND_HOST_GATEWAY_URL, "no local gateway");
 store.setActive("local-d");

@@ -1,11 +1,11 @@
-# Install Grok Bot D
+# Install grok"D"
 
 This is the custom Grok Bot. One app. Two ways to work:
 
 1. **Local** — bots run on this Mac. No Cursor login.
 2. **Cursor** — sign in with your own Cursor account. The app talks to *your* computer, not someone else’s.
 
-You do not need Grok Bot A, B, or C. Those are optional imports if you already have them.
+You do not need extra official Grok Bot copies. Official Grok Bot on this Mac can be imported as Grok A. Grok B and Grok C are not seats in this app.
 
 ## Install
 
@@ -30,14 +30,14 @@ In the app: new profile → **Cursor ID** → **Sign in here (no import)** → C
 
 The official Cursor sign-in window should appear. After that, this app saves *your* box connection in `~/.grok/grokbot-d/profile-data/`. Switching away and back does not need another Grok Bot running.
 
-If you already use official Grok Bot / Grok Bot B / C on this Mac, those seats are offered as imports. Import copies that login. It does not change those other apps.
+If official Grok Bot is already signed in on this Mac, Grok A is offered as an import. Import copies that login. It does not change the other app. Grok B and Grok C are not imported.
 
 ## Switch
 
 ```bash
 node ~/.grok/grokbot-d/switch-profile.js list
 node ~/.grok/grokbot-d/switch-profile.js switch local-d
-node ~/.grok/grokbot-d/switch-profile.js switch cursor-b
+node ~/.grok/grokbot-d/switch-profile.js switch cursor-a
 ```
 
 ## What is yours vs the app

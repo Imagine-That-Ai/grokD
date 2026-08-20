@@ -25,6 +25,7 @@ function repair() {
     report.credential = fs.existsSync(box.credentialPath(SEAT4));
     return report;
   }
+  box.clearLocalLeftovers(SEAT4);
   const dir = store.profileDataDir(profile.id);
   const identity = profile.identitySource || profile.sourceUserData;
   const remote = box.chooseCursorConnection(identity, dir);
@@ -40,12 +41,12 @@ function repair() {
     return report;
   }
   if (box.isRemoteConnection(box.connectionPath(SEAT4))) {
-    box.clearCursorHost(SEAT4);
-    report.action = "cleared-stale-remote";
-    report.reason = "official seat uses this Mac";
+    report.action = "already-remote";
+    report.baseUrl = (box.readJson(box.connectionPath(SEAT4)) || {}).baseUrl;
     return report;
   }
-  report.action = "this-mac";
+  report.action = "needs-reconnect";
+  report.reason = "no Cursor VM on disk";
   return report;
 }
 

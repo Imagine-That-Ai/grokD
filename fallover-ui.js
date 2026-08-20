@@ -20,21 +20,21 @@ const ROWS = [
     key: "nextCursor",
     label: "Next Account",
     sub: "Switch to seat with quota",
-    tip: "Rotate Accounts: Automatically hands off requests to your next available Cursor account when the current one is depleted. Same conversation only on local rails. Official Cursor chats continue as a new thread.",
+    tip: "Rotate Accounts: Automatically switches to your next available Cursor account when current quota is reached. Local chats continue seamlessly; official Cursor chats start a new thread.",
     icon: "swap",
   },
   {
     key: "localChief",
     label: "Locally · Chief Handoff",
     sub: "Delegate to local chief",
-    tip: "Orchestrator Handoff: Packages the session state and hands it to the local chief to coordinate and assign tasks locally.",
+    tip: "Primary Agent Handoff: Automatically delegates coordination to your primary local agent when this seat runs out of quota.",
     icon: "brief",
   },
   {
     key: "localClone",
     label: "Locally · Continue",
     sub: "Keep going on this Mac",
-    tip: "Continue here: Copies the bot when a local store.db exists. Official Cursor chats cannot keep the same cloud thread — D seeds a local agent with the last captured turns and continues on local or proxied models.",
+    tip: "Continue locally: Retains chat history and transfers the session to your local models. Official Cursor chats cannot keep the same cloud thread — copies recent turns to continue on local or proxied models.",
     icon: "clone",
   },
 ];
@@ -62,7 +62,13 @@ function rowHtml(cfg, switchHtml) {
 }
 
 function esc(s) {
-  return String(s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/\n/g, "&#10;");
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "&#10;");
 }
 
 module.exports = { ICONS, ROWS, TOAST, rowHtml, esc };

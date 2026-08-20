@@ -19,7 +19,7 @@ const TARGETS = {
   vibeproxy: { port: 8325, url: "http://127.0.0.1:8325/v1/chat/completions" },
 };
 
-const FALLBACK_ORDER = ["cliproxy", "openburnbar", "vibeproxy"];
+const FALLBACK_ORDER = ["openburnbar", "cliproxy", "vibeproxy"];
 
 const CURATED = [
   { id: "grok-4.6", name: "Grok 4.6" },
@@ -55,7 +55,7 @@ function portOpen(port) {
 
 function defaultConfig() {
   return {
-    proxyTarget: "cliproxy",
+    proxyTarget: "openburnbar",
     model: "grok-4.6",
     apiKey: "local-cliproxy",
     cursorAccount: "Primary Cursor Account",
@@ -99,7 +99,7 @@ function writeConfig(partial) {
 }
 
 function resolveTarget(preferred) {
-  const want = preferred && TARGETS[preferred] ? preferred : "cliproxy";
+  const want = preferred && TARGETS[preferred] ? preferred : "openburnbar";
   const order = [want, ...FALLBACK_ORDER.filter((t) => t !== want)];
   for (const t of order) {
     const spec = TARGETS[t];
@@ -111,16 +111,16 @@ function resolveTarget(preferred) {
 function resolveConfig() {
   const raw = Object.assign(defaultConfig(), readRaw());
   const target = resolveTarget(raw.proxyTarget);
-  const spec = TARGETS[target] || TARGETS.cliproxy;
+  const spec = TARGETS[target] || TARGETS.openburnbar;
   return {
     proxyUrl: raw.proxyUrl || spec.url,
     apiKey: raw.apiKey || "local-cliproxy",
     model: raw.model || "grok-4.6",
     proxyTarget: target,
-    requestedTarget: raw.proxyTarget || "cliproxy",
+    requestedTarget: raw.proxyTarget || "openburnbar",
     cursorAccount: raw.cursorAccount || "Primary Cursor Account",
     payingProfileId: raw.payingProfileId || null,
-    fellBack: target !== (raw.proxyTarget || "cliproxy"),
+    fellBack: target !== (raw.proxyTarget || "openburnbar"),
   };
 }
 
@@ -158,7 +158,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  ROOT, DURABLE, LIVE, TARGETS, CURATED,
+  ROOT, DURABLE, LIVE, TARGETS, CURATED, FALLBACK_ORDER,
   portOpen, readRaw, writeConfig, resolveTarget, resolveConfig, setModel,
   officialModelObject, defaultConfig,
 };

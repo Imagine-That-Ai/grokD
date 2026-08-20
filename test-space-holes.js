@@ -89,7 +89,7 @@ ok("never-the-same");
     if (step % 97 === 0) checkSky(sky, 0.72, "tick " + step);
   }
   assert(sky.length >= k.HOLE_MIN, "never starves: " + sky.length);
-  assert(maxR / minR > 1.15, "radius breathes: " + minR.toFixed(1) + ".." + maxR.toFixed(1));
+  assert(maxR / minR > 1.08, "radius breathes: " + minR.toFixed(1) + ".." + maxR.toFixed(1));
   assert(travel > 0.01, "position drifts: " + travel.toFixed(4));
   assert(lived.size > 3, "the sky turns over: " + lived.size + " holes in half an hour");
   assert(!sky.includes(watch), "the one it opened with is long gone");

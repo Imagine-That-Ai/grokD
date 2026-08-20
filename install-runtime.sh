@@ -85,7 +85,9 @@ sync_host_tree() {
   done
   local asar=""
   for asar in \
+    "$HOME/Applications/grok\"D\".app/Contents/Resources/app.asar" \
     "$HOME/Applications/Grok Bot D.app/Contents/Resources/app.asar" \
+    "/Applications/grok\"D\".app/Contents/Resources/app.asar" \
     "/Applications/Grok Bot D.app/Contents/Resources/app.asar"
   do
     [ -f "$asar" ] || continue

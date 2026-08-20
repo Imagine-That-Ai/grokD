@@ -28,8 +28,9 @@ ok("sameBot");
   const a = bc.markFor("CLI Guy");
   const b = bc.markFor("CLI Guy");
   assert(a.hex === b.hex && a.shape === b.shape, "stable per name");
-  assert(a.path && a.lit, "shape path + light stop");
-  assert(bc.markFor("Factory Commander").hex !== undefined, "unknown name still gets a colour");
+  const unk = bc.markFor("Factory Commander");
+  assert(/^#[0-9a-fA-F]{6}$/i.test(unk.hex), "unknown name gets a valid hex color");
+  assert(bc.COLORS.some((c) => c.hex.toLowerCase() === unk.hex.toLowerCase()), "unknown name color maps to palette");
   const set = bc.markFor("grok\"D\"", { avatarShape: "hex", avatarColor: "purple" });
   assert(set.shape === "hex", set.shape);
   assert(set.hex === bc.COLORS.find((c) => c.key === "violet").hex, set.hex);
@@ -152,7 +153,8 @@ ok("logoSvg");
 {
   assert(bc.esc('<b>"x"</b>') === "&lt;b&gt;&quot;x&quot;&lt;/b&gt;", bc.esc('<b>"x"</b>'));
   assert(bc.clockTime(0) === "", "no stamp");
-  assert(/\d/.test(bc.clockTime(Date.parse("2026-08-19T01:06:00-05:00"))), "clock");
+  const clock = bc.clockTime(Date.parse("2026-08-19T01:06:00-05:00"));
+  assert(/^(0?1:06\s*AM)$/i.test(clock.trim()), "clockTime matches 1:06 AM: " + clock);
 }
 ok("esc+clockTime");
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Drive a live conversation in D as Cursor A, then B, then C, then restore Local D.
-// Does not kill Grok Bot B. Does not write B's live user-data.
+// Drive a live conversation in D as Cursor A, then restore Local D.
+// Does not kill official Grok Bot apps. Does not write their live user-data.
 "use strict";
 
 const fs = require("fs");
@@ -13,8 +13,6 @@ const SWITCH = path.join(__dirname, "switch-profile.js");
 const PROOF = path.join(__dirname, "proof", `live-abc-${Date.now()}`);
 const SEATS = [
   { id: "cursor-a", label: "A" },
-  { id: "cursor-b", label: "B" },
-  { id: "cursor-c", label: "C" },
 ];
 
 function bUp() {
@@ -92,8 +90,7 @@ async function waitBus(label) {
 
 async function main() {
   fs.mkdirSync(PROOF, { recursive: true });
-  if (!bUp()) throw new Error("Grok Bot B is not running; refusing to start");
-  const report = { startedAt: new Date().toISOString(), seats: [], bUpBefore: true };
+  const report = { startedAt: new Date().toISOString(), seats: [], bUpBefore: bUp() };
 
   try {
     for (const seat of SEATS) {
@@ -122,7 +119,6 @@ async function main() {
       };
       report.seats.push(row);
       console.log(JSON.stringify(row, null, 2));
-      if (!bUp()) throw new Error("Grok Bot B died during " + seat.label);
     }
   } finally {
     console.log("\n== restore local-d ==");

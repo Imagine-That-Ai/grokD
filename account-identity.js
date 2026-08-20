@@ -262,13 +262,15 @@ function fetchHttpsToDataUrl(url, opts) {
   if (!/^https:\/\//i.test(want)) return Promise.resolve(null);
   const timeoutMs = (opts && opts.timeoutMs) || 8000;
   const acceptMissing = !!(opts && opts.acceptMissing);
+  const maxRedirects = opts && typeof opts.redirects === "number" ? opts.redirects : 5;
   return new Promise((resolve) => {
     const req = https.get(want, {
       headers: { Accept: "image/*", "User-Agent": "grok-d-identity" },
     }, (res) => {
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
-        fetchHttpsToDataUrl(res.headers.location, opts).then(resolve);
+        if (maxRedirects <= 0) return resolve(null);
+        fetchHttpsToDataUrl(res.headers.location, Object.assign({}, opts, { redirects: maxRedirects - 1 })).then(resolve);
         return;
       }
       if (res.statusCode === 404 && acceptMissing) {
@@ -476,13 +478,16 @@ function identityFromBrowserProfile(profileId, opts) {
   if (!out.email) {
     const web = copyForRead(path.join(def, "Web Data"));
     if (web) {
-      for (const row of sqliteQuery(web, "SELECT value FROM autofill WHERE name='email' ORDER BY date_last_used DESC;")) {
-        const v = row.split("\t")[0];
-        if (isEmail(v)) { out.email = v; break; }
+      try {
+        for (const row of sqliteQuery(web, "SELECT value FROM autofill WHERE name='email' ORDER BY date_last_used DESC;")) {
+          const v = row.split("\t")[0];
+          if (isEmail(v)) { out.email = v; break; }
+        }
+      } finally {
+        try { fs.rmSync(web, { force: true }); } catch {}
+        try { fs.rmSync(web + "-wal", { force: true }); } catch {}
+        try { fs.rmSync(web + "-journal", { force: true }); } catch {}
       }
-      try { fs.rmSync(web, { force: true }); } catch {}
-      try { fs.rmSync(web + "-wal", { force: true }); } catch {}
-      try { fs.rmSync(web + "-journal", { force: true }); } catch {}
     }
   }
   if (out.email && !out.username) out.username = out.email.split("@")[0];
