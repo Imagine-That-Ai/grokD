@@ -31,13 +31,17 @@ PY
 cp "$ICON" "$OUT/Contents/Resources/icon.icns"
 
 # Kitchen trees still have identity. Sanitize through export-public.sh when
-# that script is here; a public clone is already clean and has no exporter.
+# that script is here. A public clone is already clean and has no exporter.
+# Refuse to pack a kitchen tree if the exporter is missing.
 OVERLAY_SRC="$HERE"
 CLEAN=""
 if [ -x "$HERE/export-public.sh" ]; then
   CLEAN="$(mktemp -d "${TMPDIR:-/tmp}/grokD-drop-src.XXXXXX")"
   bash "$HERE/export-public.sh" "$CLEAN"
   OVERLAY_SRC="$CLEAN"
+elif [ -f "$HERE/PROMPT-npm-openburnbar-proxy.md" ] || [ -f "$HERE/live-cursor-chat.js" ]; then
+  echo "pack-drop: kitchen tree must run export-public.sh" >&2
+  exit 1
 fi
 trap 'if [ -n "$CLEAN" ]; then rm -rf "$CLEAN"; fi' EXIT
 
