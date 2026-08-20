@@ -18,9 +18,9 @@ try {
     try {
       if (app.dock && typeof app.dock.setIcon === "function") {
         const iconCandidates = [
+          path.join(ROOT, "hack", "icons", "icon-D.icns"),
           path.join(ROOT, "hack", "grokd_edgefill.icns"),
           path.join(ROOT, "hack", "grokd_icon_color.icns"),
-          path.join(ROOT, "hack", "icons", "icon-D.icns"),
           path.join(ROOT, "hack", "grokd_icon.icns"),
           path.join(process.resourcesPath, "icon.icns"),
         ];

@@ -5,7 +5,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC=""
-DEST="$HOME/Applications/Grok Bot D.app"
+DEST="$HOME/Applications/grok\"D\".app"
 ROOT="$HOME/.grok/grokbot-d"
 REPLACE=0
 OPEN_APP=1
@@ -108,9 +108,9 @@ loc.mkdir(parents=True, exist_ok=True)
 PY
 
 # Copy custom Grok D icon
-ICON_SRC="$HERE/hack/grokd_edgefill.icns"
-if [ ! -f "$ICON_SRC" ] && [ -f "$HERE/hack/icons/icon-D.icns" ]; then
-  ICON_SRC="$HERE/hack/icons/icon-D.icns"
+ICON_SRC="$HERE/hack/icons/icon-D.icns"
+if [ ! -f "$ICON_SRC" ] && [ -f "$HERE/hack/grokd_edgefill.icns" ]; then
+  ICON_SRC="$HERE/hack/grokd_edgefill.icns"
 fi
 if [ -f "$ICON_SRC" ]; then
   cp "$ICON_SRC" "$DEST/Contents/Resources/icon.icns"
