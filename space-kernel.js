@@ -44,6 +44,12 @@ function setScheme(next) {
   return { scheme: schemeOverride || "auto", light: isLight() };
 }
 
+function kernelHost() {
+  return document.querySelector(".sand-access-cover")
+    || document.querySelector("#sand-app")
+    || document.body;
+}
+
 function rng(seed) {
   let s = seed >>> 0;
   return () => {
@@ -527,14 +533,26 @@ function stepSats(dt) {
 }
 
 function botCenter() {
-  const mark = document.querySelector(".sand-grok-bot-mark");
-  if (!mark || !wrap) return null;
-  const mb = mark.getBoundingClientRect();
+  if (!wrap) return null;
   const wb = wrap.getBoundingClientRect();
+  const mark = document.querySelector(".sand-grok-bot-mark");
+  const heading = document.querySelector("#sand-access-cover-heading")
+    || document.querySelector(".sand-access-cover h1");
+  const target = (mark && mark.getBoundingClientRect().width) ? mark
+    : (heading && heading.getBoundingClientRect().width) ? heading
+    : null;
+  if (target) {
+    const mb = target.getBoundingClientRect();
+    return {
+      x: mb.left + mb.width / 2 - wb.left,
+      y: mb.top + mb.height / 2 - wb.top,
+      mark: mark || null,
+    };
+  }
   return {
-    x: mb.left + mb.width / 2 - wb.left,
-    y: mb.top + mb.height / 2 - wb.top,
-    mark,
+    x: Math.max(1, wb.width) / 2,
+    y: Math.max(1, wb.height) * 0.42,
+    mark: null,
   };
 }
 
@@ -824,11 +842,9 @@ function pearlHex(t) {
 function frame(now) {
   if (!running) return;
   raf = requestAnimationFrame(frame);
-  const cover = document.querySelector(".sand-access-cover");
-  if (!cover) {
-    stop();
-    return;
-  }
+  const host = kernelHost();
+  if (!host) return;
+  if (!wrap || wrap.parentNode !== host) ensureDom();
   const c = botCenter();
   if (!c || !far || !far._ctx) return;
   const dt = reduced ? 0 : Math.min(DT_MAX, last ? (now - last) / 1000 : 0.016);
@@ -870,7 +886,7 @@ function frame(now) {
 }
 
 function ensureDom() {
-  const cover = document.querySelector(".sand-access-cover") || document.querySelector("#sand-app") || document.body;
+  const cover = kernelHost();
   if (!cover) return false;
   if (cover !== document.body && getComputedStyle(cover).position === "static") cover.style.position = "relative";
   wrap = document.getElementById("gd-kernel");

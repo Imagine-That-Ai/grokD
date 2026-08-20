@@ -391,22 +391,22 @@
       .sand-access-cover {
         overflow: visible !important;
       }
-      .sand-access-cover {
-        background: #07070a !important;
+      .sand-access-cover,
+      .sand-access-cover > *:not(#gd-kernel):not(#gd-scheme-toggle) {
+        background: transparent !important;
+        background-image: none !important;
       }
       #gd-kernel {
         position: absolute;
         inset: 0;
         z-index: 0;
         pointer-events: none;
-        background: #07070a;
+        background: transparent;
         overflow: hidden;
       }
       /* Daybreak: the same sky a few hours later. The canvas paints itself, so
          these are only the surfaces behind and above it. */
       @media (prefers-color-scheme: light) {
-        .sand-access-cover { background: #fbf7f1 !important; }
-        #gd-kernel { background: #fbf7f1; }
         #sand-access-cover-heading,
         .sand-access-cover h1 { text-shadow: 0 1px 16px rgba(255,255,255,0.85); }
         #gd-sats .gd-sat { filter: drop-shadow(0 2px 4px rgba(24,26,38,0.30)); }
@@ -418,8 +418,6 @@
         #sand-access-cover-heading { color: #16171d !important; }
         .sand-access-cover p { color: rgba(22,23,29,0.72) !important; }
       }
-      .sand-access-cover[data-gd-scheme="light"] { background: #fbf7f1 !important; }
-      .sand-access-cover[data-gd-scheme="light"] #gd-kernel { background: #fbf7f1; }
       .sand-access-cover[data-gd-scheme="light"] #sand-access-cover-heading,
       .sand-access-cover[data-gd-scheme="light"] h1 { text-shadow: 0 1px 16px rgba(255,255,255,0.85); }
       .sand-access-cover[data-gd-scheme="light"] #gd-sats .gd-sat {
@@ -430,7 +428,13 @@
       .sand-access-cover[data-gd-scheme="light"] span,
       .sand-access-cover[data-gd-scheme="light"] #sand-access-cover-heading { color: #16171d !important; }
       .sand-access-cover[data-gd-scheme="light"] p { color: rgba(22,23,29,0.72) !important; }
-      .sand-access-cover[data-gd-scheme="dark"] { background: #07070a !important; }
+      .sand-access-cover[data-gd-scheme="dark"] #sand-access-cover-heading,
+      .sand-access-cover[data-gd-scheme="dark"] h1 { text-shadow: 0 1px 18px rgba(0,0,0,0.7); }
+      .sand-access-cover[data-gd-scheme="dark"] h1,
+      .sand-access-cover[data-gd-scheme="dark"] h2,
+      .sand-access-cover[data-gd-scheme="dark"] span,
+      .sand-access-cover[data-gd-scheme="dark"] #sand-access-cover-heading { color: #f4f1ea !important; }
+      .sand-access-cover[data-gd-scheme="dark"] p { color: rgba(244,241,234,0.72) !important; }
       #gd-kernel-gl, #gd-kernel-far, #gd-kernel-near, #gd-sats {
         position: absolute;
         inset: 0;
@@ -518,6 +522,16 @@
         display: block;
       }
       .sand-access-cover > *:not(#gd-kernel) { position: relative; z-index: 2; }
+      #gd-scheme-toggle {
+        position: fixed; right: 18px; bottom: 18px; z-index: 999992;
+        min-width: 72px; height: 32px; padding: 0 12px; cursor: pointer;
+        border-radius: 999px; font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+        letter-spacing: 0.04em; text-transform: uppercase;
+        color: var(--gd-text); border: 1px solid var(--gd-border);
+        background: var(--gd-card-bg); box-shadow: var(--gd-shadow);
+        backdrop-filter: blur(14px) saturate(160%);
+        -webkit-backdrop-filter: blur(14px) saturate(160%);
+      }
       .sand-grok-bot-mark { z-index: 5; }
       #sand-access-cover-heading,
       .sand-access-cover h1 {
@@ -1592,6 +1606,18 @@
   }
 
   function dressGrokOrbit() {
+    let logos;
+    try { logos = require(path.join(ROOT, "provider-logos.js")); }
+    catch { return; }
+    const pack = logos.ORBITERS || [];
+    const tints = logos.TINTS || ["#F4F1EA"];
+    try {
+      const kernel = require(path.join(ROOT, "space-kernel.js"));
+      kernel.start(pack);
+    } catch (e) {
+      try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[kernel] " + e + "\n"); } catch (_) {}
+    }
+
     const mark = document.querySelector(".sand-grok-bot-mark");
     if (!mark) return;
     stripGlasses(mark);
@@ -1605,18 +1631,6 @@
     }
     const leftover = document.getElementById("gd-orbit");
     if (leftover) leftover.remove();
-
-    let logos;
-    try { logos = require(path.join(ROOT, "provider-logos.js")); }
-    catch { return; }
-    const pack = logos.ORBITERS || [];
-    const tints = logos.TINTS || ["#F4F1EA"];
-    try {
-      const kernel = require(path.join(ROOT, "space-kernel.js"));
-      kernel.start(pack);
-    } catch (e) {
-      try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[kernel] " + e + "\n"); } catch (_) {}
-    }
 
     applyBotTint(mark, tints);
     if (!mark._gdTintCycle) {
@@ -1633,9 +1647,80 @@
     }
   }
 
+  function applyCoverScheme(cover, mode) {
+    const kernel = require(path.join(ROOT, "space-kernel.js"));
+    const next = mode === "light" || mode === "dark" ? mode : "auto";
+    const applied = kernel.setScheme(next === "auto" ? "" : next);
+    if (cover && cover.dataset) {
+      if (next === "auto") delete cover.dataset.gdScheme;
+      else cover.dataset.gdScheme = next;
+    }
+    setUiPref("coverScheme", next);
+    const btn = document.getElementById("gd-scheme-toggle");
+    if (btn) {
+      btn.textContent = applied.light ? "Dark" : "Light";
+      btn.title = applied.light ? "Switch to dark sky" : "Switch to light sky";
+      btn.setAttribute("aria-label", btn.title);
+    }
+    return applied;
+  }
+
+  function punchCoverSky(cover) {
+    if (!cover || !cover.classList || !cover.classList.contains("sand-access-cover")) return;
+    cover.style.background = "transparent";
+    cover.style.backgroundImage = "none";
+    const cr = cover.getBoundingClientRect();
+    if (!cr.width || !cr.height) return;
+    for (let i = 0; i < cover.children.length; i++) {
+      const el = cover.children[i];
+      if (el.id === "gd-kernel" || el.id === "gd-scheme-toggle") continue;
+      const r = el.getBoundingClientRect();
+      if (r.width >= cr.width * 0.72 && r.height >= cr.height * 0.5) {
+        el.style.background = "transparent";
+        el.style.backgroundImage = "none";
+        el.style.backgroundColor = "transparent";
+      }
+    }
+  }
+
+  function mountCoverSchemeToggle(cover) {
+    const host = (cover && cover.classList && cover.classList.contains("sand-access-cover"))
+      ? cover
+      : document.body;
+    if (!host) return;
+    let btn = document.getElementById("gd-scheme-toggle");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = "gd-scheme-toggle";
+      btn.type = "button";
+      host.appendChild(btn);
+    } else if (btn.parentNode !== host) {
+      host.appendChild(btn);
+    }
+    if (!btn._gdHooked) {
+      btn._gdHooked = true;
+      btn.addEventListener("click", () => {
+        try {
+          const kernel = require(path.join(ROOT, "space-kernel.js"));
+          applyCoverScheme(cover, kernel.isLight() ? "dark" : "light");
+        } catch (_) {}
+      });
+      const saved = uiPrefs().coverScheme;
+      applyCoverScheme(cover, saved === "light" || saved === "dark" ? saved : "auto");
+    } else {
+      try {
+        const kernel = require(path.join(ROOT, "space-kernel.js"));
+        btn.textContent = kernel.isLight() ? "Dark" : "Light";
+        btn.title = kernel.isLight() ? "Switch to dark sky" : "Switch to light sky";
+      } catch (_) {}
+    }
+  }
+
   function enhanceCoverScreen() {
     const cover = document.querySelector(".sand-access-cover") || document.body;
     if (!cover) return;
+    try { punchCoverSky(cover); } catch (_) {}
+    try { mountCoverSchemeToggle(cover); } catch (_) {}
     const h1 = cover.querySelector("#sand-access-cover-heading") || cover.querySelector("h1");
     if (h1) paintGrokDWordmark(h1);
     cover.querySelectorAll("h1, h2, .sand-access-cover-heading").forEach(paintGrokDWordmark);
@@ -3279,13 +3364,8 @@
           out.ok = !!(out.reply && out.reply.includes(cmd.token || text.slice(0, 12)));
         }
       } else if (cmd.op === "cover") {
-        const kernel = require(path.join(ROOT, "space-kernel.js"));
-        out.cover = kernel.setScheme(cmd.mode);
         const cover = document.querySelector(".sand-access-cover");
-        if (cover) {
-          if (cmd.mode === "light" || cmd.mode === "dark") cover.dataset.gdScheme = cmd.mode;
-          else delete cover.dataset.gdScheme;
-        }
+        out.cover = applyCoverScheme(cover, cmd.mode);
         out.ok = true;
       } else if (cmd.op === "chatter") {
         out.chatter = require(path.join(ROOT, "bot-chatter.js")).preview(cmd.mode);
@@ -3327,8 +3407,13 @@
     }
     try {
       const logos = require(path.join(ROOT, "provider-logos.js"));
-      require(path.join(ROOT, "space-kernel.js")).start(logos.ORBITERS || []);
-    } catch (_) {}
+      const kernel = require(path.join(ROOT, "space-kernel.js"));
+      const scheme = uiPrefs().coverScheme;
+      if (scheme === "light" || scheme === "dark") kernel.setScheme(scheme);
+      kernel.start(logos.ORBITERS || []);
+    } catch (e) {
+      try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[space-kernel] " + e + "\n"); } catch (_) {}
+    }
     try { require(path.join(ROOT, "glass-theme.js")).start(); } catch (_) {}
     try { candyGrokMarks(); } catch (_) {}
     try { require(path.join(ROOT, "cursor-model-bubble.js")).start(); } catch (_) {}

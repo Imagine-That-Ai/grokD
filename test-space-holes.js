@@ -128,4 +128,15 @@ ok("makeHole-declines");
 }
 ok("succession");
 
-console.log(`\n${n}/6 space-hole checks passed`);
+{
+  const auto = k.setScheme("");
+  assert(auto.scheme === "auto", "auto follows the app");
+  const light = k.setScheme("light");
+  assert(light.scheme === "light" && light.light === true, "light override");
+  const dark = k.setScheme("dark");
+  assert(dark.scheme === "dark" && dark.light === false, "dark override");
+  k.setScheme("");
+}
+ok("setScheme");
+
+console.log(`\n${n}/7 space-hole checks passed`);
