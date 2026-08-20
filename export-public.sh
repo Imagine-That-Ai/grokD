@@ -36,23 +36,25 @@ p.write_text(t, encoding="utf-8")
 
 p = root / "profile-auth-preload.js"
 t = p.read_text(encoding="utf-8")
-old = '''      return {
-        kind: "logged-in",
-        authId: "google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7",
-        email: "alberto@local",
-        name: "Alberto",
-        isAnysphereUser: false,
-      };'''
-new = '''      const os = require("os");
-      const u = os.userInfo();
-      const localName = u.username || "local";
-      return {
-        kind: "logged-in",
-        authId: "local|" + localName,
-        email: localName + "@local",
-        name: localName,
-        isAnysphereUser: false,
-      };'''
+old = '''const LOCAL_STATUS = {
+  kind: "logged-in",
+  authId: "google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7",
+  email: "alberto@local",
+  name: "Alberto",
+  isAnysphereUser: false,
+};'''
+new = '''const LOCAL_STATUS = (function () {
+  const os = require("os");
+  const u = os.userInfo();
+  const localName = u.username || "local";
+  return {
+    kind: "logged-in",
+    authId: "local|" + localName,
+    email: localName + "@local",
+    name: localName,
+    isAnysphereUser: false,
+  };
+})();'''
 if old not in t:
     raise SystemExit("profile-auth-preload.js: local identity block missing")
 p.write_text(t.replace(old, new), encoding="utf-8")
