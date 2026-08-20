@@ -24,6 +24,7 @@ assert(!fs.existsSync(path.join(dest, "PROMPT-npm-openburnbar-proxy.md")), "kitc
 assert(!fs.existsSync(path.join(dest, "live-cursor-chat.js")), "kitchen-only");
 assert(!fs.existsSync(path.join(dest, "welcome_guide_source.html")), "kitchen-only");
 assert(!fs.existsSync(path.join(dest, "sync-to-tmp.sh")), "kitchen-only");
+assert(!fs.existsSync(path.join(dest, "test-export-public.js")), "kitchen-only");
 assert(!fs.existsSync(path.join(dest, "profiles.json")), "no seats");
 assert(!fs.existsSync(path.join(dest, "host", "host-main.cjs")), "no xAI host");
 assert(fs.existsSync(path.join(dest, "install.sh")), "installer");
