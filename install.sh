@@ -5,7 +5,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC=""
-DEST="$HOME/Applications/Grok Bot D.app"
+DEST="$HOME/Applications/grok\"D\".app"
 ROOT="$HOME/.grok/grokbot-d"
 REPLACE=0
 OPEN_APP=1
@@ -16,10 +16,10 @@ usage() {
 Install grok"D" from official Grok Bot already on this Mac.
 
   ./install.sh
-  ./install.sh --src "/Applications/Grok Bot.app" --dest "$HOME/Applications/Grok Bot D.app"
+  ./install.sh --src "/Applications/Grok Bot.app" --dest "$HOME/Applications/grok\"D\".app"
 
   --src PATH     official Grok Bot.app (auto-detected if omitted)
-  --dest PATH    where to write grok"D" (folder can stay Grok Bot D.app)
+  --dest PATH    where to write grok"D" (default grok"D".app)
   --root PATH    overlay home (default ~/.grok/grokbot-d)
   --replace      overwrite dest if it already exists
   --no-open      do not launch D when done
@@ -107,10 +107,10 @@ loc.mkdir(parents=True, exist_ok=True)
 )
 PY
 
-# Copy custom Grok D icon
-ICON_SRC="$HERE/hack/icons/icon-D.icns"
-if [ ! -f "$ICON_SRC" ] && [ -f "$HERE/hack/grokd_edgefill.icns" ]; then
-  ICON_SRC="$HERE/hack/grokd_edgefill.icns"
+# Dock / Finder icon: the grok"D" mascot (edgefill), not the purple seat blob.
+ICON_SRC="$HERE/hack/grokd_edgefill.icns"
+if [ ! -f "$ICON_SRC" ] && [ -f "$HERE/hack/icons/icon-D.icns" ]; then
+  ICON_SRC="$HERE/hack/icons/icon-D.icns"
 fi
 if [ -f "$ICON_SRC" ]; then
   cp "$ICON_SRC" "$DEST/Contents/Resources/icon.icns"
@@ -266,6 +266,11 @@ xattr -cr "$DEST" 2>/dev/null || true
 
 echo "packed $DEST"
 echo "overlay $ROOT"
+ALIAS="$HOME/Applications/Grok Bot D.app"
+if [ "$DEST" != "$ALIAS" ] && [ "$(dirname "$DEST")" = "$(dirname "$ALIAS")" ]; then
+  rm -rf "$ALIAS"
+  ln -s "$(basename "$DEST")" "$ALIAS"
+fi
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f -r -u "$DEST" 2>/dev/null || true
 touch "$DEST"
 killall Dock 2>/dev/null || true

@@ -81,6 +81,14 @@ if old not in t:
     raise SystemExit("profile-auth-preload.js: local identity block missing")
 p.write_text(t.replace(old, new), encoding="utf-8")
 
+p = root / "install.sh"
+t = p.read_text(encoding="utf-8")
+t = t.replace(
+    'DEST="$HOME/Applications/grok\\"D\\".app"',
+    'DEST="$HOME/Applications/Grok Bot D.app"',
+)
+p.write_text(t, encoding="utf-8")
+
 p = root / "pack-asar.sh"
 t = p.read_text(encoding="utf-8")
 t = t.replace(
