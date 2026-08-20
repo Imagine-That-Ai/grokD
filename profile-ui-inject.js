@@ -3317,6 +3317,14 @@
     } else {
       try { require(path.join(ROOT, "bubble-rim.js")).start(); } catch (_) {}
     }
+    try {
+      const plasma = path.join(ROOT, "plasma-selectors.js");
+      if (fs.existsSync(plasma)) {
+        require(plasma);
+      }
+    } catch (e) {
+      try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[plasma-selectors] " + e + "\n"); } catch (_) {}
+    }
     try { require(path.join(ROOT, "glass-theme.js")).start(); } catch (_) {}
     try { candyGrokMarks(); } catch (_) {}
     try { require(path.join(ROOT, "cursor-model-bubble.js")).start(); } catch (_) {}

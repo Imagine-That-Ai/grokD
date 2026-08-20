@@ -1,0 +1,205 @@
+/* =========================================================================
+   LIQUID PLASMA FLOATING SELECTORS — GROK BOT D EDITION
+   Organic Amorphous Molten Physics, Living Mascot Eyes & Liquid Glass UI
+   ========================================================================= */
+
+:root {
+  --plasma-orb-size: 52px;
+  --plasma-transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s ease;
+}
+
+/* 1. Dynamic Ghost-like Billowing Water Bubble */
+@keyframes ghostlyBubbleMorph {
+  0%, 100% {
+    border-radius: 42% 58% 62% 38% / 45% 42% 58% 55%;
+    transform: translate(0, 0) rotate(0deg) scale(1, 1);
+  }
+  20% {
+    border-radius: 56% 44% 48% 52% / 58% 52% 48% 42%;
+    transform: translate(2px, -3px) rotate(1.5deg) scale(1.02, 0.98);
+  }
+  40% {
+    border-radius: 46% 54% 38% 62% / 42% 64% 36% 58%;
+    transform: translate(-3px, 1px) rotate(-1.2deg) scale(0.98, 1.03);
+  }
+  65% {
+    border-radius: 64% 36% 54% 46% / 52% 38% 62% 48%;
+    transform: translate(3px, 2px) rotate(1.8deg) scale(1.03, 0.97);
+  }
+  85% {
+    border-radius: 48% 52% 68% 32% / 38% 54% 46% 62%;
+    transform: translate(-2px, -2px) rotate(-0.8deg) scale(0.99, 1.01);
+  }
+}
+
+/* 2. Plasma Orbs Morphing */
+@keyframes dynamicPlasmaMotion1 {
+  0%, 100% { border-radius: 52% 48% 44% 56% / 48% 58% 42% 52%; transform: translate(0, 0) scale(1); }
+  50% { border-radius: 44% 56% 58% 42% / 56% 44% 54% 46%; transform: translate(3px, -3px) scale(1.05); }
+}
+
+@keyframes dynamicPlasmaMotion2 {
+  0%, 100% { border-radius: 46% 54% 58% 42% / 54% 44% 56% 46%; transform: translate(0, 0) scale(1); }
+  50% { border-radius: 56% 44% 42% 58% / 46% 56% 44% 54%; transform: translate(-3px, 3px) scale(1.05); }
+}
+
+/* 3. Thinking Emitter Bubbles */
+@keyframes riseAndPopBubble1 {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.3); }
+  30% { opacity: 0.9; transform: translate(3px, -12px) scale(1); }
+  70% { opacity: 0.6; transform: translate(6px, -28px) scale(1.2); }
+  100% { opacity: 0; transform: translate(9px, -45px) scale(0.2); }
+}
+@keyframes riseAndPopBubble2 {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.3); }
+  30% { opacity: 0.85; transform: translate(-2px, -14px) scale(1.05); }
+  70% { opacity: 0.55; transform: translate(-5px, -32px) scale(1.25); }
+  100% { opacity: 0; transform: translate(-8px, -50px) scale(0.1); }
+}
+@keyframes riseAndPopBubble3 {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.25); }
+  35% { opacity: 0.95; transform: translate(5px, -18px) scale(0.95); }
+  75% { opacity: 0.5; transform: translate(10px, -38px) scale(1.15); }
+  100% { opacity: 0; transform: translate(14px, -58px) scale(0); }
+}
+
+/* 4. Character Eyes Micro-Animations */
+@keyframes eyeBlink {
+  0%, 88%, 94%, 100% { transform: scaleY(1); }
+  91% { transform: scaleY(0.12); }
+}
+@keyframes eyeGlance {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(-2px, -1.5px); }
+  50% { transform: translate(0px, 1px); }
+  75% { transform: translate(2.5px, -1px); }
+}
+
+/* 5. Deep Core Radiant Aura Pulse */
+@keyframes plasmaGlowBreath {
+  0%, 100% { filter: blur(10px) brightness(1.15); transform: scale(0.94); opacity: 0.85; }
+  50% { filter: blur(16px) brightness(1.45); transform: scale(1.22); opacity: 1; }
+}
+
+@keyframes popInGhostlySmooth {
+  0% { opacity: 0; transform: scale(0.88) translateY(16px); filter: blur(12px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); filter: blur(0px); }
+}
+
+/* Container Structure */
+.pure-lava-wrapper {
+  position: fixed;
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  user-select: none;
+  cursor: grab;
+}
+.pure-lava-wrapper:active { cursor: grabbing; }
+
+/* Living Liquid Plasma Orb 1 */
+.pure-plasma-orb-1 {
+  position: relative;
+  width: var(--plasma-orb-size);
+  height: var(--plasma-orb-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  animation: dynamicPlasmaMotion1 7.5s infinite ease-in-out;
+  transition: var(--plasma-transition);
+}
+.pure-plasma-orb-1:hover { transform: scale(1.25) translateY(-3px); }
+.pure-plasma-orb-1:active { transform: scale(0.92); }
+
+/* Living Liquid Plasma Orb 2 */
+.pure-plasma-orb-2 {
+  position: relative;
+  width: var(--plasma-orb-size);
+  height: var(--plasma-orb-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  animation: dynamicPlasmaMotion2 8.5s infinite ease-in-out;
+  transition: var(--plasma-transition);
+}
+.pure-plasma-orb-2:hover { transform: scale(1.25) translateY(-3px); }
+.pure-plasma-orb-2:active { transform: scale(0.92); }
+
+.pure-plasma-inner {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.pure-plasma-core-glow {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: plasmaGlowBreath 3.5s infinite ease-in-out;
+}
+
+/* Ghostly Liquid Glass Bubble Container */
+.ghostly-liquid-bubble {
+  position: absolute;
+  background: radial-gradient(130% 130% at 25% 20%, rgba(26, 26, 38, 0.95) 0%, rgba(12, 12, 18, 0.98) 60%, rgba(6, 6, 10, 0.99) 100%);
+  backdrop-filter: blur(48px) saturate(240%);
+  -webkit-backdrop-filter: blur(48px) saturate(240%);
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 
+    0 28px 90px rgba(0, 0, 0, 0.95), 
+    inset 0 2px 4px rgba(255, 255, 255, 0.7),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.6),
+    0 0 45px rgba(255, 255, 255, 0.12);
+  animation: popInGhostlySmooth 0.28s cubic-bezier(0.16, 1, 0.3, 1), ghostlyBubbleMorph 12s infinite ease-in-out 0.28s;
+  z-index: 1000000;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* Floating Glass Item Rows */
+.floating-glass-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8.5px 14px;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  margin: 3px 0;
+  color: #f1f5f9;
+}
+.floating-glass-row:hover {
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateX(4px) scale(1.01);
+}
+
+/* Navigation Back Pill */
+.nav-back-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  margin-bottom: 10px;
+}
+.nav-back-pill:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
