@@ -93,7 +93,7 @@ function resolveTeammate(agents, raw) {
 function parseHandoffs(text) {
   const src = String(text || "");
   const found = [];
-  const re = /\b(?:tell|ask|message|ping)\s+(?!me\b|you\b|him\b|her\b|them\b|us\b|alberto\b)([^,\n]{1,48}?)\s+to\s+(.+?)(?=\s+(?:and\s+(?:tell|ask|message|ping)\b)|[.!?;]|$)/gi;
+  const re = /\b(?:tell|ask|message|ping)\s+(?!me\b|you\b|him\b|her\b|them\b|us\b)([^,\n]{1,48}?)\s+to\s+(.+?)(?=\s+(?:and\s+(?:tell|ask|message|ping)\b)|[.!?;]|$)/gi;
   let m;
   while ((m = re.exec(src))) {
     const target = m[1].replace(/^["']|["']$/g, "").trim();

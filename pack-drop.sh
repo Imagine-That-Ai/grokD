@@ -30,6 +30,17 @@ plistlib.dump(info, open(sys.argv[1], "wb"), fmt=plistlib.FMT_XML, sort_keys=Fal
 PY
 cp "$ICON" "$OUT/Contents/Resources/icon.icns"
 
+# Kitchen trees still have identity. Sanitize through export-public.sh when
+# that script is here; a public clone is already clean and has no exporter.
+OVERLAY_SRC="$HERE"
+CLEAN=""
+if [ -x "$HERE/export-public.sh" ]; then
+  CLEAN="$(mktemp -d "${TMPDIR:-/tmp}/grokD-drop-src.XXXXXX")"
+  bash "$HERE/export-public.sh" "$CLEAN"
+  OVERLAY_SRC="$CLEAN"
+fi
+trap 'if [ -n "$CLEAN" ]; then rm -rf "$CLEAN"; fi' EXIT
+
 rsync -a \
   --exclude '.git/' \
   --exclude 'browser-profiles/' \
@@ -41,6 +52,12 @@ rsync -a \
   --exclude 'hack/' \
   --exclude 'proof/' \
   --exclude 'host/' \
+  --exclude 'host-main.cjs' \
+  --exclude '*-worker.cjs' \
+  --exclude 'export-public.sh' \
+  --exclude 'PROMPT-npm-openburnbar-proxy.md' \
+  --exclude 'live-cursor-chat.js' \
+  --exclude 'sync-to-tmp.sh' \
   --exclude 'assets/meshy_elon.glb' \
   --exclude 'assets/meshy_elon_textured.glb' \
   --exclude 'test-*.js' \
@@ -50,7 +67,7 @@ rsync -a \
   --exclude 'onboarding.json' \
   --exclude 'profiles.json' \
   --exclude '*.log' \
-  "$HERE/" "$OUT/Contents/Resources/overlay/"
+  "$OVERLAY_SRC/" "$OUT/Contents/Resources/overlay/"
 
 cat > "$OUT/Contents/MacOS/grokD" <<'EOF'
 #!/bin/bash

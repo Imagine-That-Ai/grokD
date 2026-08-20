@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // User installs clone git and run install.sh. The look (face-tat icon, space
 // kernel, provider logos, light/dark) has to be in that tree — not in gitignored
-// hack/, not only on Alberto's Mac.
+// hack/, not only on the build machine.
 "use strict";
 const assert = (c, m) => { if (!c) throw new Error(m); };
 const fs = require("fs");

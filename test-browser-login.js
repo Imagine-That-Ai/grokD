@@ -31,10 +31,10 @@ ok("login-urls");
   const b = br.formatCursorAccount({
     kind: "logged-in",
     authId: "auth0|user_01KV1GVXW0JB5KVV1R1YE402VP",
-    email: "alberto@example.com",
+    email: "user@example.com",
   }, "cursor-b");
   assert(b.title === "B · Auth0", b.title);
-  assert(b.detail === "alberto@example.com", b.detail);
+  assert(b.detail === "user@example.com", b.detail);
   const out = br.formatCursorAccount({ kind: "logged-out" }, "cursor-c");
   assert(out.title === "C · signed out", out.title);
   assert(out.signedIn === false, "out");

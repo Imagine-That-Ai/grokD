@@ -36,6 +36,9 @@ assets/spacex_xai_logo.svg
 assets/stock_grokbot_icon.png
 assets/ref_a_grokbot_icon.png
 
-# Oversized local-only meshes (keep thumbs; do not git these)
+# Oversized local-only meshes and unused likenesses (do not git these)
 assets/meshy_elon.glb
 assets/meshy_elon_textured.glb
+assets/elon_musk_v7.glb
+assets/elon_musk_v7_rigged.glb
+assets/founder-musk-actions.glb

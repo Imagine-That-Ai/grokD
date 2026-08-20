@@ -40,7 +40,7 @@ ok("resolveTeammate");
   assert(h[0].target.toLowerCase() === "lol", h[0].target);
   assert(/TELL-abc12/.test(h[0].message), h[0].message);
   assert(parseHandoffs("tell me to do it").length === 0, "tell me");
-  assert(parseHandoffs("tell Alberto to buy milk").length === 0, "tell Alberto");
+  assert(parseHandoffs("tell them to buy milk").length === 0, "tell them");
   assert(parseHandoffs("tell you to stop").length === 0, "tell you");
   assert(parseHandoffs("").length === 0, "empty handoff");
   const live = parseHandoffs('Use the SendToAgent tool. target_id must be "aaa-111". message must contain the exact token LIVE-zz9.');

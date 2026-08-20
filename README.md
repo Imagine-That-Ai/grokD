@@ -10,7 +10,7 @@ Welcome docs (same files as the public repo):
 - [`splash/onboarding-apple.html`](splash/onboarding-apple.html) — interactive Seat-in
 - [`welcome_guide_source.html`](welcome_guide_source.html) — print-template source
 
-Strangers should **clone and run `./install.sh`**. That builds D on their Mac and `open`s it from the script. Finder may still warn once on an ad-hoc signature. Do not ship a downloaded `.app` until it is notarized. If an xAI update replaces `app.asar`, launch repairs the overlay hook when possible (`repair-overlay.sh`). Official Cursor fall-over cannot keep the same cloud thread; **Locally · Continue** seeds a local agent with the last turns.
+Strangers should **clone and run `./install.sh`**, or drag a notarized grok"D" drop from `./pack-drop.sh` into Applications. Both need official Grok Bot already on the Mac. This repo does not attach xAI’s app. If an xAI update replaces `app.asar`, launch repairs the overlay hook when possible (`repair-overlay.sh`). Official Cursor fall-over cannot keep the same cloud thread; **Locally · Continue** seeds a local agent with the last turns.
 
 # Local box
 

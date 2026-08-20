@@ -19,7 +19,41 @@ rm -f "$STAGE/export-public.sh" \
   "$STAGE/PROMPT-npm-openburnbar-proxy.md" \
   "$STAGE/live-cursor-chat.js" \
   "$STAGE/sync-to-tmp.sh" \
-  "$STAGE/test-export-public.js"
+  "$STAGE/test-export-public.js" \
+  "$STAGE/.github/workflows/check.yml"
+
+mkdir -p "$STAGE/.github/workflows"
+cat > "$STAGE/.github/workflows/check.yml" <<'EOF'
+name: check
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  door:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: unit door
+        run: |
+          node test-unit.js
+          node test-profiles.js
+          node test-box-state.js
+          node test-computer-cover.js
+          node test-paths.js
+          node test-patch-asar.js
+          node test-account-identity.js
+          node test-bot-pause.js
+          node test-failover.js
+          node test-failover-act.js
+          node test-onboarding.js
+          node test-clone-handoff.js
+          node test-space-holes.js
+          node test-install-look.js
+EOF
 
 for f in onboard-accounts.js test-onboard-accounts.js install.sh launch-d.sh; do
   [ -f "$SRC/$f" ] || continue
@@ -28,7 +62,7 @@ done
 chmod +x "$STAGE/install.sh" "$STAGE/launch-d.sh"
 
 python3 - "$STAGE" <<'PY'
-import pathlib, sys
+import pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
 
 p = root / "proxy2.js"
@@ -108,7 +142,31 @@ p.write_text(t, encoding="utf-8")
 p = root / "local-mcp.js"
 if p.is_file():
     t = p.read_text(encoding="utf-8")
-    p.write_text(t.replace('KEYCHAIN_ACCOUNT = "alberto-local"', 'KEYCHAIN_ACCOUNT = "grokbot-local"'), encoding="utf-8")
+    t = t.replace('KEYCHAIN_ACCOUNT = "alberto-local"', 'KEYCHAIN_ACCOUNT = "grokbot-local"')
+    t = t.replace(
+        '{ key: "alberto8793", service: X_TOKEN_SERVICE }',
+        '{ key: "x-1", service: X_TOKEN_SERVICE }',
+    )
+    t = t.replace(
+        '{ key: "alberto8793", service: `${GOOGLE_TOKEN_SERVICE}-1` }',
+        '{ key: "gmail-1", service: `${GOOGLE_TOKEN_SERVICE}-1` }',
+    )
+    t = t.replace(
+        '{ key: "cubelove.ai", service: `${X_TOKEN_SERVICE}-4` }',
+        '{ key: "x-4", service: `${X_TOKEN_SERVICE}-4` }',
+    )
+    if "alberto8793" in t:
+        raise SystemExit("local-mcp.js: alberto8793 slot still present")
+    p.write_text(t, encoding="utf-8")
+
+p = root / "pack-drop.sh"
+if p.is_file():
+    t = p.read_text(encoding="utf-8")
+    t = t.replace(
+        'OUT="${1:-$HERE/drop/grok\\"D\\".app}"',
+        'OUT="${1:-$HERE/drop/Grok Bot D.app}"',
+    )
+    p.write_text(t, encoding="utf-8")
 
 # Blanket leftover identity tokens (JWT fakes, comments).
 for p in root.rglob("*"):
@@ -119,8 +177,21 @@ for p in root.rglob("*"):
     except UnicodeDecodeError:
         continue
     text2 = text.replace("alberto-local", "grokbot-local").replace("alberto@local", "local@grokbot")
+    text2 = text2.replace("Alberto · Personal", "You · Personal").replace("alberto@example.com", "user@example.com")
+    text2 = text2.replace("https://github.com/Imagine-That-Ai/grok-D", "https://github.com/Imagine-That-Ai/grokD")
+    text2 = text2.replace("Imagine-That-Ai/grok-D", "Imagine-That-Ai/grokD")
+    text2 = text2.replace("Unofficial Crossover · Pending Elon seeing my tweet", "Imagine That overlay for Grok Bot")
     if text2 != text:
         p.write_text(text2, encoding="utf-8")
+
+pdf_old = b"https://github.com/Imagine-That-Ai/grok-D"
+pdf_new = b"https://github.com/Imagine-That-Ai/grokD/"
+if len(pdf_old) != len(pdf_new):
+    raise SystemExit("pdf url rewrite length mismatch")
+for p in root.rglob("*.pdf"):
+    b = p.read_bytes()
+    if pdf_old in b:
+        p.write_bytes(b.replace(pdf_old, pdf_new))
 
 needles = (
     "albertonunez",
@@ -128,6 +199,11 @@ needles = (
     "alberto-local",
     "Nunez-Garcia",
     "Alberto's Mac",
+    "Alberto · Personal",
+    "alberto@example.com",
+    "alberto8793",
+    "Pending Elon",
+    "Imagine-That-Ai/grok-D",
     "google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7",
     "/Users/albertonunez",
 )
@@ -142,6 +218,16 @@ for p in root.rglob("*"):
     for n in needles:
         if n in text:
             hits.append(f"{p.relative_to(root)}: {n}")
+alberto_re = re.compile(r"alberto", re.I)
+for p in root.rglob("*"):
+    if not p.is_file() or p.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".glb", ".pdf", ".svg", ".icns", ".woff", ".woff2"}:
+        continue
+    try:
+        text = p.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        continue
+    if alberto_re.search(text):
+        hits.append(f"{p.relative_to(root)}: alberto")
 if hits:
     raise SystemExit("export leaked identity:\n" + "\n".join(hits))
 
@@ -180,6 +266,10 @@ For local models you also need an OpenAI-compatible proxy on this Mac (CLI Proxy
 
 ## Install
 
+Two ways in:
+
+**A. Clone and install** (this repo does not attach xAI’s app):
+
 ```bash
 git clone https://github.com/Imagine-That-Ai/grokD.git
 cd grokD
@@ -187,9 +277,11 @@ chmod +x install.sh
 ./install.sh
 ```
 
-Run that from Terminal. Finder / a downloaded `.app` is blocked on an ad-hoc signature. There is no notarized installer yet.
+That writes `~/Applications/Grok Bot D.app` and opens it. `install.sh` signs with Imagine That’s Developer ID when that cert is on the Mac; otherwise it ad-hoc signs a *local* build from *your* Grok Bot. Do not email an ad-hoc `.app` — Gatekeeper will block it.
 
-That writes `~/Applications/Grok Bot D.app` and opens it. First launch is **Seat in**:
+**B. Drag a notarized drop** if Imagine That gave you one (`./pack-drop.sh` on a signing Mac). Put the grok"D" icon in Applications. First open finds official Grok Bot on this Mac, builds D, and relaunches. This GitHub repo does not host that `.app`.
+
+First launch is **Seat in**:
 
 - **This Mac** — start the local box, pick a proxy and a first model
 - **Cursor** — import official Grok Bot already on this Mac, or sign in here
@@ -230,6 +322,8 @@ Do not zip `~/.grok/grokbot-d/profile-data` or `~/Library/Application Support/Gr
 ## License
 
 Our overlay is MIT. Official Grok Bot stays xAI’s. We do not redistribute it.
+
+Provider marks (OpenAI, Anthropic, xAI, and others) and any likenesses in the welcome guide are the owners’ trademarks. This overlay is not affiliated with xAI, SpaceX, or Cursor.
 EOF
 
 cat > "$STAGE/INSTALL.md" <<'EOF'
@@ -237,16 +331,18 @@ cat > "$STAGE/INSTALL.md" <<'EOF'
 
 1. Install official Grok Bot from xAI.
 2. Install Node from https://nodejs.org
-3. Run `./install.sh` from Terminal.
-
-`install.sh` copies official Grok Bot to `~/Applications/Grok Bot D.app`, stamps the face-tat mascot (`assets/grokd-icon.icns`), applies the space-kernel overlay (event horizons, nebulas, orbiting provider logos, light/dark), and extracts the local-box host from *your* app. It does not upload or download xAI’s binary. Finder will not open a downloaded copy; the script `open`s the app it just built.
+3. From this repo:
 
 ```bash
 ./install.sh --src "/Applications/Grok Bot.app" --dest "$HOME/Applications/Grok Bot D.app"
 ./install.sh --dest /tmp/Grok-Bot-D-test.app --root /tmp/grokD-runtime --no-open
 ```
 
+`install.sh` copies official Grok Bot to `~/Applications/Grok Bot D.app`, stamps the face-tat mascot (`assets/grokd-icon.icns`), applies the space-kernel overlay (event horizons, nebulas, orbiting provider logos, light/dark), and extracts the local-box host from *your* app. It does not upload or download xAI’s binary. The script `open`s the app it just built.
+
 `--replace` overwrites dest if it already exists. Without it, an existing dest is left alone. Do not point `--dest` at a running grok"D".
+
+A notarized drag-into-Applications drop is built with `./pack-drop.sh` on a Mac that has Imagine That’s Developer ID, then notarized. This repo does not attach that `.app` (it would include xAI’s binary). If you already have the drop, drag the grok"D" icon into Applications; first open builds D from official Grok Bot.
 
 First open: Seat in can sign in **more than one** Cursor account. Skip anytime. Official Grok B and C are not imported.
 

@@ -43,6 +43,10 @@ assert(readme.includes("onboarding-apple.html"), "onboarding linked");
 assert(readme.includes("welcome_guide_source.html"), "print template linked");
 assert(!readme.includes("/tmp/grokbot-hack"), "no kitchen story");
 assert(!readme.includes("albertonunez"), "no home path");
+assert(!readme.includes("There is no notarized installer yet"), "stale no-drop docs");
+assert(readme.includes("./install.sh"), "clone install");
+assert(readme.includes("pack-drop.sh"), "drop path named");
+assert(readme.includes("does not host that"), "repo does not attach the .app");
 
 const installSh = fs.readFileSync(path.join(dest, "install.sh"), "utf8");
 assert(installSh.includes('DEST="$HOME/Applications/Grok Bot D.app"'), "safe dest");
@@ -59,6 +63,23 @@ assert(!preload.includes("google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7"), prelo
 const mcp = fs.readFileSync(path.join(dest, "local-mcp.js"), "utf8");
 assert(mcp.includes('KEYCHAIN_ACCOUNT = "grokbot-local"'), mcp);
 assert(!mcp.includes("alberto-local"), mcp);
+assert(!mcp.includes("alberto8793"), mcp);
+assert(!mcp.includes("cubelove.ai"), mcp);
+
+const dropSh = fs.readFileSync(path.join(dest, "pack-drop.sh"), "utf8");
+assert(dropSh.includes("host-main.cjs"), "drop excludes extracted host");
+assert(dropSh.includes("export-public.sh"), "drop packs from export when present");
+assert(dropSh.includes("Grok Bot D.app"), "public drop dest has no quotes");
+
+const ci = fs.readFileSync(path.join(dest, ".github", "workflows", "check.yml"), "utf8");
+assert(ci.includes("node test-unit.js"), "public CI door");
+assert(!/nunez/i.test(ci), "public CI must not spell identity");
+
+const onboard = fs.readFileSync(path.join(dest, "splash", "onboarding-apple.html"), "utf8");
+assert(!onboard.includes("Alberto · Personal"), "named seat chip");
+assert(onboard.includes("You · Personal"), "generic seat chip");
+assert(!onboard.includes("Imagine-That-Ai/grok-D"), "no kitchen repo url");
+assert(!onboard.includes("Pending Elon"), "no pending-elon joke");
 
 const needles = [
   "albertonunez",
@@ -66,6 +87,11 @@ const needles = [
   "alberto-local",
   "Nunez-Garcia",
   "Alberto's Mac",
+  "Alberto · Personal",
+  "alberto@example.com",
+  "alberto8793",
+  "Pending Elon",
+  "Imagine-That-Ai/grok-D",
   "google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7",
 ];
 function walk(dir) {

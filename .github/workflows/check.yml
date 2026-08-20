@@ -37,6 +37,9 @@ jobs:
               "alberto" + "-local",
               "Nunez" + "-Garcia",
               "Alberto" + "'s Mac",
+              "Alberto" + " · Personal",
+              "alberto" + "@example.com",
+              "alberto" + "8793",
               "/Users/" + "alberto" + "nunez",
           ]
           skip = {

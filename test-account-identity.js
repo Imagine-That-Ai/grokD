@@ -28,13 +28,13 @@ const ok = (name) => { n++; console.log("PASS ", name); };
   const a = acc.formatCursorAccount({
     kind: "logged-in",
     authId: "github|user_01JPV3PX04QGGE54KSKTQS8WS5",
-    email: "alberto@example.com",
-    name: "Alberto",
+    email: "user@example.com",
+    name: "User",
   }, "cursor-c");
   assert(a.title === "C · GitHub", a.title);
-  assert(a.detail === "alberto@example.com", a.detail);
-  assert(a.email === "alberto@example.com", a.email);
-  assert(a.hover === "alberto@example.com", a.hover);
+  assert(a.detail === "user@example.com", a.detail);
+  assert(a.email === "user@example.com", a.email);
+  assert(a.hover === "user@example.com", a.hover);
   assert(a.signedIn === true, "signed");
   const b = acc.formatCursorAccount({
     kind: "logged-in",
