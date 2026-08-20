@@ -46,6 +46,7 @@ function setScheme(next) {
 
 function kernelHost() {
   return document.querySelector(".sand-access-cover")
+    || document.querySelector(".sand-onboarding__landing")
     || document.querySelector("#sand-app")
     || document.body;
 }

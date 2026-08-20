@@ -64,8 +64,19 @@ ok("tracked-kernel-and-logos");
   assert(sh.includes("missing space-kernel.js"), "install dies if kernel is missing");
   assert(sh.includes("dest icon.icns is not the face-tat mascot"), "install compares dest icon");
   assert(!/ICON_SRC=""/.test(sh), "no empty icon fallback");
+  assert(sh.includes("Developer ID Application: Imagine That AI"), "Developer ID, not silent ad-hoc first");
+  assert(/codesign --force --deep --sign "\$SIGN_ID"/.test(sh), "uses the Developer ID when present");
 }
 ok("install-sh-ships-look");
+
+{
+  const drop = read("pack-drop.sh");
+  assert(drop.includes("Install Grok Bot first"), "drop requires official Grok Bot");
+  assert(fs.existsSync(path.join(ROOT, "pack-drop.sh")), "pack-drop.sh");
+  const kernel = read("space-kernel.js");
+  assert(kernel.includes("sand-onboarding__landing"), "kernel hosts the landing page");
+}
+ok("drop-and-landing");
 
 {
   const rt = read("install-runtime.sh");
@@ -102,4 +113,4 @@ ok("runtime-and-dist-copy-assets");
 }
 ok("install-runtime-copies-look");
 
-console.log("\n" + n + "/5 install-look checks passed");
+console.log("\n" + n + "/6 install-look checks passed");

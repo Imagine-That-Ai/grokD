@@ -392,7 +392,9 @@
         overflow: visible !important;
       }
       .sand-access-cover,
-      .sand-access-cover > *:not(#gd-kernel):not(#gd-scheme-toggle) {
+      .sand-onboarding__landing,
+      .sand-access-cover > *:not(#gd-kernel):not(#gd-scheme-toggle),
+      .sand-onboarding__landing > *:not(#gd-kernel):not(#gd-scheme-toggle) {
         background: transparent !important;
         background-image: none !important;
       }
@@ -1666,7 +1668,9 @@
   }
 
   function punchCoverSky(cover) {
-    if (!cover || !cover.classList || !cover.classList.contains("sand-access-cover")) return;
+    if (!cover || !cover.classList) return;
+    if (!cover.classList.contains("sand-access-cover")
+      && !cover.classList.contains("sand-onboarding__landing")) return;
     cover.style.background = "transparent";
     cover.style.backgroundImage = "none";
     const cr = cover.getBoundingClientRect();
@@ -1684,7 +1688,10 @@
   }
 
   function mountCoverSchemeToggle(cover) {
-    const host = (cover && cover.classList && cover.classList.contains("sand-access-cover"))
+    const host = (cover && cover.classList && (
+      cover.classList.contains("sand-access-cover")
+      || cover.classList.contains("sand-onboarding__landing")
+    ))
       ? cover
       : document.body;
     if (!host) return;
@@ -1717,7 +1724,9 @@
   }
 
   function enhanceCoverScreen() {
-    const cover = document.querySelector(".sand-access-cover") || document.body;
+    const cover = document.querySelector(".sand-access-cover")
+      || document.querySelector(".sand-onboarding__landing")
+      || document.body;
     if (!cover) return;
     try { punchCoverSky(cover); } catch (_) {}
     try { mountCoverSchemeToggle(cover); } catch (_) {}
@@ -3364,7 +3373,8 @@
           out.ok = !!(out.reply && out.reply.includes(cmd.token || text.slice(0, 12)));
         }
       } else if (cmd.op === "cover") {
-        const cover = document.querySelector(".sand-access-cover");
+        const cover = document.querySelector(".sand-access-cover")
+          || document.querySelector(".sand-onboarding__landing");
         out.cover = applyCoverScheme(cover, cmd.mode);
         out.ok = true;
       } else if (cmd.op === "chatter") {

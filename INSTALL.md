@@ -9,19 +9,17 @@ You do not need extra official Grok Bot copies. Official Grok Bot on this Mac ca
 
 ## Install
 
-You need official **Grok Bot.app** from xAI already on this Mac. Then clone the overlay and run the installer — that is how the face-tat icon, space kernel, orbiting provider logos, and light/dark sky land in the app. GitHub `main` is the look. `hack/` is local scratch and is **not** what users get.
+1. Install official **Grok Bot** from xAI.
+2. Drag **grok"D"** (the face-tat icon) into your Applications folder.
+3. Open it. The first launch builds D from the Grok Bot already on this Mac.
+
+That drop is `drop/grok"D".app` from `./pack-drop.sh`. Node is required on PATH for that first build.
+
+To rebuild from Terminal:
 
 ```bash
-git clone https://github.com/Imagine-That-Ai/grok-D.git ~/.grok/grokbot-d
-cd ~/.grok/grokbot-d
 ./install.sh --replace
 ```
-
-That writes `~/Applications/grok"D".app` (an alias `Grok Bot D.app` points at it), stamps `assets/grokd-icon.icns` as the app icon, patches the overlay hook, and opens D.
-
-Need Node on your PATH for the local box (`node`).
-
-If someone hands you an already-built `.app` instead: copy it to `~/Applications`, open it, first launch writes `~/.grok/grokbot-d` (scripts + assets, no one else’s chats). You start on **Local D**.
 
 ## First launch
 

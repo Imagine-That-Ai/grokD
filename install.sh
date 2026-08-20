@@ -250,10 +250,10 @@ if got != want:
     raise SystemExit("install: dest icon.icns is not the face-tat mascot")
 print("icon ok", len(got))
 PY
-# Official Grok is Team DCNK4UB866. Ad-hoc outer + leftover xAI framework
-# Team IDs crash ("mapped file have different Team IDs"). --deep makes
-# nested binaries ad-hoc too so they match. disable-library-validation
-# is a belt if anything nested stays signed. spctl will still reject.
+# Official Grok is Team DCNK4UB866. After we patch asar we cannot keep that
+# signature. Sign the whole bundle with Imagine That's Developer ID so nested
+# Electron helpers share one Team ID. Ad-hoc only if this Mac has no cert
+# (a local build from *your* Grok Bot is fine; a downloaded ad-hoc app is not).
 ENTS="$WORK/ents.plist"
 codesign -d --entitlements :- "$SRC" >"$ENTS" 2>/dev/null || true
 python3 - "$ENTS" <<'PY'
@@ -271,8 +271,22 @@ info["com.apple.security.cs.allow-jit"] = True
 info["com.apple.security.cs.disable-library-validation"] = True
 open(path, "wb").write(plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False))
 PY
-codesign --force --deep --sign - --options runtime --timestamp=none --entitlements "$ENTS" "$DEST" >>/tmp/grokD-install-codesign.out 2>&1 || \
-  codesign --force --deep --sign - "$DEST" >>/tmp/grokD-install-codesign.out 2>&1 || true
+SIGN_ID="${GROK_D_SIGN_IDENTITY:-}"
+if [ -z "$SIGN_ID" ]; then
+  if security find-identity -v -p codesigning 2>/dev/null | grep -q 'Developer ID Application: Imagine That AI'; then
+    SIGN_ID="Developer ID Application: Imagine That AI Limited Liability Company (4Y367DF25B)"
+  fi
+fi
+SIGN_LOG=/tmp/grokD-install-codesign.out
+if [ -n "$SIGN_ID" ]; then
+  echo "sign    $SIGN_ID"
+  codesign --force --deep --sign "$SIGN_ID" --options runtime --timestamp --entitlements "$ENTS" "$DEST" >"$SIGN_LOG" 2>&1 \
+    || die "codesign with Developer ID failed (see $SIGN_LOG)"
+else
+  echo "sign    ad-hoc (no Developer ID on this Mac — local build only)"
+  codesign --force --deep --sign - --options runtime --timestamp=none --entitlements "$ENTS" "$DEST" >"$SIGN_LOG" 2>&1 \
+    || die "ad-hoc codesign failed (see $SIGN_LOG)"
+fi
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 xattr -cr "$DEST" 2>/dev/null || true
 # Do not NSWorkspace.setIcon — that is a Finder custom icon (no macOS squircle).
