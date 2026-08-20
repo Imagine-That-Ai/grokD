@@ -25,7 +25,7 @@ First launch is Seat in. Pick This Mac (local box), Cursor (import or sign in), 
 
 [CubeLove](https://cubelove.ai) is live on iPhone. grok"D" on the phone is not yet. Want the TestFlight alpha when it is? Email [alberto@imagine-that.ai](mailto:alberto@imagine-that.ai).
 
-Guides: [`grokD_Welcome_Guide.pdf`](grokD_Welcome_Guide.pdf), [`splash/onboarding-apple.html`](splash/onboarding-apple.html), [`welcome_guide_source.html`](welcome_guide_source.html).
+Guides: [`splash/onboarding-apple.html`](splash/onboarding-apple.html), [`welcome_guide_source.html`](welcome_guide_source.html).
 
 Dock name is grok"D". Folder is `Grok Bot D.app`. Apple menu and keychain stay `Grok Bot` so renderer secrets stay on the official keychain. Do not rename the folder to `grok"D".app` — quotes in the path crash Electron.
 
