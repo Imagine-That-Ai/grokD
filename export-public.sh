@@ -18,7 +18,8 @@ rm -f "$STAGE/export-public.sh" \
   "$STAGE/PROMPT-npm-openburnbar-proxy.md" \
   "$STAGE/live-cursor-chat.js" \
   "$STAGE/welcome_guide_source.html" \
-  "$STAGE/sync-to-tmp.sh"
+  "$STAGE/sync-to-tmp.sh" \
+  "$STAGE/test-export-public.js"
 
 for f in onboard-accounts.js test-onboard-accounts.js install.sh launch-d.sh; do
   [ -f "$SRC/$f" ] || continue
@@ -148,6 +149,7 @@ for banned in (
     "live-cursor-chat.js",
     "welcome_guide_source.html",
     "sync-to-tmp.sh",
+    "test-export-public.js",
 ):
     if (root / banned).exists():
         raise SystemExit(f"export included kitchen leftover: {banned}")

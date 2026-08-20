@@ -27,9 +27,40 @@ jobs:
           node test-clone-handoff.js
       - name: no identity leak
         run: |
-          if git grep -I -n -e albertonunez -e 'alberto@local' -e 'alberto-local' -e 'Nunez-Garcia' -e "Alberto's Mac" -- \
-            ':!export-public.sh' ':!PROMPT-npm-openburnbar-proxy.md' ':!test-export-public.js' ':!pack-asar.sh' \
-            ':!proxy2.js' ':!profile-auth-preload.js' ':!local-mcp.js'; then
-            echo "identity leak" >&2
-            exit 1
-          fi
+          python3 - <<'PY'
+          import subprocess, sys
+          needles = [
+              "alberto" + "nunez",
+              "alberto" + "@local",
+              "alberto" + "-local",
+              "Nunez" + "-Garcia",
+              "Alberto" + "'s Mac",
+              "/Users/" + "alberto" + "nunez",
+          ]
+          skip = {
+              "export-public.sh",
+              "PROMPT-npm-openburnbar-proxy.md",
+              "test-export-public.js",
+              "pack-asar.sh",
+              "proxy2.js",
+              "profile-auth-preload.js",
+              "local-mcp.js",
+          }
+          proc = subprocess.run(
+              ["git", "grep", "-I", "-n", "-e", "."],
+              capture_output=True, text=True,
+          )
+          hits = []
+          for line in (proc.stdout or "").splitlines():
+              path = line.split(":", 1)[0]
+              if path in skip or path.startswith(".git"):
+                  continue
+              for n in needles:
+                  if n in line:
+                      hits.append(line)
+                      break
+          if hits:
+              print("identity leak", file=sys.stderr)
+              print("\n".join(hits[:50]), file=sys.stderr)
+              sys.exit(1)
+          PY
