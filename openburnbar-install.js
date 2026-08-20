@@ -10,14 +10,15 @@ const GROKD_PORT = 8320;
 
 function info() {
   return {
-    npmProxy: false,
+    npmProxy: true,
     npmPackage: "openburnbar",
-    npmWhat: "MCP stdio, obbresume, Pensieve memory, `app install` of the notarized Mac app. Not the local /v1/chat/completions proxy.",
+    npmWhat: "Local OpenAI-compatible gateway on port 8320, MCP stdio, obbresume, Pensieve memory, and optional Mac app install.",
     proxy: {
       daemon: `http://127.0.0.1:${DAEMON_PORT}/v1/chat/completions`,
       grokD: `http://127.0.0.1:${GROKD_PORT}/v1/chat/completions`,
     },
     install: {
+      proxy: "npx -y openburnbar proxy --port 8320 --allow-local-key",
       macApp: "npx -y openburnbar app install",
       launch: "open -a OpenBurnBar",
       pointGrokD: "node ~/.grok/grokbot-d/model-lib.js set grok-4.6 openburnbar",

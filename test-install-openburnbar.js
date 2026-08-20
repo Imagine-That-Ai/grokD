@@ -4,12 +4,12 @@ const assert = (c, m) => { if (!c) throw new Error(m); };
 const info = require("./openburnbar-install").info();
 const models = require("./model-lib");
 
-assert(info.npmProxy === false, "npm does not ship the proxy");
-assert(/npx -y openburnbar app install/.test(info.install.macApp), info.install.macApp);
+assert(info.npmProxy === true, "npm ships the proxy");
+assert(/npx -y openburnbar proxy --port 8320 --allow-local-key/.test(info.install.proxy), info.install.proxy);
 assert(info.proxy.daemon.indexOf(":8317") >= 0, info.proxy.daemon);
 assert(models.defaultConfig().proxyTarget === "openburnbar", models.defaultConfig().proxyTarget);
 assert(models.FALLBACK_ORDER[0] === "openburnbar", models.FALLBACK_ORDER.join(","));
-console.log("PASS  npm-proxy-is-app-only");
+console.log("PASS  npm-proxy-is-cli-gateway");
 console.log("PASS  grokD-default-is-openburnbar");
 
 const http = require("http");
@@ -34,7 +34,7 @@ function get(pathname) {
   await new Promise((r) => setTimeout(r, 250));
   try {
     const r = await get("/install/openburnbar");
-    assert(r.status === 200 && r.json.npmProxy === false, JSON.stringify(r));
+    assert(r.status === 200 && r.json.npmProxy === true, JSON.stringify(r));
     console.log("PASS  install-route");
     console.log("\n3/3 openburnbar install contract checks passed");
   } finally {

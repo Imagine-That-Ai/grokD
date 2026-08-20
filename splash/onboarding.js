@@ -56,10 +56,9 @@
           currentModel() { return models ? models.resolveConfig() : { model: "grok-4.6", proxyTarget: "openburnbar" }; },
           installOpenBurnBar() {
             const inst = path.join(ROOT, "openburnbar-install.js");
-            let info = { install: { macApp: "npx -y openburnbar app install", launch: "open -a OpenBurnBar" } };
+            let info = { install: { proxy: "npx -y openburnbar proxy --port 8320 --allow-local-key" } };
             try { info = require(inst).info(); } catch (_) {}
-            spawn("npx", ["-y", "openburnbar", "app", "install"], { detached: true, stdio: "ignore" }).unref();
-            spawn("open", ["-a", "OpenBurnBar"], { detached: true, stdio: "ignore" }).unref();
+            spawn("npx", ["-y", "openburnbar", "proxy", "--port", "8320", "--allow-local-key"], { detached: true, stdio: "ignore" }).unref();
             return info;
           },
           seats() {
