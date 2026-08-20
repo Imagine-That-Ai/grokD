@@ -267,18 +267,8 @@ codesign --force --deep --sign - --options runtime --timestamp=none --entitlemen
   codesign --force --deep --sign - "$DEST" >>/tmp/grokD-install-codesign.out 2>&1 || true
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 xattr -cr "$DEST" 2>/dev/null || true
-# Finder/Launchpad ignore icns until NSWorkspace stamps the bundle. Do this
-# AFTER codesign — --deep strips the Icon resource fork.
-FACE_PNG="$HERE/hack/grokd_color_1024.png"
-if [ -f "$FACE_PNG" ]; then
-  /usr/bin/python3 - "$FACE_PNG" "$DEST" <<'PY' || true
-from AppKit import NSWorkspace, NSImage
-import sys
-img = NSImage.alloc().initWithContentsOfFile_(sys.argv[1])
-if img is not None:
-    NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, sys.argv[2], 0)
-PY
-fi
+# Do not NSWorkspace.setIcon — that is a Finder custom icon (no macOS squircle).
+# App icons come from icon.icns after CFBundleIconName is dropped.
 
 echo "packed $DEST"
 echo "overlay $ROOT"
