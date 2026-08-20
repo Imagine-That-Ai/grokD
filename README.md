@@ -1,6 +1,8 @@
-# grok"D"
+# Prepare to get grok"D"!
 
 Local bots on this Mac, or your Cursor login. Other people install from [Imagine-That-Ai/grokD](https://github.com/Imagine-That-Ai/grokD). They do not get your chats or tokens.
+
+CubeLove is live on iPhone. grok"D" on the phone is not yet. TestFlight: [alberto@imagine-that.ai](mailto:alberto@imagine-that.ai).
 
 Pack and hand over: `INSTALL.md`. Do not zip `profile-data/` or `GrokBotSeat4`.
 

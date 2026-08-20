@@ -49,6 +49,11 @@ assert(!readme.includes("same files as the public repo"), "no kitchen self-talk"
 assert(readme.includes("./install.sh"), "clone install");
 assert(readme.includes("pack-drop.sh"), "drop path named");
 assert(readme.includes("does not host that"), "repo does not attach the .app");
+assert(readme.includes("Prepare to get grok"), "punch line");
+assert(readme.includes("assets/grokd-icon.png"), "logo");
+assert(readme.includes("alberto@imagine-that.ai"), "testflight email");
+assert(!readme.includes("Liquid Metal"), "no liquid-metal hub");
+assert(!fs.readFileSync(path.join(dest, "welcome_guide_source.html"), "utf8").includes("Liquid Metal Hub"), "guide copy");
 
 const installSh = fs.readFileSync(path.join(dest, "install.sh"), "utf8");
 assert(installSh.includes('DEST="$HOME/Applications/Grok Bot D.app"'), "safe dest");
