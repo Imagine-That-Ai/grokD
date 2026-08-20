@@ -121,6 +121,9 @@ if [ -f "$ICON_SRC" ]; then
   cp "$ICON_SRC" "$DEST/Contents/Resources/electron.icns" 2>/dev/null || true
   cp "$ICON_SRC" "$DEST/Contents/Resources/app.icns" 2>/dev/null || true
 fi
+# Official Grok Bot's icon catalog is the stock gray blob. Finder / Applications
+# still read it even after CFBundleIconName is dropped.
+rm -f "$DEST/Contents/Resources/Assets.car"
 
 # Rename helper apps to match CFBundleName so Electron finds them
 python3 - "$DEST/Contents/Frameworks" <<'PY'
