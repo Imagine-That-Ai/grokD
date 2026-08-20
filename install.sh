@@ -108,9 +108,9 @@ loc.mkdir(parents=True, exist_ok=True)
 PY
 
 # Copy custom Grok D icon
-ICON_SRC="$HERE/hack/icons/icon-D.icns"
-if [ ! -f "$ICON_SRC" ] && [ -f "$HERE/hack/grokd_edgefill.icns" ]; then
-  ICON_SRC="$HERE/hack/grokd_edgefill.icns"
+ICON_SRC="$HERE/hack/grokd_edgefill.icns"
+if [ ! -f "$ICON_SRC" ] && [ -f "$HERE/hack/icons/icon-D.icns" ]; then
+  ICON_SRC="$HERE/hack/icons/icon-D.icns"
 fi
 if [ -f "$ICON_SRC" ]; then
   cp "$ICON_SRC" "$DEST/Contents/Resources/icon.icns"
@@ -266,6 +266,9 @@ xattr -cr "$DEST" 2>/dev/null || true
 
 echo "packed $DEST"
 echo "overlay $ROOT"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f -r -u "$DEST" 2>/dev/null || true
+touch "$DEST"
+killall Dock 2>/dev/null || true
 if [ "$OPEN_APP" -eq 1 ]; then
   open -na "$DEST" || open "$DEST"
   echo "opened. Seat-in can add more than one Cursor account."
