@@ -60,7 +60,8 @@
           },
           switchTo(id) {
             const sw = path.join(ROOT, "switch-profile.js");
-            spawn(process.execPath, [sw, "switch", id], { detached: true, stdio: "ignore" }).unref();
+            const env = Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: "1" });
+            spawn(process.execPath, [sw, "switch", id], { detached: true, stdio: "ignore", env }).unref();
           },
           addSignIn() {
             if (store && accounts) {
@@ -72,6 +73,7 @@
             const out = execFileSync(process.execPath, [sw, "add", "--name", name, "--kind", "cursor"], {
               encoding: "utf8",
               timeout: 15000,
+              env: Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: "1" }),
             });
             const j = JSON.parse(out.trim().split("\n").pop());
             return j.id;

@@ -8,8 +8,15 @@ function sqliteRead(db, sql, opts) {
   const timeout = (opts && opts.timeout) || 4000;
   const encoding = (opts && opts.encoding) || "utf8";
   const maxBuffer = (opts && opts.maxBuffer) || 4 * 1024 * 1024;
+  const py = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3", "python3"];
+  let python = "python3";
+  for (const c of py) {
+    try {
+      if (c === "python3" || require("fs").existsSync(c)) { python = c; break; }
+    } catch {}
+  }
   try {
-    return execFileSync("python3", ["-c",
+    return execFileSync(python, ["-c",
       "import sqlite3,sys\n"
       + "c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro', uri=True, timeout=2)\n"
       + "rows=c.execute(sys.argv[2])\n"

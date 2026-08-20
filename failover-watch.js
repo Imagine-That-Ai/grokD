@@ -27,7 +27,23 @@ async function tick() {
     now: Date.now(),
   });
   if (!decision) return { skipped: true, reason: "no-decision" };
-  return act(decision, { relaunch: decision.action === "cursor" || decision.action === "local-chief" || decision.action === "local-clone" });
+  const { execFileSync } = require("child_process");
+  const sendPrompt = (id, text) => {
+    try {
+      execFileSync("curl", [
+        "-sS", "-X", "POST", "http://127.0.0.1:1337/api/sendPrompt",
+        "-H", "content-type: application/json",
+        "-H", "authorization: Bearer fake-gateway-token",
+        "-d", JSON.stringify({ agentId: id, prompt: String(text || ""), awaitTurn: false }),
+      ], { encoding: "utf8", timeout: 8000 });
+      return true;
+    } catch { return false; }
+  };
+  return act(decision, {
+    relaunch: decision.action === "cursor" || decision.action === "local-chief" || decision.action === "local-clone",
+    sendPrompt,
+    agents: store.list(),
+  });
 }
 
 module.exports = { tick };

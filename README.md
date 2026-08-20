@@ -40,6 +40,12 @@ To look at either without changing your theme:
 node -e "require('$HOME/.grok/grokbot-d/command-client').sendCommand('cover',{mode:'light'})"   # or dark / auto
 ```
 
+The left plasma orb can wear the seat's own face instead of the Grok mark: click
+it, then **Seat photo on the orb**. It follows whichever seat is active — the
+account photo, or that seat's mascot if the account has none — and the bubble rim
+reflects it like any other orb content. The choice lives in
+`runtime/ui-prefs.json`, not localStorage, so it survives a seat hop.
+
 Do not kill **Grok Bot B**.
 
 ## Checks

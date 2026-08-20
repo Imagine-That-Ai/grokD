@@ -5,7 +5,7 @@ APP="${1:-$HOME/Applications/Grok Bot D.app}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ASAR="$APP/Contents/Resources/app.asar"
 [ -f "$ASAR" ] || exit 0
-if python3 -c "import pathlib,sys; sys.exit(0 if b'profile-ui-inject.js' in pathlib.Path(sys.argv[1]).read_bytes() else 1)" "$ASAR"; then
+if grep -a -q -F "profile-ui-inject.js" "$ASAR" 2>/dev/null; then
   exit 0
 fi
 command -v node >/dev/null || exit 1
@@ -14,7 +14,7 @@ WORK="${TMPDIR:-/tmp}/grokD-repair-$$"
 mkdir -p "$WORK"
 npx --yes asar extract "$ASAR" "$WORK/asar" || exit 1
 node "$HERE/patch-asar.js" "$WORK/asar" || true
-if ! python3 -c "import pathlib,sys; sys.exit(0 if b'profile-ui-inject.js' in pathlib.Path('$WORK/asar/dist/electron-preload/preload.cjs').read_bytes() else 1)"; then
+if ! grep -a -q -F "profile-ui-inject.js" "$WORK/asar/dist/electron-preload/preload.cjs" 2>/dev/null; then
   rm -rf "$WORK"
   exit 1
 fi

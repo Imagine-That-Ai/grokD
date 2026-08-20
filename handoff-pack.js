@@ -65,8 +65,9 @@ function writePack(text) {
 function packBody(pack) {
   const s = String(pack || "");
   if (/\.md$/.test(s) && fs.existsSync(s)) {
-    try { return fs.readFileSync(s, "utf8"); } catch { return s; }
+    try { return fs.readFileSync(s, "utf8"); } catch { return ""; }
   }
+  if (s.indexOf(path.sep) >= 0 && /\.md$/.test(s)) return "";
   return s;
 }
 

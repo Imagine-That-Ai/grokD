@@ -4,7 +4,7 @@
   const os = require("os");
   const path = require("path");
   const { spawn, execFileSync } = require("child_process");
-  const ROOT = path.join(os.homedir(), ".grok", "grokbot-d");
+  const ROOT = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
   const STORE = path.join(ROOT, "profiles.json");
   const SWITCH = path.join(ROOT, "switch-profile.js");
   const ENV = path.join(ROOT, "active-env.json");
@@ -139,6 +139,30 @@
 
   function escAttr(s) {
     return String(s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/\n/g, "&#10;");
+  }
+
+  // Small, durable UI choices. localStorage would do, but it lives in the seat's
+  // own Electron profile — a preference about the orb has to survive a seat hop.
+  const UI_PREFS = path.join(RUNTIME, "ui-prefs.json");
+
+  function uiPrefs() {
+    try { return JSON.parse(fs.readFileSync(UI_PREFS, "utf8")) || {}; }
+    catch { return {}; }
+  }
+
+  function setUiPref(key, value) {
+    const next = Object.assign(uiPrefs(), { [key]: value });
+    try {
+      fs.mkdirSync(RUNTIME, { recursive: true });
+      fs.writeFileSync(UI_PREFS, JSON.stringify(next, null, 2) + "\n");
+    } catch (e) {
+      try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[ui-prefs] " + e + "\n"); } catch (_) {}
+    }
+    return next;
+  }
+
+  function orbAvatarOn() {
+    return !!uiPrefs().orbAvatar;
   }
 
   function switchBtn(on, extra, attrs) {
@@ -411,6 +435,26 @@
         filter: drop-shadow(0 1px 2px rgba(0,0,0,0.55));
       }
       #gd-sats .gd-sat svg { width: 100%; height: 100%; display: block; }
+      .gd-orb-hidden { display: none !important; }
+      .pure-plasma-orb-1 .gd-orb-photo {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        border-radius: 50%;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        box-shadow: inset 0 0 10px rgba(0,0,0,0.5), inset 0 -3px 7px rgba(0,0,0,0.45);
+      }
+      .pure-plasma-orb-1 .gd-orb-photo img,
+      .pure-plasma-orb-1 .gd-orb-photo svg {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
       .sand-access-cover > *:not(#gd-kernel) { position: relative; z-index: 2; }
       .sand-grok-bot-mark { z-index: 5; }
       #sand-access-cover-heading,
@@ -1572,16 +1616,18 @@
     _foBusy = true;
     try {
       let agents = [];
-      try {
-        const raw = execFileSync("curl", [
-          "-sS", "-X", "POST", "http://127.0.0.1:1337/api/listAgents",
-          "-H", "content-type: application/json",
-          "-H", "authorization: Bearer fake-gateway-token",
-          "-d", "{}",
-        ], { encoding: "utf8", timeout: 4000 });
-        const j = JSON.parse(raw);
-        agents = Array.isArray(j) ? j : [];
-      } catch {}
+      if (active.kind === "local") {
+        try {
+          const raw = execFileSync("curl", [
+            "-sS", "-X", "POST", "http://127.0.0.1:1337/api/listAgents",
+            "-H", "content-type: application/json",
+            "-H", "authorization: Bearer fake-gateway-token",
+            "-d", "{}",
+          ], { encoding: "utf8", timeout: 4000 });
+          const j = JSON.parse(raw);
+          agents = Array.isArray(j) ? j : [];
+        } catch {}
+      }
       const focus = agents.find((a) => a && a.isRunning) || agents[0] || null;
       let lastUser = "";
       try { lastUser = String(window.__grokdLastPrompt || ""); } catch {}
@@ -1791,6 +1837,59 @@
     setTimeout(() => document.addEventListener("click", onDoc, true), 0);
   }
 
+  // The left orb is the seat orb, so when the user asks for it, it wears the
+  // active seat's own face: their account photo, or the seat's mascot if that
+  // account has no photo. Switching seats re-paints it, because the orb is
+  // meant to answer "who am I signed in as" at a glance.
+  function seatOrbFace(id) {
+    const snap = seatSnapshot(id);
+    const photo = snap.photo;
+    if (photo && (String(photo).indexOf("data:image") === 0 || /^https:\/\//i.test(photo))) {
+      return { kind: "photo", src: photo };
+    }
+    const profile = (load().profiles || []).find((p) => p.id === id);
+    const mascot = getProfileMascotSvg(profile, id);
+    if (mascot) return { kind: "mascot", svg: mascot };
+    return null;
+  }
+
+  function clearSeatOrb(orb) {
+    orb.querySelectorAll(".gd-orb-photo").forEach((n) => n.remove());
+    orb.querySelectorAll(".gd-orb-hidden").forEach((n) => n.classList.remove("gd-orb-hidden"));
+    orb.classList.remove("gd-orb-avatar");
+  }
+
+  function paintSeatOrb() {
+    const orb = document.querySelector(".pure-plasma-orb-1");
+    if (!orb) return;
+    const id = activeId();
+    const face = orbAvatarOn() ? seatOrbFace(id) : null;
+    const key = face ? id + "|" + face.kind + "|" + String(face.src || face.svg).slice(-40) : "";
+    if (orb._gdOrbKey === key) return;
+    orb._gdOrbKey = key;
+    clearSeatOrb(orb);
+    if (!face) return;
+    // the packed face and its gradients step aside; the rim clones children, so
+    // marking them keeps the reflection in step with what the orb now shows
+    Array.from(orb.children).forEach((n) => {
+      if (n.getAttribute && n.getAttribute("data-gd-rim") != null) return;
+      if (n.classList) n.classList.add("gd-orb-hidden");
+    });
+    const slot = document.createElement("span");
+    slot.className = "gd-orb-photo";
+    if (face.kind === "photo") {
+      const img = document.createElement("img");
+      img.src = face.src;
+      img.alt = "";
+      img.draggable = false;
+      slot.appendChild(img);
+    } else {
+      slot.innerHTML = face.svg;
+    }
+    orb.appendChild(slot);
+    orb.classList.add("gd-orb-avatar");
+  }
+
   function wirePlasmaSeatOrb() {
     const lava = document.getElementById("pure-lava-orbs-root");
     if (lava) {
@@ -1827,6 +1926,7 @@
       right._gdSeatClose = true;
       right.addEventListener("click", () => closeSeatActionMenu(), true);
     }
+    try { paintSeatOrb(); } catch (_) {}
     try { require(path.join(ROOT, "cursor-model-bubble.js")).start(); } catch (_) {}
   }
 
@@ -2262,6 +2362,16 @@
         <button type="button" id="grok-menu-new-bot" class="whimsical-model-item" title="Create a bot on this computer">
           <span style="font-size:11px;font-weight:700;color:#fff">Create new Bot</span>
         </button>
+        <div class="whimsical-model-item" id="grok-orb-avatar" role="switch"
+             aria-checked="${orbAvatarOn() ? "true" : "false"}" tabindex="0"
+             title="Put the active seat's photo on the left orb">
+          ${seatFace(profile || { id }, seatSnapshot(id), 20)}
+          <span style="min-width:0;flex:1">
+            <span style="display:block;font-size:11px;font-weight:700;color:#fff">Seat photo on the orb</span>
+            <span style="display:block;font-size:9.5px;color:rgba(255,255,255,0.5)">Follows the active seat</span>
+          </span>
+          ${switchBtn(orbAvatarOn(), "", 'data-orb-avatar="1"')}
+        </div>
         <div class="gd-railacts" style="justify-content:center;border:none;padding:4px 0 8px;gap:8px">
           <button type="button" id="grok-menu-add-seat" class="gd-iconbtn is-primary" title="Add seat">${ICONS.plus}</button>
           <button type="button" id="grok-menu-clean-login" class="gd-iconbtn" title="Open Sign-In">${ICONS.browser}</button>
@@ -2322,6 +2432,30 @@
         }).catch((err) => toast("Stop failed: " + (err.message || err)));
       });
     });
+    const orbRow = menu.querySelector("#grok-orb-avatar");
+    if (orbRow) {
+      const flipOrb = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const next = !orbAvatarOn();
+        setUiPref("orbAvatar", next);
+        const knob = orbRow.querySelector(".gd-sw");
+        if (knob) {
+          knob.classList.toggle("is-on", next);
+          knob.setAttribute("aria-pressed", next ? "true" : "false");
+        }
+        orbRow.setAttribute("aria-checked", next ? "true" : "false");
+        try { paintSeatOrb(); } catch (_) {}
+        const face = next ? seatOrbFace(id) : null;
+        if (next && !face) toast("No photo or icon on this seat yet");
+        else toast(next ? "Orb follows the active seat" : "Orb back to the Grok face");
+      };
+      orbRow.addEventListener("click", flipOrb);
+      orbRow.addEventListener("keydown", (e) => {
+        if (e.key === " " || e.key === "Enter") flipOrb(e);
+      });
+    }
+
     const flipFallOver = (row) => {
       const key = row.getAttribute("data-fo");
       if (!key) return;
@@ -2679,7 +2813,7 @@
       const list = Array.isArray(agents) ? agents : (agents && agents.agents) || [];
       if (list[0] && list[0].id) return list[0].id;
     } catch {}
-    return "e219204f-eadc-4dfa-893f-8ca572650ee4";
+    return null;
   }
 
   function findComposer() {
@@ -2719,6 +2853,7 @@
 
   function sendLocal(text) {
     const agentId = readActiveAgent();
+    if (!agentId) return Promise.reject(new Error("no active local agent"));
     const payload = JSON.stringify({ agentId, prompt: text, awaitTurn: false });
     return new Promise((resolve, reject) => {
       const req = require("http").request({
@@ -3142,6 +3277,29 @@
     injectSplash();
     inject();
     writeReady();
+    try {
+      const jobFile = path.join(RUNTIME, "continue-job.json");
+      if (fs.existsSync(jobFile) && mode() === "local") {
+        const job = JSON.parse(fs.readFileSync(jobFile, "utf8"));
+        fs.unlinkSync(jobFile);
+        const text = String((job && job.text) || "");
+        const id = job && job.agentId;
+        if (text && id) {
+          setTimeout(() => {
+            try {
+              execFileSync("curl", [
+                "-sS", "-X", "POST", "http://127.0.0.1:1337/api/sendPrompt",
+                "-H", "content-type: application/json",
+                "-H", "authorization: Bearer fake-gateway-token",
+                "-d", JSON.stringify({ agentId: id, prompt: text, awaitTurn: false }),
+              ], { encoding: "utf8", timeout: 8000 });
+            } catch (e) {
+              try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[continue-job] " + e + "\n"); } catch (_) {}
+            }
+          }, 2500);
+        }
+      }
+    } catch (_) {}
     window.__grokd = {
       send: (text) => handleCommand({ id: "api", op: "send", text }),
       setModel: applyModel,

@@ -12,7 +12,7 @@ const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
 
-const ROOT = path.join(os.homedir(), ".grok", "grokbot-d");
+const ROOT = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
 const STYLE_ID = "gd-bot-chatter-css";
 const PICKER_ID = "gd-chatter-picker";
 const THREAD_ID = "gd-chatter-thread";

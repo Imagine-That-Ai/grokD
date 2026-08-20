@@ -19,7 +19,7 @@ fi
 
 # Prefer durable scripts; keep a copy under /tmp for anything still pointed there.
 if [ -d "$DURABLE" ]; then
-  for f in proxy2.js runbox.js fakebox.js protoutil.js local-mcp.js bridge-lib.js gateway-shim.js routine-guard.js; do
+  for f in proxy2.js runbox.js fakebox.js protoutil.js local-mcp.js bridge-lib.js gateway-shim.js routine-guard.js node-deps.js sqlite-ro.js clone-bot.js paths.js; do
     if [ -f "$DURABLE/$f" ]; then
       cp "$DURABLE/$f" "$HACK/$f" 2>/dev/null || true
       if [ -d /tmp/grokbot-hack ] && [ ! -L /tmp/grokbot-hack ]; then

@@ -16,7 +16,7 @@ const READ_OFFICIAL = 'async read(a){if(!t.codec.isAvailable())return null;let l
 const READ_PATCH = 'async read(a){if(!t.codec.isAvailable())return null;let n=async()=>{try{let p=t.filePath.replace(/gateway-descriptor\\.json$/,"sand-data/local-exec-daemon-connection.json");return cBs(JSON.parse(await XYe.promises.readFile(p,"utf8")))}catch{return null}};let l;try{l=await XYe.promises.readFile(t.filePath,"utf8")}catch(u){return lBs(u)?await n():(xe("gateway-descriptor","read",u),null)}try{let u=JSON.parse(l);let x=!J1t(u)||u.version!==K6n||u.accountScope!==a||typeof u.savedAtMs!="number"||e()-u.savedAtMs>r||typeof u.encrypted!="string"?null:cBs(JSON.parse(t.codec.decrypt(u.encrypted)));return x||await n()}catch(u){return xe("gateway-descriptor","decrypt",u),await n()}}';
 
 const AUTH_OFFICIAL = 'Ic.markPhase("auth_service");let a=await u2(),l=FOn({getStatus:()=>a.getStatus()';
-const AUTH_PATCH = 'Ic.markPhase("auth_service");let a=await u2();try{a=require(require("os").homedir()+"/.grok/grokbot-d/profile-auth-preload.js").wrapMainAuth(a)||a}catch{}let l=FOn({getStatus:()=>a.getStatus()';
+const AUTH_PATCH = 'Ic.markPhase("auth_service");let a=await u2();try{const os=require("os"),path=require("path"),root=process.env.GROK_PROFILE_ROOT||path.join(os.homedir(),".grok","grokbot-d");a=require(path.join(root,"profile-auth-preload.js")).wrapMainAuth(a)||a}catch{}let l=FOn({getStatus:()=>a.getStatus()';
 
 const HOOK = `
 

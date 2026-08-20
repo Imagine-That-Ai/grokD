@@ -150,6 +150,48 @@ function pauseLocal() {
   return { localDisabled, saved };
 }
 
+function interruptLocal() {
+  const http = require("http");
+  const payload = Buffer.from("{}");
+  const list = () => new Promise((resolve, reject) => {
+    const req = http.request({
+      host: "127.0.0.1", port: 1337, path: "/api/listAgents", method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer fake-gateway-token", "content-length": payload.length },
+      timeout: 3000,
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); }
+        catch { resolve([]); }
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+    req.write(payload);
+    req.end();
+  });
+  return list().then((agents) => {
+    const arr = Array.isArray(agents) ? agents : [];
+    return Promise.all(arr.map((a) => {
+      if (!a || !a.id) return null;
+      if (!(a.isRunning || a.isComposingMessage || a.isRunningTurn)) return null;
+      const body = Buffer.from(JSON.stringify({ id: a.id }));
+      return new Promise((resolve) => {
+        const req = http.request({
+          host: "127.0.0.1", port: 1337, path: "/api/interruptAgentRun", method: "POST",
+          headers: { "content-type": "application/json", authorization: "Bearer fake-gateway-token", "content-length": body.length },
+          timeout: 3000,
+        }, (res) => { res.resume(); res.on("end", resolve); });
+        req.on("error", () => resolve());
+        req.on("timeout", () => { req.destroy(); resolve(); });
+        req.write(body);
+        req.end();
+      });
+    }));
+  }).catch(() => {});
+}
+
 function resumeLocal(saved) {
   let n = 0;
   for (const row of saved || []) {
@@ -328,7 +370,10 @@ async function pause(opts) {
     return { paused: true, already: true, seats: pausedSeats() };
   }
   let local = { localDisabled: 0, saved: [] };
-  if (pending.includes("local-d")) local = pauseLocal();
+  if (pending.includes("local-d")) {
+    local = pauseLocal();
+    try { interruptLocal(); } catch {}
+  }
   const now = Date.now();
   const next = loadState();
   for (const id of pending) {

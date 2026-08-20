@@ -89,6 +89,7 @@ assert(fs.existsSync(file), file);
 assert(fs.readFileSync(file, "utf8") === pack, "written");
 assert(packBody(file) === pack, "packBody reads file");
 assert(packBody("# already markdown") === "# already markdown", "packBody passthrough");
+assert(packBody("/no/such/handoff-missing.md") === "", "missing pack file is empty not a path");
 ok("pack");
 
 fs.rmSync(tmp, { recursive: true, force: true });

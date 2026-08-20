@@ -6,6 +6,8 @@
 // Does nothing unless evaluate() returned an action. Never kills Grok Bot B.
 "use strict";
 
+const fs = require("fs");
+const path = require("path");
 const fo = require("./failover");
 const store = require("./profile-store");
 
@@ -96,11 +98,20 @@ async function act(decision, deps) {
         switchTo(to, { relaunch: land ? false : deps.relaunch !== false });
       }
       const extra = land ? landLocal(decision, deps) : {};
-      if (land && extra.clone && extra.clone.destId && typeof deps.sendPrompt === "function") {
-        extra.continued = deps.sendPrompt(
-          extra.clone.destId,
-          extra.pack || deps.lastUser || "Continue this work on Local D."
-        );
+      if (land && extra.clone && extra.clone.destId) {
+        const body = extra.pack || deps.lastUser || "Continue this work on Local D.";
+        try {
+          const job = path.join(store.ROOT, "runtime", "continue-job.json");
+          fs.mkdirSync(path.dirname(job), { recursive: true });
+          fs.writeFileSync(job, JSON.stringify({
+            agentId: extra.clone.destId,
+            text: body,
+            at: Date.now(),
+          }) + "\n");
+          extra.continueJob = job;
+        } catch (e) {
+          extra.continueJobError = String(e && e.message || e);
+        }
       }
       if (land && deps.relaunch !== false) {
         if (typeof deps.relaunchD === "function") deps.relaunchD();
