@@ -114,15 +114,20 @@ function resolveConfig() {
   const raw = Object.assign(defaultConfig(), readRaw());
   const target = resolveTarget(raw.proxyTarget);
   const spec = TARGETS[target] || TARGETS.openburnbar;
+  const fellBack = target !== (raw.proxyTarget || "openburnbar");
+  let model = raw.model || "grok-4.6";
+  if (target === "ollama" && (model === "grok-4.6" || !model)) {
+    model = "deepseek-v4-pro:cloud";
+  }
   return {
-    proxyUrl: raw.proxyUrl || spec.url,
+    proxyUrl: fellBack ? spec.url : (raw.proxyUrl || spec.url),
     apiKey: raw.apiKey || "local-cliproxy",
-    model: raw.model || "grok-4.6",
+    model: model,
     proxyTarget: target,
     requestedTarget: raw.proxyTarget || "openburnbar",
     cursorAccount: raw.cursorAccount || "Primary Cursor Account",
     payingProfileId: raw.payingProfileId || null,
-    fellBack: target !== (raw.proxyTarget || "openburnbar"),
+    fellBack,
   };
 }
 

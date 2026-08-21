@@ -6,6 +6,19 @@ HACK="${GROKBOT_HACK:-$DURABLE/hack}"
 NODE="${NODE:-$(command -v node)}"
 mkdir -p "$HACK/box-data/agents" "$HACK/box-data/workspace"
 
+if [ -z "$(ls -A "$HACK/box-data/agents" 2>/dev/null)" ]; then
+  DEFAULT_ID="d0000000-0000-0000-0000-000000000001"
+  mkdir -p "$HACK/box-data/agents/$DEFAULT_ID/memory/log"
+  cat > "$HACK/box-data/agents/$DEFAULT_ID/profile.json" <<'EOF'
+{
+  "name": "Local D",
+  "description": "Your local AI companion",
+  "origin": "user"
+}
+EOF
+  echo "{}" > "$HACK/box-data/agents/$DEFAULT_ID/settings.json"
+fi
+
 if [ -x "$DURABLE/install-runtime.sh" ]; then
   "$DURABLE/install-runtime.sh" "$DURABLE" >/tmp/grokbot-d-install.log 2>&1 || true
 fi

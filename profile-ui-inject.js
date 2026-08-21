@@ -1897,7 +1897,10 @@
 
   function skyHost() {
     return document.querySelector(".sand-access-cover")
-      || document.querySelector(".sand-onboarding__landing");
+      || document.querySelector(".sand-onboarding__landing")
+      || document.querySelector("[class*='onboarding']")
+      || document.querySelector("[class*='landing']")
+      || document.querySelector("[class*='sand-access']");
   }
 
   function skyCleared() {

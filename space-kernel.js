@@ -61,7 +61,10 @@ function onSky() {
     if (typeof window !== "undefined" && window.__gdSkyCleared) return false;
   } catch (_) {}
   const n = document.querySelector(".sand-access-cover")
-    || document.querySelector(".sand-onboarding__landing");
+    || document.querySelector(".sand-onboarding__landing")
+    || document.querySelector("[class*='onboarding']")
+    || document.querySelector("[class*='landing']")
+    || document.querySelector("[class*='sand-access']");
   if (!n) return false;
   try {
     if (n.style && n.style.display === "none") return false;

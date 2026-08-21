@@ -280,8 +280,11 @@ fi
 SIGN_LOG=/tmp/grokD-install-codesign.out
 if [ -n "$SIGN_ID" ]; then
   echo "sign    $SIGN_ID"
-  codesign --force --deep --sign "$SIGN_ID" --options runtime --timestamp --entitlements "$ENTS" "$DEST" >"$SIGN_LOG" 2>&1 \
-    || die "codesign with Developer ID failed (see $SIGN_LOG)"
+  if ! codesign --force --deep --sign "$SIGN_ID" --options runtime --timestamp --entitlements "$ENTS" "$DEST" >"$SIGN_LOG" 2>&1; then
+    echo "warn: Developer ID signing failed (keychain locked or unattended?); falling back to ad-hoc sign"
+    codesign --force --deep --sign - --options runtime --timestamp=none --entitlements "$ENTS" "$DEST" >"$SIGN_LOG" 2>&1 \
+      || die "ad-hoc codesign failed (see $SIGN_LOG)"
+  fi
 else
   echo "sign    ad-hoc (no Developer ID on this Mac — local build only)"
   codesign --force --deep --sign - --options runtime --timestamp=none --entitlements "$ENTS" "$DEST" >"$SIGN_LOG" 2>&1 \
