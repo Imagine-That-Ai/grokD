@@ -53,6 +53,7 @@ jobs:
           node test-clone-handoff.js
           node test-space-holes.js
           node test-install-look.js
+          node test-liquid-glass-btn.js
       - name: no kitchen leftovers
         run: |
           python3 - <<'PY'
