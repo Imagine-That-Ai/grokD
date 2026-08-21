@@ -477,27 +477,35 @@
         transform: translateX(-50%);
         z-index: 999993;
         display: flex;
-        gap: 8px;
+        gap: 3px;
+        padding: 4px;
         pointer-events: auto;
-      }
-      #gd-sky-actions button {
-        min-height: 32px;
-        padding: 0 14px;
-        cursor: pointer;
         border-radius: 999px;
-        font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
-        letter-spacing: 0.03em;
-        color: var(--gd-text);
-        border: 1px solid var(--gd-border);
-        background: var(--gd-card-bg);
-        box-shadow: var(--gd-shadow);
-        backdrop-filter: blur(14px) saturate(160%);
-        -webkit-backdrop-filter: blur(14px) saturate(160%);
+        background: var(--gdg-shell, var(--gd-card-bg));
+        backdrop-filter: var(--gdg-blur, blur(34px) saturate(185%));
+        -webkit-backdrop-filter: var(--gdg-blur, blur(34px) saturate(185%));
+        border: 1px solid var(--gdg-border, var(--gd-border));
+        box-shadow: var(--gdg-lift, var(--gd-shadow)), var(--gdg-bevel, inset 0 1px 0 rgba(255,255,255,0.22));
+        color: var(--gdg-text, var(--gd-text));
+        opacity: 1;
+        transition: opacity .2s ease;
       }
+      #gd-sky-actions.is-out { opacity: 0; pointer-events: none; }
+      #gd-sky-actions button {
+        min-height: 30px;
+        padding: 0 13px;
+        cursor: pointer;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+        letter-spacing: 0.02em;
+        color: inherit;
+      }
+      #gd-sky-actions button:hover { background: var(--gdg-chip, rgba(255,255,255,0.08)); }
       #gd-sky-continue {
-        background: rgba(244,241,234,0.92);
-        color: #16171d;
-        border-color: rgba(244,241,234,0.4);
+        background: var(--gdg-chip, rgba(255,255,255,0.12));
+        box-shadow: var(--gdg-bevel, inset 0 1px 0 rgba(255,255,255,0.22));
       }
       .gd-quota {
         display:flex; align-items:center; gap:5px; width:100%;
@@ -1865,21 +1873,32 @@
       || document.querySelector(".sand-onboarding__landing");
   }
 
-  function dismissSky() {
-    window.__gdSkyCleared = true;
+  function skyCleared() {
+    if (window.__gdSkyCleared) return true;
+    return !!uiPrefs().skyCleared;
+  }
+
+  function hideSkySurfaces() {
     document.querySelectorAll(".sand-access-cover, .sand-onboarding__landing").forEach((n) => {
       n.style.display = "none";
       n.setAttribute("aria-hidden", "true");
     });
+  }
+
+  function dismissSky() {
+    window.__gdSkyCleared = true;
+    setUiPref("skyCleared", true);
+    hideSkySurfaces();
     const bar = document.getElementById("gd-sky-actions");
-    if (bar) bar.remove();
+    if (!bar) return;
+    bar.classList.add("is-out");
+    setTimeout(() => { if (bar.parentNode) bar.remove(); }, 220);
   }
 
   function mountSkyActions() {
-    if (window.__gdSkyCleared) {
-      document.querySelectorAll(".sand-access-cover, .sand-onboarding__landing").forEach((n) => {
-        if (n.style.display !== "none") n.style.display = "none";
-      });
+    if (skyCleared()) {
+      window.__gdSkyCleared = true;
+      hideSkySurfaces();
       const leftover = document.getElementById("gd-sky-actions");
       if (leftover) leftover.remove();
       return;
@@ -1915,6 +1934,7 @@
     bar.querySelector("#gd-sky-cursor").addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      dismissSky();
       startOnboarding(true);
     });
   }
@@ -3549,6 +3569,9 @@
   }
 
   function inject() {
+    try {
+      if (uiPrefs().skyCleared) window.__gdSkyCleared = true;
+    } catch (_) {}
     restoreGorgeousUi();
     // Real picker is the packed liquid-glass orbs. Do not draw a second bar.
     // Give those orbs a soap-bubble rim that reflects their own contents.
