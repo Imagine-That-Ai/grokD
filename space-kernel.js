@@ -56,6 +56,89 @@ function kernelHost() {
     || document.body;
 }
 
+function onSky() {
+  return !!(document.querySelector(".sand-access-cover")
+    || document.querySelector(".sand-onboarding__landing"));
+}
+
+function isListAvatar(el) {
+  if (!el || typeof el.closest !== "function") return false;
+  if (el.id === "gd-grok-hero") return false;
+  return !!(el.closest(".sand-agent-item")
+    || el.closest("[class*='agent-item']")
+    || el.closest(".sand-agent-item__avatar-disc"));
+}
+
+const HERO_SIZE = 196;
+
+function officialHeroMark() {
+  const nodes = document.querySelectorAll(".sand-grok-bot-mark");
+  let best = null;
+  let bestW = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (!n || n.id === "gd-grok-hero" || isListAvatar(n)) continue;
+    const r = n.getBoundingClientRect();
+    if (r.width > bestW) {
+      best = n;
+      bestW = r.width;
+    }
+  }
+  return bestW >= 72 ? best : null;
+}
+
+function grokSvgHtml() {
+  const official = officialHeroMark();
+  const marks = document.querySelectorAll(".sand-grok-bot-mark");
+  let any = official;
+  for (let i = 0; !any && i < marks.length; i++) {
+    if (marks[i].id !== "gd-grok-hero" && marks[i].querySelector("svg")) any = marks[i];
+  }
+  if (any) {
+    const svg = any.querySelector("svg");
+    if (svg) return svg.outerHTML;
+  }
+  const g = document.querySelector("[id^='sand-agent-mark-source-']");
+  if (g) {
+    return '<svg viewBox="-15 -15 259 259" style="display:block;width:100%;height:100%;overflow:visible"><use href="#' + g.id + '"></use></svg>';
+  }
+  return "";
+}
+
+function ensureHeroMark() {
+  if (!wrap) return null;
+  let hero = document.getElementById("gd-grok-hero");
+  if (!hero) {
+    hero = document.createElement("div");
+    hero.id = "gd-grok-hero";
+    hero.className = "sand-grok-bot-mark";
+    hero.setAttribute("aria-hidden", "true");
+    const sats = document.getElementById("gd-sats") || layer;
+    if (sats && sats.parentNode === wrap) wrap.insertBefore(hero, sats);
+    else wrap.appendChild(hero);
+  }
+  const html = grokSvgHtml();
+  if (html && hero.getAttribute("data-src") !== html.slice(0, 120)) {
+    hero.innerHTML = html;
+    hero.setAttribute("data-src", html.slice(0, 120));
+  }
+  hero.style.position = "absolute";
+  hero.style.width = HERO_SIZE + "px";
+  hero.style.height = HERO_SIZE + "px";
+  hero.style.zIndex = "5";
+  hero.style.pointerEvents = "none";
+  hero.style.overflow = "visible";
+  hero.style.margin = "0";
+  return hero;
+}
+
+function placeHero(cx, cy) {
+  const hero = ensureHeroMark();
+  if (!hero) return;
+  hero.style.left = (cx - HERO_SIZE / 2).toFixed(2) + "px";
+  hero.style.top = (cy - HERO_SIZE / 2).toFixed(2) + "px";
+}
+
 function rng(seed) {
   let s = seed >>> 0;
   return () => {
@@ -388,9 +471,11 @@ function markSpan() {
   const wb = wrap.getBoundingClientRect();
   let x0 = Infinity;
   let x1 = -Infinity;
-  const sel = [".sand-grok-bot-mark", "#sand-access-cover-heading", ".sand-access-cover h1"];
-  for (let i = 0; i < sel.length; i++) {
-    const n = document.querySelector(sel[i]);
+  const nodes = [officialHeroMark(), document.getElementById("gd-grok-hero"),
+    document.querySelector("#sand-access-cover-heading"),
+    document.querySelector(".sand-access-cover h1")];
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
     if (!n) continue;
     const r = n.getBoundingClientRect();
     if (!r.width) continue;
@@ -541,24 +626,24 @@ function stepSats(dt) {
 function botCenter() {
   if (!wrap) return null;
   const wb = wrap.getBoundingClientRect();
-  const mark = document.querySelector(".sand-grok-bot-mark");
+  const official = officialHeroMark();
   const heading = document.querySelector("#sand-access-cover-heading")
-    || document.querySelector(".sand-access-cover h1");
-  const target = (mark && mark.getBoundingClientRect().width) ? mark
-    : (heading && heading.getBoundingClientRect().width) ? heading
-    : null;
+    || document.querySelector(".sand-access-cover h1")
+    || document.querySelector(".sand-onboarding__landing h1");
+  const target = official
+    || ((heading && heading.getBoundingClientRect().width) ? heading : null);
   if (target) {
     const mb = target.getBoundingClientRect();
     return {
       x: mb.left + mb.width / 2 - wb.left,
       y: mb.top + mb.height / 2 - wb.top,
-      mark: mark || null,
+      mark: official || null,
     };
   }
   return {
     x: Math.max(1, wb.width) / 2,
     y: Math.max(1, wb.height) * 0.42,
-    mark: null,
+    mark: document.getElementById("gd-grok-hero"),
   };
 }
 
@@ -850,11 +935,11 @@ function pearlHex(t) {
 function frame(now) {
   if (!running) return;
   raf = requestAnimationFrame(frame);
-  const onCover = !!(document.querySelector(".sand-access-cover")
-    || document.querySelector(".sand-onboarding__landing"));
-  if (wrap) wrap.style.display = onCover ? "block" : "none";
-  if (!onCover) return;
+  const sky = onSky();
+  if (wrap) wrap.style.display = sky ? "block" : "none";
+  if (!sky) return;
   if (!wrap || !wrap.isConnected) ensureDom();
+  ensureHeroMark();
   const c = botCenter();
   if (!c || !far || !far._ctx) return;
   const dt = reduced ? 0 : Math.min(DT_MAX, last ? (now - last) / 1000 : 0.016);
@@ -892,6 +977,7 @@ function frame(now) {
   near._ctx.clearRect(0, 0, near._w, near._h);
   drawDust(near._ctx, c.x, c.y, pitch, yaw, true);
   placeSats(c.x, c.y, pitch, yaw);
+  placeHero(c.x, c.y);
   hideLava();
 }
 
@@ -1020,4 +1106,5 @@ module.exports = {
   seedHoles, makeHole, tickHoles, clearOfMark, refSize, makeNebula, tickNebulas,
   pickBand, SIZE_BANDS, TEMP_BANDS,
   HOLE_MIN, HOLE_MAX, MARCH_R, DISK_R,
+  isListAvatar, officialHeroMark, onSky,
 };
