@@ -139,4 +139,15 @@ ok("succession");
 }
 ok("setScheme");
 
-console.log(`\n${n}/7 space-hole checks passed`);
+{
+  assert(k.isListAvatar(null) === false, "null");
+  assert(k.isListAvatar({}) === false, "plain object");
+  assert(typeof k.officialHeroMark === "function", "hero picker");
+  assert(typeof k.onSky === "function", "sky host");
+  const src = require("fs").readFileSync(require("path").join(__dirname, "space-kernel.js"), "utf8");
+  assert(src.includes("gd-grok-hero"), "kernel paints the grok bot in the hole");
+  assert(src.includes("isListAvatar"), "ignores sidebar avatars");
+}
+ok("hero-mark");
+
+console.log(`\n${n}/8 space-hole checks passed`);

@@ -462,6 +462,13 @@
       #gd-kernel-far { z-index: 1; }
       #gd-kernel-near { z-index: 3; }
       #gd-sats { z-index: 4; }
+      #gd-grok-hero {
+        position: absolute !important;
+        z-index: 5 !important;
+        pointer-events: none !important;
+        overflow: visible !important;
+      }
+      #gd-grok-hero svg { width: 100%; height: 100%; display: block; overflow: visible; }
       .gd-quota {
         display:flex; align-items:center; gap:5px; width:100%;
         margin-top:3px;
@@ -1648,31 +1655,26 @@
     catch { return; }
     const pack = logos.ORBITERS || [];
     const tints = logos.TINTS || ["#F4F1EA"];
+    let kernel = null;
     try {
-      const kernel = require(path.join(ROOT, "space-kernel.js"));
+      kernel = require(path.join(ROOT, "space-kernel.js"));
       kernel.start(pack);
     } catch (e) {
       try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[kernel] " + e + "\n"); } catch (_) {}
     }
 
-    const mark = document.querySelector(".sand-grok-bot-mark");
-    if (!mark) return;
-    stripGlasses(mark);
-    mark.style.position = "relative";
-    mark.style.overflow = "visible";
-    mark.style.zIndex = "5";
-    let climb = mark.parentElement;
-    for (let i = 0; i < 4 && climb; i++) {
-      climb.style.overflow = "visible";
-      climb = climb.parentElement;
-    }
     const leftover = document.getElementById("gd-orbit");
     if (leftover) leftover.remove();
-
+    const mark = document.getElementById("gd-grok-hero")
+      || (kernel && kernel.officialHeroMark && kernel.officialHeroMark());
+    if (!mark) return;
+    stripGlasses(mark);
+    mark.style.overflow = "visible";
     applyBotTint(mark, tints);
     if (!mark._gdTintCycle) {
       mark._gdTintCycle = setInterval(() => {
-        const live = document.querySelector(".sand-grok-bot-mark");
+        const live = document.getElementById("gd-grok-hero")
+          || (kernel && kernel.officialHeroMark && kernel.officialHeroMark());
         if (!live) {
           clearInterval(mark._gdTintCycle);
           mark._gdTintCycle = null;
@@ -1723,12 +1725,7 @@
   }
 
   function mountCoverSchemeToggle(cover) {
-    const host = (cover && cover.classList && (
-      cover.classList.contains("sand-access-cover")
-      || cover.classList.contains("sand-onboarding__landing")
-    ))
-      ? cover
-      : document.body;
+    const host = document.body;
     if (!host) return;
     let btn = document.getElementById("gd-scheme-toggle");
     if (!btn) {
