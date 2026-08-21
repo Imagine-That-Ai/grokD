@@ -174,6 +174,14 @@ function applyAuthPolicy(Q) {
     getSandAccessFresh: async function () {
       return { state: "granted", reason: "none" };
     },
+    login: async function () {
+      log("local-login-noop");
+      return LOCAL_STATUS;
+    },
+    logout: async function () {
+      log("local-logout-noop");
+      return LOCAL_STATUS;
+    },
     getAvatar: async function () { return null; },
     getWeeklyUsage: async function () { return null; },
     getUsageSummary: async function () { return null; },
@@ -193,9 +201,11 @@ function isLocalMode() {
       require("path").join(profileRoot(), "active-env.json"),
       "utf8"
     ));
-    return env && env.mode === "local";
+    const mode = env && env.mode ? env.mode : "local";
+    if (mode === "local") return true;
+    return String((env && env.profileId) || "").indexOf("local") === 0;
   } catch (e) {
-    return false;
+    return true;
   }
 }
 
@@ -217,6 +227,17 @@ function wrapMainAuth(svc) {
       });
     };
   }
+  ["login", "logout"].forEach((name) => {
+    if (typeof svc[name] !== "function") return;
+    const orig = svc[name].bind(svc);
+    svc[name] = async function () {
+      if (isLocalMode()) {
+        log("local-" + name + "-noop");
+        return Object.assign({}, LOCAL_STATUS);
+      }
+      return orig.apply(this, arguments);
+    };
+  });
   log("wrap-main-auth local=" + isLocalMode());
   return svc;
 }

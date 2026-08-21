@@ -76,8 +76,24 @@ function accountAvatarDataUrl(status) {
   return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
 }
 
+function isLocalSeat(seat) {
+  return /^local-/i.test(String(seat || ""));
+}
+
 function formatCursorAccount(status, seat) {
-  const letter = String(seat || "").replace(/^cursor-/i, "").toUpperCase() || "Cursor";
+  const sid = String(seat || "");
+  if (isLocalSeat(sid)) {
+    return {
+      title: "D · Local",
+      detail: "This Mac",
+      signedIn: true,
+      email: "",
+      hover: "Local bots on this Mac — no Cursor sign-in",
+      letter: "D",
+      provider: "Local",
+    };
+  }
+  const letter = sid.replace(/^cursor-/i, "").toUpperCase() || "Cursor";
   if (!status || status.kind === "logged-out" || status.kind === "unknown") {
     return {
       title: letter + " · signed out",
@@ -171,6 +187,13 @@ function rememberStatus(status, profileId) {
 function enrichStatus(status, opts) {
   const profileId = opts && opts.profileId;
   const st = status && typeof status === "object" ? Object.assign({}, status) : { kind: "unknown" };
+  if (isLocalSeat(profileId)) {
+    st.kind = "logged-in";
+    if (!st.name && !st.displayName) st.name = "Local D";
+    if (!st.provider) st.provider = "local";
+    if (!st.authId) st.authId = "local|d";
+    return st;
+  }
   const cached = (st.authId && cacheForAuthId(st.authId)) || (profileId && readCache(profileId)) || null;
   if (cached && !(st.authId && cached.authId && st.authId !== cached.authId)) {
     if (!st.email && cached.email) st.email = cached.email;
@@ -603,6 +626,7 @@ module.exports = {
   letterFor,
   accountAvatarDataUrl,
   formatCursorAccount,
+  isLocalSeat,
   readCache,
   writeCache,
   cacheForAuthId,

@@ -80,6 +80,24 @@ const ok = (name) => { n++; console.log("PASS ", name); };
 }
 
 {
+  const loc = acc.formatCursorAccount({ kind: "logged-out" }, "local-d");
+  assert(loc.signedIn === true, "local-d is signed in on this Mac");
+  assert(loc.detail === "This Mac", loc.detail);
+  assert(loc.provider === "Local", loc.provider);
+  assert(!/clean browser/i.test(loc.detail + loc.hover + loc.title), loc.hover);
+  const loc2 = acc.formatCursorAccount({ kind: "unknown" }, "local-box");
+  assert(loc2.signedIn === true, "other local-* seats skip Cursor login");
+  const cur = acc.formatCursorAccount({ kind: "logged-out" }, "cursor-c");
+  assert(cur.signedIn === false, "cursor still signs out");
+  assert(/clean browser/i.test(cur.detail), cur.detail);
+  const en = acc.enrichStatus({ kind: "logged-out" }, { profileId: "local-d" });
+  assert(en.kind === "logged-in", en.kind);
+  assert(en.provider === "local", en.provider);
+  assert(acc.isLocalSeat("local-d") && !acc.isLocalSeat("cursor-a"), "isLocalSeat");
+  ok("local-d-no-cursor-signin");
+}
+
+{
   const url = acc.accountAvatarDataUrl({ kind: "logged-in", authId: "github|user_01AAA" });
   assert(url.startsWith("data:image/svg+xml"), url.slice(0, 40));
   assert(decodeURIComponent(url).includes(">G<"), "letter");

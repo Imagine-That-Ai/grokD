@@ -44,6 +44,11 @@ function setScheme(next) {
   return { scheme: schemeOverride || "auto", light: isLight() };
 }
 
+function overlayRoot() {
+  return process.env.GROK_PROFILE_ROOT
+    || require("path").join(require("os").homedir(), ".grok", "grokbot-d");
+}
+
 function kernelHost() {
   return document.querySelector(".sand-access-cover")
     || document.querySelector(".sand-onboarding__landing")
@@ -560,8 +565,9 @@ function botCenter() {
 function resizeCanvases() {
   if (!wrap || !far || !near) return;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const w = Math.max(1, wrap.clientWidth);
-  const h = Math.max(1, wrap.clientHeight);
+  const w = Math.max(1, wrap.clientWidth || window.innerWidth);
+  const h = Math.max(1, wrap.clientHeight || window.innerHeight);
+  if (far._w === w && far._h === h && far._dpr === dpr) return;
   [far, near].forEach((c) => {
     c.width = Math.floor(w * dpr);
     c.height = Math.floor(h * dpr);
@@ -572,6 +578,7 @@ function resizeCanvases() {
     c._ctx = ctx;
     c._w = w;
     c._h = h;
+    c._dpr = dpr;
   });
   if (glApi) {
     try {
@@ -843,9 +850,11 @@ function pearlHex(t) {
 function frame(now) {
   if (!running) return;
   raf = requestAnimationFrame(frame);
-  const host = kernelHost();
-  if (!host) return;
-  if (!wrap || wrap.parentNode !== host) ensureDom();
+  const onCover = !!(document.querySelector(".sand-access-cover")
+    || document.querySelector(".sand-onboarding__landing"));
+  if (wrap) wrap.style.display = onCover ? "block" : "none";
+  if (!onCover) return;
+  if (!wrap || !wrap.isConnected) ensureDom();
   const c = botCenter();
   if (!c || !far || !far._ctx) return;
   const dt = reduced ? 0 : Math.min(DT_MAX, last ? (now - last) / 1000 : 0.016);
@@ -904,6 +913,7 @@ function ensureDom() {
     wrap.style.pointerEvents = "none";
     wrap.style.zIndex = "0";
     wrap.style.opacity = "1";
+    wrap.style.display = "block";
     glCanvas = document.createElement("canvas");
     glCanvas.id = "gd-kernel-gl";
     far = document.createElement("canvas");
@@ -917,7 +927,7 @@ function ensureDom() {
     wrap.appendChild(near);
     wrap.appendChild(layer);
     try {
-      glApi = require(require("os").homedir() + "/.grok/grokbot-d/space-field-gl.js").create(glCanvas);
+      glApi = require(require("path").join(overlayRoot(), "space-field-gl.js")).create(glCanvas);
     } catch (e) {
       try { require("fs").appendFileSync("/tmp/grokbot-renderer.log", "[gl] " + e + "\n"); } catch (_) {}
       glApi = null;
@@ -929,7 +939,7 @@ function ensureDom() {
     layer = document.getElementById("gd-sats");
     glCanvas = document.getElementById("gd-kernel-gl");
     if (glCanvas && !glApi) {
-      try { glApi = require(require("os").homedir() + "/.grok/grokbot-d/space-field-gl.js").create(glCanvas); }
+      try { glApi = require(require("path").join(overlayRoot(), "space-field-gl.js")).create(glCanvas); }
       catch (_) { glApi = null; }
     }
   }
