@@ -94,6 +94,26 @@ function docFrom(map) {
 }
 
 {
+  const next = node({ textContent: "Next" });
+  const d = docFrom({ "button, [role='button'], a": [next] });
+  const r = enterChat(d);
+  assert(r.action === "clicked-next", r.action);
+  assert(next.clicked === 1, "clicked Next");
+  ok("clicks-onboarding-next");
+}
+
+{
+  const sign = node({ textContent: "Sign in" });
+  let created = 0;
+  const d = docFrom({ "button, [role='button'], a": [sign] });
+  const r = enterChat(d, { createNamed() { created += 1; } });
+  assert(sign.clicked === 0, "must not click Sign in");
+  assert(r.action === "box-create", r.action);
+  assert(created === 1, "fell through to box create");
+  ok("never-sign-in");
+}
+
+{
   let created = 0;
   const d = docFrom({});
   const r = enterChat(d, { createNamed() { created += 1; } });

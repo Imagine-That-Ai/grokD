@@ -87,6 +87,8 @@ function enterChat(doc, opts) {
   }
   const created = clickLabeled(doc, /^Create new Bot$/i) || clickLabeled(doc, /^Create new$/i);
   if (created) return { action: "clicked-create", label: created, ok: false };
+  const next = clickLabeled(doc, /^(Next|Skip|Get started|Done)$/i);
+  if (next) return { action: "clicked-next", label: next, ok: false };
   const cancel = clickLabeled(doc, /^Cancel$/i);
   if (cancel) return { action: "clicked-cancel", ok: false };
   if (typeof opts.createNamed === "function") {
