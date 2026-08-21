@@ -1822,9 +1822,12 @@
 
   function enhanceCoverScreen() {
     const cover = document.querySelector(".sand-access-cover")
-      || document.querySelector(".sand-onboarding__landing")
-      || document.body;
-    if (!cover) return;
+      || document.querySelector(".sand-onboarding__landing");
+    if (!cover || (cover.style && cover.style.display === "none") || skyCleared()) {
+      const toggle = document.getElementById("gd-scheme-toggle");
+      if (toggle && toggle.parentNode) toggle.remove();
+      return;
+    }
     try { punchCoverSky(cover); } catch (_) {}
     try { mountCoverSchemeToggle(cover); } catch (_) {}
     const h1 = cover.querySelector("#sand-access-cover-heading") || cover.querySelector("h1");
@@ -1898,9 +1901,8 @@
   function skyHost() {
     return document.querySelector(".sand-access-cover")
       || document.querySelector(".sand-onboarding__landing")
-      || document.querySelector("[class*='onboarding']")
-      || document.querySelector("[class*='landing']")
-      || document.querySelector("[class*='sand-access']");
+      || document.querySelector(".sand-onboarding")
+      || document.querySelector(".sand-landing");
   }
 
   function skyCleared() {

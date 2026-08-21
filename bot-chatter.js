@@ -925,11 +925,9 @@ function preview(mode) {
 
 let observer = null;
 
-// A recycled row can keep its node and swap only the key and the text, so
-// childList alone would leave a marker sitting on someone else's message.
 const OBSERVE = {
-  childList: true, subtree: true, characterData: true,
-  attributes: true, attributeFilter: ["data-row-key"],
+  childList: true, subtree: true,
+  attributes: true, attributeFilter: ["data-row-key", "data-role"],
 };
 
 function start() {
