@@ -131,7 +131,6 @@ const CSS = `
 #grok-profile-sheet .gp-kind { color: var(--gdg-text) !important; }
 
 #grok-d-toast,
-#gd-sky-actions,
 #gd-scheme-toggle {
   background: var(--gdg-shell) !important;
   backdrop-filter: var(--gdg-blur) !important;
@@ -139,11 +138,6 @@ const CSS = `
   border: 1px solid var(--gdg-border) !important;
   color: var(--gdg-text) !important;
   box-shadow: var(--gdg-lift), var(--gdg-bevel) !important;
-}
-#gd-sky-actions button { color: var(--gdg-text) !important; }
-#gd-sky-continue {
-  background: var(--gdg-chip) !important;
-  box-shadow: var(--gdg-bevel) !important;
 }
 `;
 

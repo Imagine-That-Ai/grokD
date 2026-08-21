@@ -41,6 +41,7 @@ ok("tracked-face-tat-icon");
     "space-field-gl.js",
     "provider-logos.js",
     "glass-theme.js",
+    "liquid-glass-btn.js",
     "profile-ui-inject.js",
     "assets/lobe/openai.svg",
     "assets/lobe/anthropic.svg",
@@ -84,9 +85,14 @@ ok("install-sh-ships-look");
   assert(inject.includes("Set up with Cursor"), "cursor setup on the sky page");
   assert(inject.includes("This Mac only"), "local-only on the sky page");
   assert(inject.includes("skyCleared"), "sky actions last only until you pick");
-  assert(inject.includes("--gdg-shell") || inject.includes("gdg-blur"), "sky actions are liquid glass");
-  const glass = read("glass-theme.js");
-  assert(glass.includes("#gd-sky-actions"), "glass theme covers the sky bar");
+  assert(inject.includes("liquid-glass-btn.js"), "sky buttons use the glass renderer");
+  assert(inject.includes("gd-lg-btn"), "three separate glass buttons");
+  const lg = read("liquid-glass-btn.js");
+  assert(lg.includes("sdRoundBox"), "volume sdf");
+  assert(lg.includes("dFdx"), "volumetric normals");
+  assert(lg.includes("1.14") && lg.includes("0.86"), "chromatic IOR split");
+  assert(lg.includes("cau"), "caustics");
+  assert(!read("glass-theme.js").includes("#gd-sky-actions"), "no blur-panel override on sky buttons");
   assert(inject.includes('grok<span class="gd-qd">"D"</span>'), "wordmark is grok\"D\" as one mark");
   assert(inject.includes("border-radius: 12px !important"), "seat menu is a card, not an oval");
   assert(inject.includes("function isLocalSeat"), "local seat helper");

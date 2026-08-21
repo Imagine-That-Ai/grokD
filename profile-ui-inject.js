@@ -477,35 +477,44 @@
         transform: translateX(-50%);
         z-index: 999993;
         display: flex;
-        gap: 3px;
-        padding: 4px;
+        gap: 14px;
+        padding: 0;
         pointer-events: auto;
-        border-radius: 999px;
-        background: var(--gdg-shell, var(--gd-card-bg));
-        backdrop-filter: var(--gdg-blur, blur(34px) saturate(185%));
-        -webkit-backdrop-filter: var(--gdg-blur, blur(34px) saturate(185%));
-        border: 1px solid var(--gdg-border, var(--gd-border));
-        box-shadow: var(--gdg-lift, var(--gd-shadow)), var(--gdg-bevel, inset 0 1px 0 rgba(255,255,255,0.22));
-        color: var(--gdg-text, var(--gd-text));
+        background: none;
+        border: 0;
+        box-shadow: none;
         opacity: 1;
         transition: opacity .2s ease;
       }
       #gd-sky-actions.is-out { opacity: 0; pointer-events: none; }
-      #gd-sky-actions button {
-        min-height: 30px;
-        padding: 0 13px;
-        cursor: pointer;
+      #gd-sky-actions .gd-lg-btn {
+        position: relative;
+        isolation: isolate;
+        min-height: 40px;
+        padding: 0 22px;
         border: 0;
         border-radius: 999px;
         background: transparent;
-        font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
-        letter-spacing: 0.02em;
-        color: inherit;
+        color: #f4f1ea;
+        font: 650 12px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        letter-spacing: 0.01em;
+        cursor: pointer;
+        overflow: hidden;
+        transform-origin: 50% 80%;
       }
-      #gd-sky-actions button:hover { background: var(--gdg-chip, rgba(255,255,255,0.08)); }
-      #gd-sky-continue {
-        background: var(--gdg-chip, rgba(255,255,255,0.12));
-        box-shadow: var(--gdg-bevel, inset 0 1px 0 rgba(255,255,255,0.22));
+      #gd-sky-actions .gd-lg-btn canvas.gd-lg-glass {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        border-radius: inherit;
+      }
+      #gd-sky-actions .gd-lg-btn span {
+        position: relative;
+        z-index: 1;
+        pointer-events: none;
+        text-shadow: 0 1px 10px rgba(0,0,0,0.58);
       }
       .gd-quota {
         display:flex; align-items:center; gap:5px; width:100%;
@@ -1891,6 +1900,7 @@
     hideSkySurfaces();
     const bar = document.getElementById("gd-sky-actions");
     if (!bar) return;
+    try { require(path.join(ROOT, "liquid-glass-btn.js")).stop(); } catch (_) {}
     bar.classList.add("is-out");
     setTimeout(() => { if (bar.parentNode) bar.remove(); }, 220);
   }
@@ -1901,20 +1911,22 @@
       hideSkySurfaces();
       const leftover = document.getElementById("gd-sky-actions");
       if (leftover) leftover.remove();
+      try { require(path.join(ROOT, "liquid-glass-btn.js")).stop(); } catch (_) {}
       return;
     }
     if (!skyHost()) {
       const leftover = document.getElementById("gd-sky-actions");
       if (leftover) leftover.remove();
+      try { require(path.join(ROOT, "liquid-glass-btn.js")).stop(); } catch (_) {}
       return;
     }
     if (document.getElementById("gd-sky-actions")) return;
     const bar = document.createElement("div");
     bar.id = "gd-sky-actions";
     bar.innerHTML = `
-      <button type="button" id="gd-sky-continue">Continue</button>
-      <button type="button" id="gd-sky-local">This Mac only</button>
-      <button type="button" id="gd-sky-cursor">Set up with Cursor</button>
+      <button type="button" class="gd-lg-btn" id="gd-sky-continue">Continue</button>
+      <button type="button" class="gd-lg-btn" id="gd-sky-local">This Mac only</button>
+      <button type="button" class="gd-lg-btn" id="gd-sky-cursor">Set up with Cursor</button>
     `;
     document.body.appendChild(bar);
     bar.querySelector("#gd-sky-continue").addEventListener("click", (e) => {
@@ -1937,6 +1949,7 @@
       dismissSky();
       startOnboarding(true);
     });
+    try { require(path.join(ROOT, "liquid-glass-btn.js")).start(bar); } catch (_) {}
   }
 
   async function keepCursorComputer() {
