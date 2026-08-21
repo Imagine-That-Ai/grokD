@@ -38,6 +38,10 @@ ok("login-urls");
   const out = br.formatCursorAccount({ kind: "logged-out" }, "cursor-c");
   assert(out.title === "C · signed out", out.title);
   assert(out.signedIn === false, "out");
+  const loc = br.formatCursorAccount({ kind: "logged-out" }, "local-d");
+  assert(loc.signedIn === true, "local-d");
+  assert(loc.detail === "This Mac", loc.detail);
+  assert(!/clean browser/i.test(loc.detail), loc.detail);
   ok("account-label");
 }
 

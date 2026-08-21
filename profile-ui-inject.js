@@ -35,6 +35,12 @@
     try { return load().activeId || "cursor"; } catch { return "cursor"; }
   }
 
+  function isLocalSeat(id) {
+    const sid = String(id || activeId() || "");
+    if (mode() === "local") return true;
+    return sid === "local-d" || sid.indexOf("local-") === 0;
+  }
+
   // In the renderer, process.execPath is the Electron binary. Handed a script
   // path it launches a second app instance and ignores the script entirely, so
   // every profile command silently did nothing. ELECTRON_RUN_AS_NODE makes the
@@ -403,10 +409,12 @@
         background: transparent;
         overflow: hidden;
       }
-      #sand-app,
-      body {
-        background: #050508 !important;
+      html, body { background: #050508; }
+      body:has(.sand-access-cover) #sand-app,
+      body:has(.sand-onboarding__landing) #sand-app {
+        background: transparent !important;
       }
+      #gd-kernel { z-index: 1 !important; }
       .sand-access-cover,
       .sand-onboarding__landing {
         background: transparent !important;
@@ -1096,6 +1104,20 @@
       const ringEl = v.querySelector("#gv-avatar-ring");
       if (!accEl || !dotEl || !statEl) return;
 
+      if (isLocalSeat(id) || (st && st.provider === "local")) {
+        accEl.textContent = "Local D";
+        dotEl.style.background = "var(--gd-green)";
+        statEl.textContent = "This Mac · no Cursor sign-in";
+        statEl.style.color = "var(--gd-green-text)";
+        const reopen = v.querySelector("#gv-btn-reopen");
+        const reset = v.querySelector("#gv-btn-reset");
+        if (reopen) reopen.style.display = "none";
+        if (reset) reset.style.display = "none";
+        const sub = v.querySelector("#gv-subtitle");
+        if (sub) sub.textContent = "Local bots on this Mac — no Cursor sign-in.";
+        return;
+      }
+
       const raw = String((st && (st.email || st.authId)) || "");
       const prov = getProviderInfo(raw || id, id);
       const mascot = getProfileMascotSvg(curProfile, id);
@@ -1309,6 +1331,11 @@
   async function loginClean(opts) {
     const reset = !!(opts && opts.reset);
     const id = activeId();
+    if (isLocalSeat(id)) {
+      unveil();
+      toast("Local D is this Mac — no Cursor sign-in");
+      return { id, action: "local" };
+    }
     if (window.__gdLoggingIn) {
       toast("Sign-in is already open in the browser for " + profileDisplayName(id));
       return { id, action: "in-flight" };
@@ -1760,6 +1787,38 @@
         }
       }
     });
+    if (isLocalSeat()) {
+      const signInCta = (el) => {
+        if (!el || el.id === "gd-scheme-toggle") return false;
+        const t = String(el.textContent || el.getAttribute("aria-label") || "");
+        return /sign[\s-]*in|log[\s-]*in|check access|open clean browser/i.test(t);
+      };
+      cover.querySelectorAll("button, a, [role='button']").forEach((b) => {
+        if (!signInCta(b)) return;
+        b.style.display = "none";
+        b.setAttribute("aria-hidden", "true");
+        if ("disabled" in b) b.disabled = true;
+      });
+      cover.querySelectorAll("p, span, div, h2, h3").forEach((el) => {
+        if (el.children.length) return;
+        const t = String(el.textContent || "").trim();
+        if (/sign in with a clean browser|sign in to continue|log in to continue|check what this account needs/i.test(t)) {
+          el.textContent = "Local bots on this Mac — no Cursor sign-in.";
+        }
+      });
+      if (!cover._gdLocalSignBlock) {
+        cover._gdLocalSignBlock = true;
+        cover.addEventListener("click", (e) => {
+          const t = e.target && e.target.closest && e.target.closest("button, a, [role='button']");
+          if (!t || t.id === "gd-scheme-toggle") return;
+          const label = String(t.textContent || t.getAttribute("aria-label") || "");
+          if (!/sign[\s-]*in|log[\s-]*in|check access|open clean browser/i.test(label)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          toast("Local D runs on this Mac — no Cursor sign-in");
+        }, true);
+      }
+    }
     const btn = cover.querySelector(".sand-access-cover button") || cover.querySelector("button");
     if (btn && (btn.textContent.includes("Check Access") || btn.textContent.includes("Switch Seat"))) {
       btn.textContent = "Switch Seat / Add Non-Grok Seat";
@@ -2667,14 +2726,14 @@
           </div>
           <div class="gd-railacts">
             <button type="button" id="grok-menu-add-seat" class="gd-iconbtn is-primary" title="Add seat">${ICONS.plus}</button>
-            <button type="button" id="grok-menu-clean-login" class="gd-iconbtn" title="Open Sign-In">${ICONS.browser}</button>
+            ${isLocalSeat(id) || (profile && profile.kind === "local") ? "" : `<button type="button" id="grok-menu-clean-login" class="gd-iconbtn" title="Open Sign-In">${ICONS.browser}</button>`}
             <button type="button" id="grok-menu-pick-icon" class="gd-iconbtn" title="Change icon">${ICONS.palette}</button>
           </div>
           ${fallOverBlock()}
-          <button type="button" id="grok-menu-reset-login" class="whimsical-model-item is-danger">
+          ${isLocalSeat(id) || (profile && profile.kind === "local") ? "" : `<button type="button" id="grok-menu-reset-login" class="whimsical-model-item is-danger">
             ${ICONS.reset}
             <span style="font-size:11px;font-weight:650">Reset session</span>
-          </button>
+          </button>`}
         </div>
       </div>
     `;
@@ -2808,7 +2867,8 @@
         switchTo("local-d", { takeover: true });
       });
     }
-    menu.querySelector("#grok-menu-reset-login").addEventListener("click", () => {
+    const resetEl = menu.querySelector("#grok-menu-reset-login");
+    if (resetEl) resetEl.addEventListener("click", () => {
       closeSeatActionMenu();
       toast("Resetting browser profile for " + profileDisplayName(id) + "…");
       loginClean({ reset: true }).catch((e) => {
@@ -2816,7 +2876,8 @@
         toast("Reset failed. Please retry.");
       });
     });
-    menu.querySelector("#grok-menu-clean-login").addEventListener("click", () => {
+    const loginEl = menu.querySelector("#grok-menu-clean-login");
+    if (loginEl) loginEl.addEventListener("click", () => {
       closeSeatActionMenu();
       loginClean({ reset: false }).catch((e) => {
         logRendererError("login", e);
@@ -3278,6 +3339,9 @@
   }
 
   async function identity() {
+    if (isLocalSeat()) {
+      return { kind: "logged-in", name: "Local D", provider: "local", authId: "local|d" };
+    }
     const r = await pageCall("return await window.desktop.cursorAccount.getStatus()", 2500);
     const raw = (r && r.ok && r.value) || { kind: "unknown", error: r && r.error };
     try {

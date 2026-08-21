@@ -79,6 +79,13 @@ ok("install-sh-ships-look");
   const inject = read("profile-ui-inject.js");
   assert(inject.includes('grok<span class="gd-qd">"D"</span>'), "wordmark is grok\"D\" as one mark");
   assert(inject.includes("border-radius: 12px !important"), "seat menu is a card, not an oval");
+  assert(inject.includes("function isLocalSeat"), "local seat helper");
+  assert(inject.includes("no Cursor sign-in"), "local cover copy");
+  assert(inject.includes('action: "local"'), "loginClean no-ops on local-d");
+  const ident = read("account-identity.js");
+  assert(ident.includes("Local bots on this Mac"), "chip does not ask local-d to sign in");
+  const preload = read("profile-auth-preload.js");
+  assert(preload.includes("local-login-noop"), "official Sign in is a no-op on local");
 }
 ok("drop-and-landing");
 

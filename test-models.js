@@ -48,9 +48,26 @@ const Q = {
   onboarding: {},
 };
 assert(auth.isLocalMode() === true, "isolated local mode");
+{
+  const cursorRoot = fs.mkdtempSync(path.join(os.tmpdir(), "grok-auth-cur-"));
+  process.env.GROK_PROFILE_ROOT = cursorRoot;
+  fs.writeFileSync(path.join(cursorRoot, "active-env.json"), JSON.stringify({
+    mode: "cursor",
+    profileId: "cursor-a",
+  }) + "\n");
+  assert(auth.isLocalMode() === false, "cursor mode is not local");
+  const missing = fs.mkdtempSync(path.join(os.tmpdir(), "grok-auth-miss-"));
+  process.env.GROK_PROFILE_ROOT = missing;
+  assert(auth.isLocalMode() === true, "missing env defaults to local");
+  process.env.GROK_PROFILE_ROOT = authRoot;
+}
 auth.applyAuthPolicy(Q);
+assert(typeof Q.cursorAccount.login === "function", "local login stub");
 Q.cursorAccount.getStatus().then((s) => {
   assert(s && s.kind === "logged-in", JSON.stringify(s));
+  return Q.cursorAccount.login();
+}).then((login) => {
+  assert(login && login.kind === "logged-in", JSON.stringify(login));
   ok("local-status-does-not-need-official-computer");
   models.setModel(prev || "grok-4.6", written.proxyTarget);
 

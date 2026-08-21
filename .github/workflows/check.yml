@@ -34,6 +34,8 @@ jobs:
           needles = [
               "Imagine-That-Ai/grok" + "-D",
               "Pending " + "Elon",
+              "Elon " + "Musk",
+              "funding " + "frontier",
               "google-oauth2|user_",
           ]
           proc = subprocess.run(
