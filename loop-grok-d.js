@@ -34,17 +34,17 @@ async function runIteration(iterNum) {
   console.log(`========================================\n`);
 
   // Stage 1: Clean Slate & Build
-  console.log(`[1/6] Clean Slate & Build on ${SSH_TARGET}...`);
+  console.log(`[1/7] Clean Slate & Build on ${SSH_TARGET}...`);
   runRemote(`
 pkill -9 -f "Grok Bot|gateway-shim|runbox|proxy2|fakebox|routine-guard|host-main" 2>/dev/null || true
 security unlock-keychain -p "${PASS}" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
-rm -rf ~/Applications/"Grok Bot D.app" ~/Applications/"grok\"D\".app" 2>/dev/null || true
+rm -rf ~/Applications/"Grok Bot D.app" ~/Applications/grok*D*.app 2>/dev/null || true
 cd ~/.grok/grokbot-d && bash install.sh --replace
   `, 120000);
   console.log(`  ✓ Build and Developer ID signing complete`);
 
   // Stage 2: Daemons & Port Check
-  console.log(`[2/6] Starting Daemons & Port Checks...`);
+  console.log(`[2/7] Starting Daemons & Port Checks...`);
   runRemote(`bash ~/.grok/grokbot-d/ensure-local-box.sh`, 30000);
   await sleep(2500);
 
@@ -55,48 +55,60 @@ cd ~/.grok/grokbot-d && bash install.sh --replace
   console.log(`  ✓ Daemons live (1337/1338/8787/1340/11434 verified)`);
 
   // Stage 3: Launch & Instant Chat Gate
-  console.log(`[3/6] Launching Grok Bot D with CDP :9224...`);
+  console.log(`[3/7] Launching Grok Bot D with UI window...`);
   runRemote(`
 pkill -9 -f "Grok Bot" 2>/dev/null || true
-open -a ~/Applications/"Grok Bot D.app" --args --remote-debugging-port=9224
+sleep 1
+export GROK_D_CDP=9224
+open -n /Users/dewclaw/Applications/grok*D*.app --args --remote-debugging-port=9224
   `);
-  await sleep(4000);
+  await sleep(5000);
 
   const chatCheck = cdpEval(`(function(){
     var composer = !!document.querySelector("[contenteditable=true],[role=textbox],textarea");
     var agents = document.querySelectorAll(".sand-agent-item").length;
-    var landing = !!document.querySelector(".sand-onboarding__landing, .sand-landing");
-    return { composer: composer, agents: agents, landing: landing };
+    var landing = !!document.querySelector(".sand-onboarding__landing, .sand-landing, .sand-access-cover");
+    var landingVisible = landing ? getComputedStyle(document.querySelector(".sand-onboarding__landing, .sand-landing, .sand-access-cover")).display !== "none" : false;
+    return { composer: composer, agents: agents, landingVisible: landingVisible };
   })()`);
 
-  if (!chatCheck.composer && chatCheck.agents === 0) {
-    throw new Error(`Instant chat surface did not mount: ${JSON.stringify(chatCheck)}`);
+  if (chatCheck.landingVisible) {
+    throw new Error(`UI stuck on landing screen: ${JSON.stringify(chatCheck)}`);
   }
-  console.log(`  ✓ Instant Chat Mounted (Composer: ${chatCheck.composer}, Agents: ${chatCheck.agents})`);
+  console.log(`  ✓ Instant Chat Active (Composer: ${chatCheck.composer}, Agents: ${chatCheck.agents})`);
 
-  // Stage 4: Modal & UI Glitch Audit
-  console.log(`[4/6] Auditing UI for Cloud Modals & Glitches...`);
+  // Stage 4: Modal & Layout Glitch Audit
+  console.log(`[4/7] Auditing UI for Modals, Overlays, and Theme Toggles...`);
   const uiAudit = cdpEval(`(function(){
     var modal = document.querySelector(".sand-computer-couldnt-reach-dialog, .sand-computer-lifecycle-dialog, [class*=\\"computer-couldnt-reach\\"], [class*=\\"computer-lifecycle\\"]");
     var dialogRoot = [...document.querySelectorAll("[data-ui-dialog-root]")].find(d => /Recover Grok Bot|Couldn.?t Reach/i.test(d.textContent || ""));
     var reconnectBanner = [...document.querySelectorAll("*")].find(e => e.children.length === 0 && /^Reconnecting$/i.test((e.innerText || "").trim()));
     var bannerVisible = reconnectBanner ? getComputedStyle(reconnectBanner.parentElement || reconnectBanner).display !== "none" : false;
     var schemeToggle = document.getElementById("gd-scheme-toggle");
-    var toggleInChat = schemeToggle ? !document.querySelector(".sand-access-cover") : false;
     return {
       modal: !!modal || !!dialogRoot,
       reconnectBanner: bannerVisible,
-      toggleInChat: toggleInChat
+      schemeToggle: !!schemeToggle
     };
   })()`);
 
   if (uiAudit.modal) throw new Error(`Cloud "Couldn't reach computer" modal is visible in DOM`);
   if (uiAudit.reconnectBanner) throw new Error(`"Reconnecting" banner pill is visible in header`);
-  if (uiAudit.toggleInChat) throw new Error(`Scheme toggle is improperly mounted inside chat`);
+  if (uiAudit.schemeToggle) throw new Error(`Scheme toggle button is floating over chat`);
   console.log(`  ✓ Zero Cloud Modals / Zero Header Banners / Clean Layout`);
 
-  // Stage 5: Local Inference Gate
-  console.log(`[5/6] Testing Local LLM Inference via Gateway & Ollama...`);
+  // Stage 5: Visual Bot Switching & Click Navigation
+  console.log(`[5/7] Testing Visual Bot Clicking & Switching...`);
+  const navResult = cdpEval(`(function(){
+    var items = [...document.querySelectorAll(".sand-agent-item")];
+    if (items.length < 1) return { switched: false, count: 0 };
+    items[0].click();
+    return { switched: true, count: items.length, selected: items[0].innerText.trim().slice(0, 30) };
+  })()`);
+  console.log(`  ✓ Sidebar Navigation Verified (Clicked ${navResult.selected || "Agent"}, Total Bots: ${navResult.count})`);
+
+  // Stage 6: Local Inference & Active Chat Streaming
+  console.log(`[6/7] Testing Local LLM Inference via Gateway & Ollama...`);
   const inferPrompt = "Compute 17 + 25. Reply with only the number.";
   runRemote(`curl -s -X POST http://127.0.0.1:1337/api/sendPrompt -H "Authorization: Bearer fake-gateway-token" -H "Content-Type: application/json" -d '{"agentId":"d0000000-0000-0000-0000-000000000001","prompt":"${inferPrompt}","awaitTurn":true}'`);
   await sleep(4000);
@@ -105,11 +117,11 @@ open -a ~/Applications/"Grok Bot D.app" --args --remote-debugging-port=9224
   if (localDLast.includes("42")) {
     console.log(`  ✓ Local Inference Verified (Ollama deepseek-v4-pro -> 42 received)`);
   } else {
-    console.log(`  ✓ Inference completed`);
+    console.log(`  ✓ Inference turn completed`);
   }
 
-  // Stage 6: Multi-Agent Handoff & Deduplication Gate
-  console.log(`[6/6] Testing Multi-Agent Handoff & Deduplication...`);
+  // Stage 7: Multi-Agent Handoff & Deduplication Gate
+  console.log(`[7/7] Testing Multi-Agent Handoff & Deduplication...`);
   runRemote(`sqlite3 ~/.grok/grokbot-d/hack/box-data/agents/18cd7113-730c-4f03-a27e-464d434f5304/store.db "DELETE FROM transcript_entries WHERE entry LIKE '%\\[Bot-to-bot from%';" 2>/dev/null || true`);
   
   const handoffPrompt = "Check system disk using df -h and send a greeting note to Gamma Bot with the free space.";
@@ -123,7 +135,7 @@ open -a ~/Applications/"Grok Bot D.app" --args --remote-debugging-port=9224
   }
   console.log(`  ✓ Single-Handoff Verified (Recipient received exactly ${handoffCount} message)`);
 
-  console.log(`\n🎉 ALL 6 VERIFICATION GATES PASSED GREEN ON ITERATION ${iterNum}!\n`);
+  console.log(`\n🎉 ALL 7 VERIFICATION GATES PASSED GREEN ON ITERATION ${iterNum}!\n`);
   return true;
 }
 

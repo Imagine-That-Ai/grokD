@@ -1840,9 +1840,13 @@
   function enhanceCoverScreen() {
     const cover = document.querySelector(".sand-access-cover")
       || document.querySelector(".sand-onboarding__landing");
-    if (!cover || (cover.style && cover.style.display === "none") || skyCleared()) {
+    if (isLocalSeat() || !cover || (cover.style && cover.style.display === "none") || skyCleared()) {
+      hideSkySurfaces();
       const toggle = document.getElementById("gd-scheme-toggle");
       if (toggle && toggle.parentNode) toggle.remove();
+      if (isLocalSeat()) {
+        try { goChat(); } catch (_) {}
+      }
       return;
     }
     try { punchCoverSky(cover); } catch (_) {}
@@ -2012,8 +2016,10 @@
   }
 
   function mountSkyActions() {
-    if (skyCleared()) {
+    if (isLocalSeat() || skyCleared()) {
       window.__gdSkyCleared = true;
+      setUiPref("skyCleared", true);
+      hideSkySurfaces();
       const have = chatLib() && chatLib().chatSurface(document);
       if (have && have.ok) hideSkySurfaces();
       else goChat();
