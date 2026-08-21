@@ -47,6 +47,23 @@ function tryReplace(text, from, to, label) {
   return { text, status: "skipped", label, reason: "ambiguous:" + n };
 }
 
+function fuzzyWrapAuth(text) {
+  if (text.includes("wrapMainAuth")) {
+    return { text, status: "already", label: "wrap-main-auth-fuzzy" };
+  }
+  const re = /markPhase\("auth_service"\);let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\),/;
+  if (!re.test(text)) {
+    return { text, status: "skipped", label: "wrap-main-auth-fuzzy", reason: "no-match" };
+  }
+  const next = text.replace(re, (_, id, fn) => (
+    "markPhase(\"auth_service\");let " + id + "=await " + fn + "();"
+    + "try{const os=require(\"os\"),path=require(\"path\"),root=process.env.GROK_PROFILE_ROOT||path.join(os.homedir(),\".grok\",\"grokbot-d\");"
+    + id + "=require(path.join(root,\"profile-auth-preload.js\")).wrapMainAuth(" + id + ")||" + id
+    + "}catch{}let "
+  ));
+  return { text: next, status: "patched", label: "wrap-main-auth-fuzzy" };
+}
+
 function fuzzyIpn(text) {
   if (text.includes('access:{state:"granted",reason:"none"}')) {
     return { text, status: "already", label: "IPn-fuzzy" };
@@ -85,6 +102,11 @@ function applyPatches(opts) {
   main = rd.text;
   const auth = tryReplace(main, AUTH_OFFICIAL, AUTH_PATCH, "wrap-main-auth");
   main = auth.text;
+  let authFuzzy = { status: "skipped", label: "wrap-main-auth-fuzzy" };
+  if (auth.status === "skipped") {
+    authFuzzy = fuzzyWrapAuth(main);
+    main = authFuzzy.text;
+  }
   let openExt = "already";
   if (!main.includes("patch-open-external.js")) {
     main = MAIN_HOOK + main;
@@ -96,7 +118,7 @@ function applyPatches(opts) {
     main: mainFile,
     IPn: ipn.status === "skipped" ? ipnFuzzy.status : ipn.status,
     descriptorRead: rd.status,
-    wrapMainAuth: auth.status,
+    wrapMainAuth: auth.status === "skipped" ? authFuzzy.status : auth.status,
     openExternal: openExt,
     preloadHook: hook,
   };
@@ -120,5 +142,5 @@ if (require.main === module) {
 
 module.exports = {
   IPN_OFFICIAL, IPN_PATCH, READ_OFFICIAL, READ_PATCH, AUTH_OFFICIAL, AUTH_PATCH,
-  tryReplace, fuzzyIpn, ensurePreloadHook, applyPatches, HOOK, MAIN_HOOK,
+  tryReplace, fuzzyIpn, fuzzyWrapAuth, ensurePreloadHook, applyPatches, HOOK, MAIN_HOOK,
 };

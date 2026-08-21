@@ -63,6 +63,12 @@ assert(auth.isLocalMode() === true, "isolated local mode");
 }
 auth.applyAuthPolicy(Q);
 assert(typeof Q.cursorAccount.login === "function", "local login stub");
+{
+  const src = auth.pageWorldLocalScript();
+  assert(src.includes("getStatus"), "page wrap");
+  assert(src.includes("getSeen"), "skip official onboarding");
+  assert(!/Sign in/.test(src), "must not click Sign in");
+}
 Q.cursorAccount.getStatus().then((s) => {
   assert(s && s.kind === "logged-in", JSON.stringify(s));
   return Q.cursorAccount.login();

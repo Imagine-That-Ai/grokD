@@ -242,4 +242,27 @@ function wrapMainAuth(svc) {
   return svc;
 }
 
-module.exports = { applyAuthPolicy, seedEncryptedDescriptor, wrapMainAuth, LOCAL_STATUS, isLocalMode };
+function pageWorldLocalScript() {
+  const st = {
+    kind: "logged-in",
+    authId: "local|d",
+    email: "",
+    name: "Local D",
+    isAnysphereUser: false,
+  };
+  return "(() => {"
+    + "const st=" + JSON.stringify(st) + ";"
+    + "const D=window.desktop;"
+    + "if(!D||!D.cursorAccount)return \"no-desktop\";"
+    + "D.cursorAccount.getStatus=async function(){return Object.assign({},st)};"
+    + "if(typeof D.cursorAccount.getAuthStatus===\"function\")D.cursorAccount.getAuthStatus=async function(){return Object.assign({},st)};"
+    + "D.cursorAccount.login=async function(){return Object.assign({},st)};"
+    + "D.cursorAccount.logout=async function(){return Object.assign({},st)};"
+    + "D.cursorAccount.getSandAccess=async function(){return {kind:\"allowed\",tier:\"pro\",isTrial:false}};"
+    + "D.cursorAccount.getSandAccessFresh=async function(){return {state:\"granted\",reason:\"none\"}};"
+    + "if(D.onboarding){D.onboarding.getSeen=async function(){return true};D.onboarding.setSeen=async function(){};}"
+    + "return \"wrapped\";"
+    + "})()";
+}
+
+module.exports = { applyAuthPolicy, seedEncryptedDescriptor, wrapMainAuth, LOCAL_STATUS, isLocalMode, pageWorldLocalScript };

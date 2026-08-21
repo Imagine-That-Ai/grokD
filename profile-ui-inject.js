@@ -27,6 +27,19 @@
     catch { return "local"; }
   }
 
+  function wrapPageAuth() {
+    if (mode() !== "local") return Promise.resolve("skip");
+    try {
+      const auth = require(path.join(ROOT, "profile-auth-preload.js"));
+      const { webFrame } = require("electron");
+      const src = auth.pageWorldLocalScript();
+      return webFrame.executeJavaScript(src, true);
+    } catch (e) {
+      return Promise.resolve("err " + (e && e.message || e));
+    }
+  }
+  wrapPageAuth().catch(() => {});
+
   function activeId() {
     try {
       const env = JSON.parse(fs.readFileSync(ENV, "utf8"));
@@ -1917,10 +1930,14 @@
       const hook = require(path.join(ROOT, "create-bot-hook.js"));
       if (hook && hook.createNamed) createNamed = (name) => hook.createNamed(name);
     } catch {}
-    return lib.enterChat(document, {
-      createNamed,
-      onOpen() { hideSkySurfaces(); },
-    });
+    wrapPageAuth().then(() => {
+      const opened = lib.enterChat(document, {
+        createNamed,
+        onOpen() { hideSkySurfaces(); },
+      });
+      if (opened && opened.ok) hideSkySurfaces();
+    }).catch(() => {});
+    return { action: "wrapping", ok: false };
   }
 
   function dismissSky() {
