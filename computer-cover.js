@@ -42,10 +42,26 @@ function lostCopy(opts) {
 
 function restyleLostDialog(doc, opts) {
   if (!doc || typeof doc.querySelector !== "function") return false;
+  const isLocal = !!(opts && opts.local);
+  const dialogs = doc.querySelectorAll(
+    SELECTOR + ", [data-ui-dialog-root]"
+  );
+  let n = 0;
+  dialogs.forEach((d) => {
+    const t = String(d.textContent || "");
+    if (/Recover Grok Bot|Couldn.?t Reach|Reconnecting this seat/i.test(t)) {
+      if (isLocal) {
+        const backdrop = (d.closest && d.closest("[data-ui-dialog-backdrop]")) || d.parentElement;
+        if (backdrop && backdrop !== doc.body && backdrop.contains(d)) backdrop.remove();
+        d.remove();
+        n += 1;
+      }
+    }
+  });
+  if (isLocal) return n > 0;
   const dialog = doc.querySelector(SELECTOR) || (overlayShowing(doc) ? doc.body : null);
   if (!dialog || typeof dialog.querySelectorAll !== "function") return false;
   const copy = lostCopy(opts);
-  let n = 0;
   dialog.querySelectorAll("p, h2, h3, span, div").forEach((el) => {
     if (el.children && el.children.length) return;
     const t = String(el.textContent || "").trim();

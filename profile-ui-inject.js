@@ -1268,9 +1268,23 @@
   }
 
   function dressComputerLost() {
+    const dialogs = document.querySelectorAll(
+      '[data-ui-dialog-root], .sand-computer-couldnt-reach-dialog, .sand-computer-lifecycle-dialog, [class*="computer-couldnt-reach"], [class*="computer-lifecycle"]'
+    );
+    for (const d of dialogs) {
+      const text = String(d.textContent || "");
+      if (/Recover Grok Bot|Couldn.?t Reach|Reconnecting this seat/i.test(text)) {
+        if (isLocalSeat()) {
+          const backdrop = (d.closest && d.closest("[data-ui-dialog-backdrop]")) || d.parentElement;
+          if (backdrop && backdrop !== document.body && backdrop.contains(d)) backdrop.remove();
+          d.remove();
+          continue;
+        }
+      }
+    }
     const lib = coverLib();
     if (!lib || !lib.restyleLostDialog) return;
-    try { lib.restyleLostDialog(document, { paused: botsPaused(activeId()) }); }
+    try { lib.restyleLostDialog(document, { paused: botsPaused(activeId()), local: isLocalSeat() }); }
     catch (_) {}
   }
 
