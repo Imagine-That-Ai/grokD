@@ -705,7 +705,7 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
     if (!r.ok) throw new Error(`${method} ${r.status}: ${text.slice(0, 300)}`);
     return json;
   };
-  const resolveTeammate = bridgeLib.resolveTeammate;
+  const sentHandoffsInLoop = new Set();
   const runSendToAgentLocal = async (tc) => {
     const a = parseArgs(tc);
     const targetRaw = a.target_id || a.agent_id || a.target || a.name;
@@ -727,9 +727,15 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
     const from = running || (Array.isArray(agents) ? agents : []).find((x) => x.id === selectedId);
     const fromName = from?.name || "a teammate Bot";
     if (from && dest.id === from.id) return "You can't message yourself with SendToAgent. Use SendMessage to talk to the user.";
+    const destKey = dest.id.toLowerCase();
+    if (sentHandoffsInLoop.has(destKey)) {
+      return `Already sent handoff to ${dest.name} during this turn. No need to resend.`;
+    }
     const prompt = `[Bot-to-bot from ${fromName}]: ${msg}`;
     try {
       await hostGateway("sendPrompt", { agentId: dest.id, prompt, awaitTurn: false });
+      sentHandoffsInLoop.add(destKey);
+      sentHandoffsInLoop.add(dest.name.toLowerCase());
       console.log(`[${id}] BRIDGE SendToAgent local: ${fromName} -> ${dest.name} (${dest.id.slice(0, 8)}) ${msg.length}B`);
       return `Sent to ${dest.name}. This is asynchronous — if they reply, it'll arrive later as a new message that wakes you; don't wait on it now.`;
     } catch (e) {
@@ -741,7 +747,10 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
     const lastUser = [...payload].reverse().find((m) => m.role === "user");
     const plans = parseHandoffs(lastUser?.content || "");
     if (!plans.length) return { sent: [], notes: [] };
-    const already = new Set((alreadySent || []).map((s) => String(s).toLowerCase()));
+    const already = new Set([
+      ...(alreadySent || []).map((s) => String(s).toLowerCase()),
+      ...sentHandoffsInLoop,
+    ]);
     const notes = [];
     const sent = [];
     for (const plan of plans) {
@@ -751,7 +760,10 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
         function: { name: "SendToAgent", arguments: JSON.stringify({ target_id: plan.target, message: plan.message }) },
       });
       notes.push(`${plan.target}: ${result}`);
-      if (/^Sent to /i.test(result)) sent.push(plan.target);
+      if (/^Sent to /i.test(result)) {
+        sent.push(plan.target);
+        sentHandoffsInLoop.add(key);
+      }
     }
     return { sent, notes };
   };
@@ -1238,7 +1250,11 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
       const wantsExec = lastUser && /write a file at\s+\S+/i.test(lastText);
       const hasSendToAgent = tools.some(t => t.function?.name === "SendToAgent");
       const hasShell = tools.some(t => t.function?.name === "Shell");
-      if (wantsHandoff && hasSendToAgent) {
+      const alreadySent = payload.some(m =>
+        (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.some(tc => tc.function?.name === "SendToAgent")) ||
+        (m.role === "tool" && (m.name === "SendToAgent" || String(m.tool_call_id || "").includes("SendToAgent")))
+      );
+      if (wantsHandoff && hasSendToAgent && !alreadySent) {
         body.tool_choice = { type: "function", function: { name: "SendToAgent" } };
       } else if (wantsExec && hasShell) {
         body.tool_choice = { type: "function", function: { name: "Shell" } };
