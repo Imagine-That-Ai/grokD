@@ -467,8 +467,38 @@
         z-index: 5 !important;
         pointer-events: none !important;
         overflow: visible !important;
+        color: var(--fg, #f4f1ea);
       }
-      #gd-grok-hero svg { width: 100%; height: 100%; display: block; overflow: visible; }
+      #gd-grok-hero svg { width: 100%; height: 100%; display: block; overflow: visible; fill: currentColor; }
+      #gd-sky-actions {
+        position: fixed;
+        left: 50%;
+        bottom: 28px;
+        transform: translateX(-50%);
+        z-index: 999993;
+        display: flex;
+        gap: 8px;
+        pointer-events: auto;
+      }
+      #gd-sky-actions button {
+        min-height: 32px;
+        padding: 0 14px;
+        cursor: pointer;
+        border-radius: 999px;
+        font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+        letter-spacing: 0.03em;
+        color: var(--gd-text);
+        border: 1px solid var(--gd-border);
+        background: var(--gd-card-bg);
+        box-shadow: var(--gd-shadow);
+        backdrop-filter: blur(14px) saturate(160%);
+        -webkit-backdrop-filter: blur(14px) saturate(160%);
+      }
+      #gd-sky-continue {
+        background: rgba(244,241,234,0.92);
+        color: #16171d;
+        border-color: rgba(244,241,234,0.4);
+      }
       .gd-quota {
         display:flex; align-items:center; gap:5px; width:100%;
         margin-top:3px;
@@ -1827,6 +1857,66 @@
         });
       }
     }
+    try { mountSkyActions(); } catch (_) {}
+  }
+
+  function skyHost() {
+    return document.querySelector(".sand-access-cover")
+      || document.querySelector(".sand-onboarding__landing");
+  }
+
+  function dismissSky() {
+    window.__gdSkyCleared = true;
+    document.querySelectorAll(".sand-access-cover, .sand-onboarding__landing").forEach((n) => {
+      n.style.display = "none";
+      n.setAttribute("aria-hidden", "true");
+    });
+    const bar = document.getElementById("gd-sky-actions");
+    if (bar) bar.remove();
+  }
+
+  function mountSkyActions() {
+    if (window.__gdSkyCleared) {
+      document.querySelectorAll(".sand-access-cover, .sand-onboarding__landing").forEach((n) => {
+        if (n.style.display !== "none") n.style.display = "none";
+      });
+      const leftover = document.getElementById("gd-sky-actions");
+      if (leftover) leftover.remove();
+      return;
+    }
+    if (!skyHost()) {
+      const leftover = document.getElementById("gd-sky-actions");
+      if (leftover) leftover.remove();
+      return;
+    }
+    if (document.getElementById("gd-sky-actions")) return;
+    const bar = document.createElement("div");
+    bar.id = "gd-sky-actions";
+    bar.innerHTML = `
+      <button type="button" id="gd-sky-continue">Continue</button>
+      <button type="button" id="gd-sky-local">This Mac only</button>
+      <button type="button" id="gd-sky-cursor">Set up with Cursor</button>
+    `;
+    document.body.appendChild(bar);
+    bar.querySelector("#gd-sky-continue").addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dismissSky();
+    });
+    bar.querySelector("#gd-sky-local").addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!isLocalSeat()) {
+        toast("Switching to Local D…");
+        switchTo("local-d");
+      }
+      dismissSky();
+    });
+    bar.querySelector("#gd-sky-cursor").addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      startOnboarding(true);
+    });
   }
 
   async function keepCursorComputer() {
@@ -1885,6 +1975,7 @@
       if (toolbar && toolbar.style.display === "none") toolbar.style.display = "";
       paintLoginChip();
       wirePlasmaSeatOrb();
+      try { mountSkyActions(); } catch (_) {}
     } catch (e) {
       try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[restore-ui] " + e + "\n"); } catch (_) {}
     }

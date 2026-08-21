@@ -57,8 +57,16 @@ function kernelHost() {
 }
 
 function onSky() {
-  return !!(document.querySelector(".sand-access-cover")
-    || document.querySelector(".sand-onboarding__landing"));
+  try {
+    if (typeof window !== "undefined" && window.__gdSkyCleared) return false;
+  } catch (_) {}
+  const n = document.querySelector(".sand-access-cover")
+    || document.querySelector(".sand-onboarding__landing");
+  if (!n) return false;
+  try {
+    if (n.style && n.style.display === "none") return false;
+  } catch (_) {}
+  return true;
 }
 
 function isListAvatar(el) {
@@ -68,8 +76,6 @@ function isListAvatar(el) {
     || el.closest("[class*='agent-item']")
     || el.closest(".sand-agent-item__avatar-disc"));
 }
-
-const HERO_SIZE = 196;
 
 function officialHeroMark() {
   const nodes = document.querySelectorAll(".sand-grok-bot-mark");
@@ -111,7 +117,6 @@ function ensureHeroMark() {
   if (!hero) {
     hero = document.createElement("div");
     hero.id = "gd-grok-hero";
-    hero.className = "sand-grok-bot-mark";
     hero.setAttribute("aria-hidden", "true");
     const sats = document.getElementById("gd-sats") || layer;
     if (sats && sats.parentNode === wrap) wrap.insertBefore(hero, sats);
@@ -123,20 +128,26 @@ function ensureHeroMark() {
     hero.setAttribute("data-src", html.slice(0, 120));
   }
   hero.style.position = "absolute";
-  hero.style.width = HERO_SIZE + "px";
-  hero.style.height = HERO_SIZE + "px";
   hero.style.zIndex = "5";
   hero.style.pointerEvents = "none";
   hero.style.overflow = "visible";
   hero.style.margin = "0";
+  hero.style.padding = "0";
   return hero;
 }
 
-function placeHero(cx, cy) {
+function placeHero(cx, cy, pitch) {
   const hero = ensureHeroMark();
   if (!hero) return;
-  hero.style.left = (cx - HERO_SIZE / 2).toFixed(2) + "px";
-  hero.style.top = (cy - HERO_SIZE / 2).toFixed(2) + "px";
+  const innerR = ringBands()[0].r0 * ORBIT_ZOOM;
+  const size = innerR * 2 * 0.86;
+  const ySquash = Math.max(0.3, Math.abs(Math.cos(pitch || 1.12)));
+  hero.style.width = size.toFixed(1) + "px";
+  hero.style.height = size.toFixed(1) + "px";
+  hero.style.left = (cx - size / 2).toFixed(2) + "px";
+  hero.style.top = (cy - size / 2).toFixed(2) + "px";
+  hero.style.transform = "scaleY(" + ySquash.toFixed(4) + ")";
+  hero.style.transformOrigin = "center center";
 }
 
 function rng(seed) {
@@ -626,20 +637,6 @@ function stepSats(dt) {
 function botCenter() {
   if (!wrap) return null;
   const wb = wrap.getBoundingClientRect();
-  const official = officialHeroMark();
-  const heading = document.querySelector("#sand-access-cover-heading")
-    || document.querySelector(".sand-access-cover h1")
-    || document.querySelector(".sand-onboarding__landing h1");
-  const target = official
-    || ((heading && heading.getBoundingClientRect().width) ? heading : null);
-  if (target) {
-    const mb = target.getBoundingClientRect();
-    return {
-      x: mb.left + mb.width / 2 - wb.left,
-      y: mb.top + mb.height / 2 - wb.top,
-      mark: official || null,
-    };
-  }
   return {
     x: Math.max(1, wb.width) / 2,
     y: Math.max(1, wb.height) * 0.42,
@@ -667,7 +664,7 @@ function resizeCanvases() {
   });
   if (glApi) {
     try {
-      require(require("os").homedir() + "/.grok/grokbot-d/space-field-gl.js").resize(glApi, w, h, dpr);
+      require(require("path").join(overlayRoot(), "space-field-gl.js")).resize(glApi, w, h, dpr);
     } catch (_) {}
   }
 }
@@ -958,7 +955,7 @@ function frame(now) {
   const yaw = -0.46 + Math.sin(t * 0.033) * 0.03;
   if (glApi) {
     try {
-      const field = require(require("os").homedir() + "/.grok/grokbot-d/space-field-gl.js");
+      const field = require(require("path").join(overlayRoot(), "space-field-gl.js"));
       field.frame(glApi, t, holes, nebulas, isLight());
       if (!reduced && dt > 0) {
         frameMs = frameMs ? frameMs * 0.9 + dt * 100 : dt * 1000;
@@ -977,7 +974,7 @@ function frame(now) {
   near._ctx.clearRect(0, 0, near._w, near._h);
   drawDust(near._ctx, c.x, c.y, pitch, yaw, true);
   placeSats(c.x, c.y, pitch, yaw);
-  placeHero(c.x, c.y);
+  placeHero(c.x, c.y, pitch);
   hideLava();
 }
 
