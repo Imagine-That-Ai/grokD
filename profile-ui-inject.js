@@ -633,6 +633,9 @@
       .sand-grok-bot-mark.gd-bot-blackhole {
         filter: drop-shadow(6px 11px 16px rgba(0,0,0,0.88)) drop-shadow(0 0 12px rgba(255,110,60,0.28));
       }
+      .sand-78zum5.sand-dt5ytf.sand-euugli {
+        display: none !important;
+      }
 
       /* Tesla candy red for the grok mark itself, wherever it renders: the
          little one riding the model orb, the picker header, every model chip.

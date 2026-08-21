@@ -222,8 +222,34 @@ function normalizeCreateAgent(raw) {
 }
 
 async function postApi(method, body, inboundAuth = AUTH) {
+  if (/^(getStatus|health|ping|status|getHealth)$/i.test(method)) {
+    const res = { ok: true, status: "idle", mode: "local", connected: true, timestamp: Date.now() };
+    return { status: 200, text: JSON.stringify(res), json: res, type: "application/json" };
+  }
   let raw = Buffer.isBuffer(body) || typeof body === "string" ? body : JSON.stringify(body ?? {});
   if (method === "createAgent") raw = normalizeCreateAgent(raw);
+  if (method === "listAgents" || method === "getAgent") {
+    try {
+      const r = await fetch(`${UP}/api/${method}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: inboundAuth },
+        body: raw,
+      });
+      const text = await r.text();
+      let res = parseJson(text);
+      if (Array.isArray(res)) {
+        res = res.map((a) => ({ ...a, isRunning: false, isRunningTurn: false, isComposingMessage: false }));
+        return { status: 200, text: JSON.stringify(res), json: res, type: "application/json" };
+      }
+      if (res && res.id) {
+        res = { ...res, isRunning: false, isRunningTurn: false, isComposingMessage: false };
+        return { status: 200, text: JSON.stringify(res), json: res, type: "application/json" };
+      }
+      return { status: r.status, text, json: res, type: r.headers.get("content-type") || "application/json" };
+    } catch (e) {
+      return offlineFallback(method, parseJson(raw) || {}, e);
+    }
+  }
   try {
     const r = await fetch(`${UP}/api/${method}`, {
       method: "POST",
