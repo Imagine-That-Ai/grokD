@@ -9,6 +9,7 @@ const crypto = require("crypto");
 const { tryParse, encode, rewriteProto } = require("./protoutil");
 const localMcp = require("./local-mcp");
 const bridgeLib = require("./bridge-lib");
+const { resolveTeammate, parseHandoffs, parseFileOps, allowedHackPath, safeRunCmd } = bridgeLib;
 
 const MODEL_CONFIG_PATH = "/tmp/grokbot-hack/model-config.json";
 

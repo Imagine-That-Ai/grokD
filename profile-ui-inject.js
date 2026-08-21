@@ -634,6 +634,12 @@
         filter: drop-shadow(6px 11px 16px rgba(0,0,0,0.88)) drop-shadow(0 0 12px rgba(255,110,60,0.28));
       }
 
+      /* Hide fake cloud reconnecting badge in local mode without touching sidebar */
+      span.sand-4z9k3i,
+      div:has(> span.sand-4z9k3i) {
+        display: none !important;
+      }
+
       /* Tesla candy red for the grok mark itself, wherever it renders: the
          little one riding the model orb, the picker header, every model chip.
          The mark ships as fill="currentColor" inside an <img> data URL, so CSS
@@ -971,6 +977,10 @@
   }
 
   function veil(msg) {
+    if (isLocalSeat()) {
+      unveil();
+      return;
+    }
     ensureStyles();
     let v = document.getElementById("grok-profile-veil");
     const id = activeId();
@@ -1277,6 +1287,25 @@
           d.remove();
           continue;
         }
+      }
+    }
+    if (isLocalSeat()) {
+      const spans = document.querySelectorAll("span");
+      for (const s of spans) {
+        if ((s.textContent || "").trim() === "Reconnecting" && s.children.length === 0) {
+          const wrap = s.closest("div");
+          if (wrap && !wrap.classList.contains("sand-agents-sidebar") && !wrap.classList.contains("sand-shell")) {
+            wrap.style.display = "none";
+          }
+        }
+      }
+      const routineToasts = [...document.querySelectorAll("*")].filter((el) => {
+        return /Routine Sync Failed/i.test(el.textContent || "") && el.children.length > 0 && el.offsetHeight > 0 && el.offsetHeight < 200;
+      });
+      for (const t of routineToasts) {
+        const btn = t.querySelector("button");
+        if (btn) btn.click();
+        else t.style.display = "none";
       }
     }
     const lib = coverLib();
@@ -3829,9 +3858,13 @@
       if (chip) chip.style.visibility = "visible";
       const v = document.getElementById("grok-profile-veil");
       if (v) {
-        v.style.visibility = "visible";
-        v.style.opacity = "1";
-        v.style.pointerEvents = "auto";
+        if (isLocalSeat()) {
+          v.remove();
+        } else {
+          v.style.visibility = "visible";
+          v.style.opacity = "1";
+          v.style.pointerEvents = "auto";
+        }
       }
     } catch (_) {}
     try {
