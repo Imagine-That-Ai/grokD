@@ -75,6 +75,10 @@ ok("install-sh-ships-look");
   assert(fs.existsSync(path.join(ROOT, "pack-drop.sh")), "pack-drop.sh");
   const kernel = read("space-kernel.js");
   assert(kernel.includes("sand-onboarding__landing"), "kernel hosts the landing page");
+  assert(kernel.includes('position = "fixed"'), "kernel fills the window");
+  const inject = read("profile-ui-inject.js");
+  assert(inject.includes('grok<span class="gd-qd">"D"</span>'), "wordmark is grok\"D\" as one mark");
+  assert(inject.includes("border-radius: 12px !important"), "seat menu is a card, not an oval");
 }
 ok("drop-and-landing");
 
