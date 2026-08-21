@@ -378,14 +378,9 @@
         70% { transform: rotate(10deg) translate(0.5px, 0.4px); }
         84% { transform: rotate(-5deg) translate(-0.4px, 0); }
       }
-      .gd-wordmark { display:inline-flex; align-items:baseline; gap:0; letter-spacing:-0.03em; }
-      .gd-wordmark .gd-q { opacity:0.72; font-weight:500; padding:0 0.04em; }
-      .gd-wordmark .gd-wiggle-d {
-        display:inline-block;
-        transform-origin: 50% 85%;
-        animation: gdDWiggle 0.85s ease-in-out infinite;
-        font-weight: 780;
-      }
+      .gd-wordmark { display:inline; letter-spacing:-0.03em; font: inherit; }
+      .gd-wordmark .gd-qd { font: inherit; font-weight: inherit; letter-spacing: -0.06em; }
+      .sand-grok-bot-mark { flex-shrink: 0; }
       .sand-grok-bot-mark,
       .sand-onboarding__landing,
       .sand-access-cover {
@@ -399,12 +394,25 @@
         background-image: none !important;
       }
       #gd-kernel {
-        position: absolute;
-        inset: 0;
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
         z-index: 0;
         pointer-events: none;
         background: transparent;
         overflow: hidden;
+      }
+      #sand-app,
+      body {
+        background: #050508 !important;
+      }
+      .sand-access-cover,
+      .sand-onboarding__landing {
+        background: transparent !important;
+        box-shadow: none !important;
+        border: none !important;
+        outline: none !important;
       }
       /* Daybreak: the same sky a few hours later. The canvas paints itself, so
          these are only the surfaces behind and above it. */
@@ -1543,7 +1551,7 @@
     const wrap = el("span", "");
     wrap.className = "gd-wordmark";
     wrap.setAttribute("aria-label", 'grok"D"');
-    wrap.innerHTML = 'grok<span class="gd-q">"</span><span class="gd-wiggle-d">D</span><span class="gd-q">"</span>';
+    wrap.innerHTML = 'grok<span class="gd-qd">"D"</span>';
     node.appendChild(wrap);
   }
 
@@ -2053,11 +2061,11 @@
 
   function positionSeatBubble(menu) {
     if (!menu) return;
-    const w = 300;
+    const w = 320;
     const orb = document.querySelector(".pure-plasma-orb-1");
     const lavaVisible = !!(orb && orb.offsetWidth > 0);
     const anchor = lavaVisible ? orb : document.getElementById("grok-d-login-chip");
-    const h = Math.min(520, menu.offsetHeight || 420);
+    const h = Math.min(window.innerHeight * 0.86, menu.offsetHeight || 480);
     if (!anchor || !anchor.offsetWidth) {
       menu.style.left = "18px";
       menu.style.bottom = "76px";
@@ -2424,9 +2432,9 @@
       #grok-seat-action-menu.gd-seat-bubble {
         position: fixed;
         z-index: 1000003;
-        width: 272px;
-        max-width: min(272px, calc(100vw - 24px));
-        max-height: min(80vh, 620px);
+        width: 320px;
+        max-width: min(320px, calc(100vw - 24px));
+        max-height: min(86vh, 680px);
         display: flex;
         flex-direction: column;
         padding: 10px 10px 8px;
@@ -2438,9 +2446,12 @@
         backdrop-filter: blur(18px);
         -webkit-backdrop-filter: blur(18px);
         border: 1px solid rgba(255,255,255,0.12);
-        border-radius: 12px;
+        border-radius: 12px !important;
+        animation: none !important;
+        transform: none !important;
         box-shadow: 0 12px 32px rgba(0,0,0,0.4);
         user-select: none;
+        align-items: stretch !important;
       }
       #grok-seat-action-menu.gd-seat-bubble .gd-seat-scroll {
         flex: 1 1 auto;
@@ -2545,7 +2556,7 @@
     hidePackedBubbles();
     const menu = document.createElement("div");
     menu.id = "grok-seat-action-menu";
-    menu.className = "ghostly-liquid-glass-bubble no-scrollbar gd-seat-bubble";
+    menu.className = "no-scrollbar gd-seat-bubble";
 
     const allProfiles = load().profiles || [];
     let idCollapsed = true;
@@ -2636,8 +2647,7 @@
         <div class="whimsical-model-tray no-scrollbar">
           ${swapButtonsHtml}
         </div>
-        <button type="button" id="grok-seat-more" class="gd-seat-more" aria-expanded="false">More</button>
-        <div id="grok-seat-more-body" style="display:none">
+        <div id="grok-seat-more-body">
           ${(profile && profile.kind === "cursor") ? `
           <button type="button" id="grok-continue-local" class="whimsical-model-item" title="Keep this chat and settings. Local models pick up here.">
             <span style="font-size:11px;font-weight:650">Continue on Local D</span>
@@ -2677,18 +2687,6 @@
     refreshSeatQuotaBars(id);
 
     menu.querySelector("#grok-menu-close").addEventListener("click", closeSeatActionMenu);
-    const moreBtn = menu.querySelector("#grok-seat-more");
-    const moreBody = menu.querySelector("#grok-seat-more-body");
-    if (moreBtn && moreBody) {
-      moreBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const open = moreBody.style.display !== "none";
-        moreBody.style.display = open ? "none" : "block";
-        moreBtn.setAttribute("aria-expanded", open ? "false" : "true");
-        moreBtn.textContent = open ? "More" : "Less";
-        requestAnimationFrame(() => positionSeatBubble(menu));
-      });
-    }
     menu.querySelector("#grok-idcard-toggle").addEventListener("click", (e) => {
       e.stopPropagation();
       const card = menu.querySelector("#grok-idcard");

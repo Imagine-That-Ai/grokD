@@ -887,22 +887,23 @@ function frame(now) {
 }
 
 function ensureDom() {
-  const cover = kernelHost();
+  const cover = document.querySelector("#sand-app")
+    || document.body
+    || kernelHost();
   if (!cover) return false;
-  if (cover !== document.body && getComputedStyle(cover).position === "static") cover.style.position = "relative";
   wrap = document.getElementById("gd-kernel");
   if (!wrap || wrap.parentNode !== cover) {
     if (wrap) wrap.remove();
     wrap = document.createElement("div");
     wrap.id = "gd-kernel";
     wrap.setAttribute("aria-hidden", "true");
-    if (cover === document.body) {
-      wrap.style.position = "fixed";
-      wrap.style.inset = "0";
-      wrap.style.pointerEvents = "none";
-      wrap.style.zIndex = "0";
-      wrap.style.opacity = "0.85";
-    }
+    wrap.style.position = "fixed";
+    wrap.style.inset = "0";
+    wrap.style.width = "100vw";
+    wrap.style.height = "100vh";
+    wrap.style.pointerEvents = "none";
+    wrap.style.zIndex = "0";
+    wrap.style.opacity = "1";
     glCanvas = document.createElement("canvas");
     glCanvas.id = "gd-kernel-gl";
     far = document.createElement("canvas");
