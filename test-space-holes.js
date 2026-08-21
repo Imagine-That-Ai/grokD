@@ -147,6 +147,8 @@ ok("setScheme");
   const src = require("fs").readFileSync(require("path").join(__dirname, "space-kernel.js"), "utf8");
   assert(src.includes("gd-grok-hero"), "kernel paints the grok bot in the hole");
   assert(src.includes("isListAvatar"), "ignores sidebar avatars");
+  assert(src.includes("scaleY"), "hero matches the ring ellipse");
+  assert(!src.includes("HERO_SIZE = 196"), "hero size follows the inner hole");
 }
 ok("hero-mark");
 
