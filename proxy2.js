@@ -116,6 +116,8 @@ const TARGET_DEFAULT_URLS = {
   openburnbar: "http://127.0.0.1:8320/v1/chat/completions",
   cliproxy: "http://127.0.0.1:8322/v1/chat/completions",
   vibeproxy: "http://127.0.0.1:8325/v1/chat/completions",
+  ollama: "http://127.0.0.1:11434/v1/chat/completions",
+  podex: "http://127.0.0.1:8484/v1/chat/completions",
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
   vercel: "https://ai-gateway.vercel.sh/v1/chat/completions",
   fireworks: "https://api.fireworks.ai/inference/v1/chat/completions",

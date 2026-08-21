@@ -17,9 +17,11 @@ const TARGETS = {
   openburnbar: { port: 8320, url: "http://127.0.0.1:8320/v1/chat/completions" },
   cliproxy: { port: 8322, url: "http://127.0.0.1:8322/v1/chat/completions" },
   vibeproxy: { port: 8325, url: "http://127.0.0.1:8325/v1/chat/completions" },
+  ollama: { port: 11434, url: "http://127.0.0.1:11434/v1/chat/completions" },
+  podex: { port: 8484, url: "http://127.0.0.1:8484/v1/chat/completions" },
 };
 
-const FALLBACK_ORDER = ["openburnbar", "cliproxy", "vibeproxy"];
+const FALLBACK_ORDER = ["openburnbar", "cliproxy", "vibeproxy", "ollama", "podex"];
 
 const CURATED = [
   { id: "grok-4.6", name: "Grok 4.6" },
