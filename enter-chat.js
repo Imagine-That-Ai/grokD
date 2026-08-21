@@ -72,15 +72,8 @@ function revealLandings(doc) {
   return n;
 }
 
-function enterChat(doc, opts) {
+function stepIntoChat(doc, opts) {
   opts = opts || {};
-  doc = doc || (typeof document !== "undefined" ? document : null);
-  if (!doc) return { action: "no-doc", ok: false };
-  const have = chatSurface(doc);
-  if (have.ok) {
-    if (typeof opts.onOpen === "function") opts.onOpen(have);
-    return { action: "already", ok: true, composer: have.composer, agent: have.agent, thread: have.thread };
-  }
   revealLandings(doc);
   if (clickFirst(doc, ".sand-agent-item")) {
     return { action: "clicked-agent", ok: false };
@@ -102,4 +95,36 @@ function enterChat(doc, opts) {
   return { action: "no-target", ok: false };
 }
 
-module.exports = { chatSurface, enterChat, revealLandings, textOf };
+function enterChat(doc, opts) {
+  opts = opts || {};
+  doc = doc || (typeof document !== "undefined" ? document : null);
+  if (!doc) return { action: "no-doc", ok: false };
+  const until = !!opts.untilOpen;
+  const max = until ? Math.max(1, opts.steps || 8) : 1;
+  let last = { action: "no-target", ok: false };
+  for (let i = 0; i < max; i++) {
+    const have = chatSurface(doc);
+    if (have.ok) {
+      if (typeof opts.onOpen === "function") opts.onOpen(have);
+      return {
+        action: i === 0 ? "already" : last.action,
+        ok: true,
+        composer: have.composer,
+        agent: have.agent,
+        thread: have.thread,
+      };
+    }
+    last = stepIntoChat(doc, opts);
+    if (typeof opts.afterClick === "function") opts.afterClick(last, i, doc);
+    if (!until) break;
+    if (last.action === "no-target" || last.action === "create-failed") break;
+  }
+  const end = chatSurface(doc);
+  if (end.ok) {
+    if (typeof opts.onOpen === "function") opts.onOpen(end);
+    return { action: last.action, ok: true, composer: end.composer, agent: end.agent, thread: end.thread };
+  }
+  return last;
+}
+
+module.exports = { chatSurface, enterChat, stepIntoChat, revealLandings, textOf };

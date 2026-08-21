@@ -608,7 +608,7 @@
       }
       .sand-access-cover > *:not(#gd-kernel) { position: relative; z-index: 2; }
       #gd-scheme-toggle {
-        position: fixed; right: 18px; bottom: 18px; z-index: 999992;
+        position: fixed; right: 18px; top: 52px; bottom: auto; z-index: 999992;
         min-width: 72px; height: 32px; padding: 0 12px; cursor: pointer;
         border-radius: 999px; font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
         letter-spacing: 0.04em; text-transform: uppercase;
@@ -1755,6 +1755,11 @@
       else cover.dataset.gdScheme = next;
     }
     setUiPref("coverScheme", next);
+    try { document.documentElement.style.colorScheme = applied.light ? "light" : "dark"; } catch {}
+    try {
+      const { nativeTheme } = require("electron");
+      if (nativeTheme) nativeTheme.themeSource = applied.light ? "light" : "dark";
+    } catch {}
     const btn = document.getElementById("gd-scheme-toggle");
     if (btn) {
       btn.textContent = applied.light ? "Dark" : "Light";
@@ -1907,40 +1912,70 @@
     });
   }
 
+  function reconnectBox() {
+    try { require(path.join(ROOT, "create-bot-hook.js")).reconnect(); } catch {}
+    try {
+      const n = queuedNotice();
+      const btn = n && n.querySelector && [...(n.querySelectorAll("button") || [])].find((b) => !/cancel/i.test(b.textContent || ""));
+      if (btn && typeof btn.click === "function") btn.click();
+    } catch {}
+  }
+
   function chatLib() {
     try { return require(path.join(ROOT, "enter-chat.js")); }
     catch { return null; }
   }
 
   function goChat() {
+    if (window.__gdChatBusy) return window.__gdChatBusy;
     const lib = chatLib();
-    if (!lib) return { action: "no-lib", ok: false };
-    const have = lib.chatSurface(document);
-    if (have.ok) {
-      hideSkySurfaces();
-      return { action: "already", ok: true, composer: have.composer, agent: have.agent, thread: have.thread };
-    }
-    const now = Date.now();
-    if (window.__gdEnteringChat && now - window.__gdEnteringChat < 4000) {
-      return { action: "in-flight", ok: false };
-    }
-    window.__gdEnteringChat = now;
-    let createNamed = null;
-    try {
-      const hook = require(path.join(ROOT, "create-bot-hook.js"));
-      if (hook && hook.createNamed) createNamed = (name) => hook.createNamed(name);
-    } catch {}
-    wrapPageAuth().then(() => {
-      const opened = lib.enterChat(document, {
-        createNamed,
-        onOpen() { hideSkySurfaces(); },
-      });
-      if (opened && opened.ok) hideSkySurfaces();
-    }).catch(() => {});
-    return { action: "wrapping", ok: false };
+    if (!lib) return Promise.resolve({ action: "no-lib", ok: false });
+    window.__gdChatBusy = (async () => {
+      const have = lib.chatSurface(document);
+      if (have.ok) {
+        hideSkySurfaces();
+        reconnectBox();
+        return { action: "already", ok: true, composer: have.composer, agent: have.agent, thread: have.thread };
+      }
+      let createNamed = null;
+      try {
+        const hook = require(path.join(ROOT, "create-bot-hook.js"));
+        if (hook && hook.createNamed) createNamed = (name) => hook.createNamed(name);
+      } catch {}
+      try { await wrapPageAuth(); } catch {}
+      let last = { action: "none", ok: false };
+      for (let i = 0; i < 10; i++) {
+        const now = lib.chatSurface(document);
+        if (now.ok) {
+          hideSkySurfaces();
+          reconnectBox();
+          return { action: last.action === "none" ? "already" : last.action, ok: true, composer: now.composer, agent: now.agent, thread: now.thread };
+        }
+        last = lib.enterChat(document, {
+          createNamed,
+          untilOpen: false,
+          onOpen() { hideSkySurfaces(); },
+        });
+        if (last && last.ok) {
+          hideSkySurfaces();
+          reconnectBox();
+          return last;
+        }
+        if (!last || last.action === "no-target" || last.action === "create-failed") break;
+        await new Promise((r) => setTimeout(r, 450));
+      }
+      const end = lib.chatSurface(document);
+      if (end.ok) {
+        hideSkySurfaces();
+        reconnectBox();
+        return { action: last.action, ok: true, composer: end.composer, agent: end.agent, thread: end.thread };
+      }
+      return { action: last.action, ok: false, composer: end.composer, agent: end.agent, thread: end.thread };
+    })().finally(() => { window.__gdChatBusy = null; });
+    return window.__gdChatBusy;
   }
 
-  function dismissSky() {
+  async function dismissSky() {
     window.__gdSkyCleared = true;
     setUiPref("skyCleared", true);
     const bar = document.getElementById("gd-sky-actions");
@@ -1949,7 +1984,7 @@
       bar.classList.add("is-out");
       setTimeout(() => { if (bar.parentNode) bar.remove(); }, 220);
     }
-    const opened = goChat();
+    const opened = await goChat();
     if (opened && opened.ok) hideSkySurfaces();
     return opened;
   }
@@ -3576,9 +3611,9 @@
         out.orbs = !!document.getElementById("pure-lava-orbs-root");
         out.bodyLen = t.length;
       } else if (cmd.op === "continue-sky") {
-        out.enter = dismissSky();
+        out.enter = await dismissSky();
         out.chat = chatLib() ? chatLib().chatSurface(document) : { ok: !!findComposer() };
-        out.ok = true;
+        out.ok = !!(out.chat && out.chat.ok);
       } else if (cmd.op === "login-clean") {
         out.login = await loginClean({ reset: !!cmd.reset });
         out.ok = true;

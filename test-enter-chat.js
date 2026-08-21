@@ -103,6 +103,25 @@ function docFrom(map) {
 }
 
 {
+  const next = node({ textContent: "Next" });
+  const composer = node();
+  const map = { "button, [role='button'], a": [next] };
+  const d = docFrom(map);
+  const r = enterChat(d, {
+    untilOpen: true,
+    steps: 4,
+    afterClick(last) {
+      if (last.action === "clicked-next") map['[contenteditable="true"]'] = composer;
+    },
+  });
+  assert(r.ok === true, JSON.stringify(r));
+  assert(r.action === "clicked-next", r.action);
+  assert(r.composer === true, "composer after Next");
+  assert(next.clicked === 1, "one Next");
+  ok("until-open-walks-wizard");
+}
+
+{
   const sign = node({ textContent: "Sign in" });
   let created = 0;
   const d = docFrom({ "button, [role='button'], a": [sign] });
