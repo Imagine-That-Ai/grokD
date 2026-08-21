@@ -42,6 +42,7 @@ ok("tracked-face-tat-icon");
     "provider-logos.js",
     "glass-theme.js",
     "liquid-glass-btn.js",
+    "enter-chat.js",
     "profile-ui-inject.js",
     "assets/lobe/openai.svg",
     "assets/lobe/anthropic.svg",
@@ -86,6 +87,8 @@ ok("install-sh-ships-look");
   assert(inject.includes("This Mac only"), "local-only on the sky page");
   assert(inject.includes("skyCleared"), "sky actions last only until you pick");
   assert(inject.includes("liquid-glass-btn.js"), "sky buttons use the glass renderer");
+  assert(inject.includes("enter-chat.js"), "Continue opens chat");
+  assert(inject.includes("continue-sky"), "overlay command leaves the sky");
   assert(inject.includes("gd-lg-btn"), "three separate glass buttons");
   const lg = read("liquid-glass-btn.js");
   assert(lg.includes("sdRoundBox"), "volume sdf");

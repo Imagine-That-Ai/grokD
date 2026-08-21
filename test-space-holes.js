@@ -152,4 +152,29 @@ ok("setScheme");
 }
 ok("hero-mark");
 
-console.log(`\n${n}/8 space-hole checks passed`);
+{
+  const prevDoc = global.document;
+  const prevWin = global.window;
+  try {
+    const cover = { style: { display: "" } };
+    global.window = {};
+    global.document = {
+      querySelector(sel) {
+        if (sel === ".sand-access-cover" || sel === ".sand-onboarding__landing") return cover;
+        return null;
+      },
+    };
+    assert(k.onSky() === true, "cover shown is sky");
+    cover.style.display = "none";
+    assert(k.onSky() === false, "display none is not sky");
+    cover.style.display = "";
+    global.window.__gdSkyCleared = true;
+    assert(k.onSky() === false, "cleared flag is not sky");
+  } finally {
+    global.document = prevDoc;
+    global.window = prevWin;
+  }
+}
+ok("onSky");
+
+console.log(`\n${n}/9 space-hole checks passed`);

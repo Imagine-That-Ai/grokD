@@ -54,6 +54,7 @@ jobs:
           node test-space-holes.js
           node test-install-look.js
           node test-liquid-glass-btn.js
+          node test-enter-chat.js
       - name: no kitchen leftovers
         run: |
           python3 - <<'PY'

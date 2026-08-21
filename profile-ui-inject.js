@@ -1894,21 +1894,55 @@
     });
   }
 
+  function chatLib() {
+    try { return require(path.join(ROOT, "enter-chat.js")); }
+    catch { return null; }
+  }
+
+  function goChat() {
+    const lib = chatLib();
+    if (!lib) return { action: "no-lib", ok: false };
+    const have = lib.chatSurface(document);
+    if (have.ok) {
+      hideSkySurfaces();
+      return { action: "already", ok: true, composer: have.composer, agent: have.agent, thread: have.thread };
+    }
+    const now = Date.now();
+    if (window.__gdEnteringChat && now - window.__gdEnteringChat < 4000) {
+      return { action: "in-flight", ok: false };
+    }
+    window.__gdEnteringChat = now;
+    let createNamed = null;
+    try {
+      const hook = require(path.join(ROOT, "create-bot-hook.js"));
+      if (hook && hook.createNamed) createNamed = (name) => hook.createNamed(name);
+    } catch {}
+    return lib.enterChat(document, {
+      createNamed,
+      onOpen() { hideSkySurfaces(); },
+    });
+  }
+
   function dismissSky() {
     window.__gdSkyCleared = true;
     setUiPref("skyCleared", true);
-    hideSkySurfaces();
     const bar = document.getElementById("gd-sky-actions");
-    if (!bar) return;
-    try { require(path.join(ROOT, "liquid-glass-btn.js")).stop(); } catch (_) {}
-    bar.classList.add("is-out");
-    setTimeout(() => { if (bar.parentNode) bar.remove(); }, 220);
+    if (bar) {
+      try { require(path.join(ROOT, "liquid-glass-btn.js")).stop(); } catch (_) {}
+      bar.classList.add("is-out");
+      setTimeout(() => { if (bar.parentNode) bar.remove(); }, 220);
+    }
+    const opened = goChat();
+    if (opened && opened.ok) hideSkySurfaces();
+    return opened;
   }
 
   function mountSkyActions() {
     if (skyCleared()) {
       window.__gdSkyCleared = true;
-      hideSkySurfaces();
+      const have = chatLib() && chatLib().chatSurface(document);
+      if (have && have.ok) hideSkySurfaces();
+      else goChat();
       const leftover = document.getElementById("gd-sky-actions");
       if (leftover) leftover.remove();
       try { require(path.join(ROOT, "liquid-glass-btn.js")).stop(); } catch (_) {}
@@ -1937,9 +1971,12 @@
     bar.querySelector("#gd-sky-local").addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!isLocalSeat()) {
+      if (activeId() !== "local-d") {
+        window.__gdSkyCleared = true;
+        setUiPref("skyCleared", true);
         toast("Switching to Local D…");
         switchTo("local-d");
+        return;
       }
       dismissSky();
     });
@@ -3494,16 +3531,37 @@
     try {
       if (cmd.op === "status") {
         const t = document.body ? document.body.innerText : "";
+        const cover = document.querySelector(".sand-access-cover");
+        const landing = document.querySelector(".sand-onboarding__landing");
+        const kernel = document.getElementById("gd-kernel");
+        const chat = chatLib() ? chatLib().chatSurface(document) : { composer: !!findComposer(), ok: !!findComposer() };
+        let sky = false;
+        try { sky = require(path.join(ROOT, "space-kernel.js")).onSky(); } catch {}
         out.ok = true;
         out.mode = mode();
         out.identity = await identity();
         out.model = currentModelId();
-        out.composer = !!findComposer();
+        out.composer = !!chat.composer;
+        out.agent = !!chat.agent;
+        out.thread = !!chat.thread;
+        out.chat = !!chat.ok;
+        out.agentCount = document.querySelectorAll(".sand-agent-item").length;
+        out.cover = !!cover;
+        out.landing = !!landing;
+        out.coverShown = !!(cover && !(cover.style && cover.style.display === "none"));
+        out.landingShown = !!(landing && !(landing.style && landing.style.display === "none"));
+        out.kernelDisplay = kernel ? (kernel.style.display || "") : "";
+        out.sky = !!sky;
+        out.skyCleared = !!window.__gdSkyCleared;
         out.queued = !!queuedNotice();
         out.unavail = /isn.?t available on this account/i.test(t);
         out.rec = /Will send when reconnected/.test(t);
         out.orbs = !!document.getElementById("pure-lava-orbs-root");
         out.bodyLen = t.length;
+      } else if (cmd.op === "continue-sky") {
+        out.enter = dismissSky();
+        out.chat = chatLib() ? chatLib().chatSurface(document) : { ok: !!findComposer() };
+        out.ok = true;
       } else if (cmd.op === "login-clean") {
         out.login = await loginClean({ reset: !!cmd.reset });
         out.ok = true;
