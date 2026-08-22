@@ -333,12 +333,29 @@ async function routeCompletions(body, res) {
   }
 
   // 5. Rich Onboarding & Provider Setup Fallback
+  const text = `👋 **Welcome to Grok "D" — Powered by OpenBurnBar!**\n\nYour local AI gateway is active on \`http://127.0.0.1:8320\`.\n\nTo connect your AI subscriptions and keys:\n\n* 🌐 **OpenRouter / All Models**: Connect via OAuth or add an OpenRouter key to unlock Claude 3.7, DeepSeek R1, GPT-4o & Llama 3.3.\n* ⚡ **Free Local AI**: Run [Ollama](https://ollama.com) (\`ollama run llama3.2\`) or LM Studio. OpenBurnBar auto-detects local models instantly.\n* 🔑 **Direct API Keys**: Configure OpenAI, xAI, Anthropic, MiniMax, DeepSeek, or Gemini in the **OpenBurnBar & Models** settings menu.\n* ✨ **Cursor Multi-Seat**: Click the bottom-left seat menu to manage multiple Cursor accounts.\n* 🔥 **BurnBar Mac App**: Check out [burnbar.app](https://burnbar.app) for system-wide AI spend tracking.`;
+
+  if (body.stream === false) {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      id: "chatcmpl-" + Date.now(),
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: targetModel,
+      choices: [{
+        index: 0,
+        message: { role: "assistant", content: text },
+        finish_reason: "stop"
+      }]
+    }));
+    return;
+  }
+
   res.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
     "connection": "keep-alive",
   });
-  const text = `👋 **Welcome to Grok "D" — Powered by OpenBurnBar!**\n\nYour local AI gateway is active on \`http://127.0.0.1:8320\`.\n\nTo connect your AI subscriptions and keys:\n\n* 🌐 **OpenRouter / All Models**: Connect via OAuth or add an OpenRouter key to unlock Claude 3.7, DeepSeek R1, GPT-4o & Llama 3.3.\n* ⚡ **Free Local AI**: Run [Ollama](https://ollama.com) (\`ollama run llama3.2\`) or LM Studio. OpenBurnBar auto-detects local models instantly.\n* 🔑 **Direct API Keys**: Configure OpenAI, xAI, Anthropic, MiniMax, DeepSeek, or Gemini in the **OpenBurnBar & Models** settings menu.\n* ✨ **Cursor Multi-Seat**: Click the bottom-left seat menu to manage multiple Cursor accounts.\n* 🔥 **BurnBar Mac App**: Check out [burnbar.app](https://burnbar.app) for system-wide AI spend tracking.`;
 
   const chunk = {
     id: "chatcmpl-" + Date.now(),
