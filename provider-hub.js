@@ -22,7 +22,8 @@
       const cur = readConfig();
       const next = { ...cur, ...patch };
       fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), "utf8");
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), { encoding: "utf8", mode: 0o600 });
+      try { fs.chmodSync(CONFIG_PATH, 0o600); } catch (_) {}
       return next;
     } catch (e) {
       console.error("[provider-hub] saveConfig error:", e);

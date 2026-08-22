@@ -73,7 +73,8 @@ function writeModelConfig(patch) {
     const cur = readModelConfig();
     const next = { ...cur, ...patch };
     fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), "utf8");
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), { encoding: "utf8", mode: 0o600 });
+    try { fs.chmodSync(CONFIG_PATH, 0o600); } catch (_) {}
     return next;
   } catch (e) {
     console.error("[openburnbar-proxy] writeModelConfig error:", e);
@@ -377,11 +378,12 @@ const server = http.createServer(async (req, res) => {
     const code = url.searchParams.get("code") || url.searchParams.get("token") || url.searchParams.get("api_key") || url.searchParams.get("key");
     const provider = url.searchParams.get("provider") || "openrouter";
     if (code) {
-      const patch = { providers: { ...readModelConfig().providers, [provider]: { enabled: true, apiKey: code, connectedAt: Date.now() } } };
-      if (provider === "openrouter") patch.openrouterApiKey = code;
+      const safeProvider = String(provider || "openrouter").replace(/[^a-zA-Z0-9_-]/g, "");
+      const patch = { providers: { ...readModelConfig().providers, [safeProvider]: { enabled: true, apiKey: code, connectedAt: Date.now() } } };
+      if (safeProvider === "openrouter") patch.openrouterApiKey = code;
       writeModelConfig(patch);
       res.writeHead(200, { "content-type": "text/html" });
-      res.end(`<!DOCTYPE html><html><body style="font-family:system-ui,-apple-system;background:#0b0d13;color:#e6edf3;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><div style="text-align:center;padding:32px;background:#161b22;border:1px solid #30363d;border-radius:16px;box-shadow:0 12px 36px rgba(0,0,0,0.5);max-width:440px;"><h2 style="margin:0 0 12px;color:#58a6ff;">⚡ OpenBurnBar Connected!</h2><p style="color:#8b949e;line-height:1.5;">${provider.toUpperCase()} has been authenticated and linked to your local Grok "D" workspace.</p><p style="color:#58a6ff;font-size:13px;margin-top:20px;">You can close this window now.</p><script>setTimeout(() => window.close(), 1500);</script></div></body></html>`);
+      res.end(`<!DOCTYPE html><html><body style="font-family:system-ui,-apple-system;background:#0b0d13;color:#e6edf3;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><div style="text-align:center;padding:32px;background:#161b22;border:1px solid #30363d;border-radius:16px;box-shadow:0 12px 36px rgba(0,0,0,0.5);max-width:440px;"><h2 style="margin:0 0 12px;color:#58a6ff;">⚡ OpenBurnBar Connected!</h2><p style="color:#8b949e;line-height:1.5;">${safeProvider.toUpperCase()} has been authenticated and linked to your local Grok "D" workspace.</p><p style="color:#58a6ff;font-size:13px;margin-top:20px;">You can close this window now.</p><script>setTimeout(() => window.close(), 1500);</script></div></body></html>`);
       return;
     }
   }
