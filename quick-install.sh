@@ -51,7 +51,7 @@ echo "✓ Node.js $(node -v) & Python3 $(python3 -V 2>&1 | awk '{print $2}') ver
 
 # 3. Clone or Update Grok-D Workspace
 GROK_ROOT="$HOME/.grok/grokbot-d"
-REPO_URL="https://github.com/Imagine-That-Ai/grok-D.git"
+REPO_URL="https://github.com/Imagine-That-Ai/grokD.git"
 
 if [ -d "$GROK_ROOT/.git" ]; then
   echo "✓ Updating existing Grok \"D\" workspace at $GROK_ROOT..."

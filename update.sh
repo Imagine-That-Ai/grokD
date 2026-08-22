@@ -27,8 +27,9 @@ if [ -d "$ROOT/.git" ]; then
   git fetch origin main
   git reset --hard origin/main
 else
-  echo "✓ Updating workspace at $ROOT..."
-  git clone https://github.com/Imagine-That-Ai/grok-D.git "$ROOT.tmp"
+  echo "✓ Workspace not initialized. Fresh cloning from GitHub..."
+  git clone https://github.com/Imagine-That-Ai/grokD.git "$ROOT.tmp"
+  mkdir -p "$ROOT"
   cp -R "$ROOT.tmp/"* "$ROOT/"
   rm -rf "$ROOT.tmp"
   cd "$ROOT"
