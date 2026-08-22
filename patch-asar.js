@@ -112,6 +112,27 @@ function applyPatches(opts) {
     main = MAIN_HOOK + main;
     openExt = "patched";
   }
+  // Neutralize false-alarm auto-update / minimum version blocker
+  main = main.replace(/isBelowMinimumVersion\(\)\s*\{[\s\S]*?return\s*[^}]+\}/g, "isBelowMinimumVersion(){return false;}");
+  main = main.replace(/isBelowMinimumVersion:\s*this\.isBelowMinimumVersion\(\)/g, "isBelowMinimumVersion:false");
+
+  const assetsDir = path.join(SRC, "dist", "renderer", "assets");
+  if (fs.existsSync(assetsDir)) {
+    try {
+      const files = fs.readdirSync(assetsDir);
+      for (const f of files) {
+        if (f.endsWith(".js")) {
+          const fp = path.join(assetsDir, f);
+          let code = fs.readFileSync(fp, "utf8");
+          if (code.includes("isBelowMinimumVersion")) {
+            code = code.replace(/\.isBelowMinimumVersion/g, ".isBelowMinimumVersion&&false");
+            fs.writeFileSync(fp, code, "utf8");
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   fs.writeFileSync(mainFile, main);
   const hook = ensurePreloadHook(preFile);
   const report = {
@@ -121,6 +142,7 @@ function applyPatches(opts) {
     wrapMainAuth: auth.status === "skipped" ? authFuzzy.status : auth.status,
     openExternal: openExt,
     preloadHook: hook,
+    minVersionBypass: "patched",
   };
   report.ok = hook === "patched" || hook === "already";
   return report;

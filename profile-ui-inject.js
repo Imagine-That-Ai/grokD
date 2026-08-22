@@ -640,6 +640,13 @@
         display: none !important;
       }
 
+      /* Hide false-alarm update required modals */
+      .sand-update-required,
+      [class*="sand-update-required"],
+      div[class*="update-required"] {
+        display: none !important;
+      }
+
       /* Tesla candy red for the grok mark itself, wherever it renders: the
          little one riding the model orb, the picker header, every model chip.
          The mark ships as fill="currentColor" inside an <img> data URL, so CSS
@@ -1307,6 +1314,8 @@
         if (btn) btn.click();
         else t.style.display = "none";
       }
+      const updateBlockers = document.querySelectorAll(".sand-update-required, [class*='update-required']");
+      for (const ub of updateBlockers) ub.remove();
     }
     const lib = coverLib();
     if (!lib || !lib.restyleLostDialog) return;
