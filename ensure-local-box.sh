@@ -32,7 +32,7 @@ fi
 
 # Prefer durable scripts; keep a copy under /tmp for anything still pointed there.
 if [ -d "$DURABLE" ]; then
-  for f in proxy2.js runbox.js fakebox.js protoutil.js local-mcp.js bridge-lib.js gateway-shim.js routine-guard.js node-deps.js sqlite-ro.js clone-bot.js paths.js; do
+  for f in proxy2.js runbox.js fakebox.js protoutil.js local-mcp.js bridge-lib.js gateway-shim.js routine-guard.js openburnbar-proxy.mjs node-deps.js sqlite-ro.js clone-bot.js paths.js; do
     if [ -f "$DURABLE/$f" ]; then
       cp "$DURABLE/$f" "$HACK/$f" 2>/dev/null || true
       if [ -d /tmp/grokbot-hack ] && [ ! -L /tmp/grokbot-hack ]; then
@@ -123,6 +123,13 @@ fi
 if ! is_listen 8787; then
   nohup env GROKBOT_HACK="$HACK" "$NODE" "$RUN_JS/proxy2.js" 8787 >"$HACK/proxy2.out" 2>&1 &
   echo "started proxy2 pid $!"
+fi
+
+if ! is_listen 8320; then
+  if [ -f "$RUN_JS/openburnbar-proxy.mjs" ]; then
+    nohup "$NODE" "$RUN_JS/openburnbar-proxy.mjs" --port 8320 >"$HACK/openburnbar-proxy.out" 2>&1 &
+    echo "started openburnbar-proxy pid $! (:8320)"
+  fi
 fi
 
 if ! pgrep -f "$RUN_JS/routine-guard.js" >/dev/null 2>&1; then

@@ -1,30 +1,45 @@
-# Prepare to get grok"D"!
+# Grok "D" — Local-First Autonomous AI Companion
 
-Local bots on this Mac, or your Cursor login. Other people install from [Imagine-That-Ai/grokD](https://github.com/Imagine-That-Ai/grokD). They do not get your chats or tokens.
+Local bots on your Mac, seamless multi-account Cursor switching, offline Ollama/LM Studio models, and OpenBurnBar OpenAI-compatible gateway.
 
-CubeLove is live on iPhone. grok"D" on the phone is not yet. TestFlight: [alberto@imagine-that.ai](mailto:alberto@imagine-that.ai).
+---
 
-Pack and hand over: `INSTALL.md`. Do not zip `profile-data/` or `GrokBotSeat4`.
+## ⚡ Instant 1-Liner Install (For any Mac)
 
-Guides:
+Paste this into Terminal on any Mac with `/Applications/Grok Bot.app` installed:
 
-- [`splash/onboarding-apple.html`](splash/onboarding-apple.html)
-- [`welcome_guide_source.html`](welcome_guide_source.html)
+```bash
+git clone https://github.com/Imagine-That-Ai/grok-D.git ~/.grok/grokbot-d && bash ~/.grok/grokbot-d/install.sh --replace
+```
 
-Strangers clone that public repo and run `./install.sh`, or drag a notarized drop from `./pack-drop.sh`. Official Grok Bot has to be on the Mac first. If an xAI update replaces `app.asar`, `repair-overlay.sh` tries to put the hook back. Official Cursor fall-over cannot keep the same cloud thread; **Locally · Continue** seeds a local agent with the last turns.
+*(If you already cloned the repo, simply run `bash install.sh --replace` inside the folder).*
 
-# Local box
+---
 
-Local mode talks to this machine, not to a signed-in cloud box.
+## 🔄 Safe In-Place Update (Never Breaks Chats or Logins)
 
-| Port | Process | Start |
+Update Grok D to the latest version while preserving all your bots, transcripts, and Cursor seats:
+
+```bash
+bash ~/.grok/grokbot-d/update.sh
+```
+
+*(You can also click the **"Update Grok D"** button inside the app's bottom-left seat menu).*
+
+---
+
+# Local Architecture & Services
+
+Local mode runs entirely on your Mac, routing prompts through the local OpenBurnBar OpenAI gateway:
+
+| Port | Service | Role |
 | --- | --- | --- |
-| 1337 | `gateway-shim.js` (idle-wait + broadcast retry). `GET /install/openburnbar` | `ensure-local-box.sh` |
-| 1338 | `runbox.js` → host-main | same |
-| 8787 | `proxy2.js` (default target: OpenBurnBar) | same |
-| 8320 | grokD `openburnbar` target | Mac app daemon; npm cannot start this yet |
-| — | `routine-guard.js` | parks resurrected joke crons |
-| — | Grok Bot D.app | `SAND_HOST_GATEWAY_URL=http://127.0.0.1:1337` |
+| **8320** | `openburnbar-proxy` | Local loopback OpenAI-compatible completions gateway (Ollama / xAI / OpenAI) |
+| **1337** | `gateway-shim.js` | Sand agent dispatch, broadcast retries, and local prompt routing |
+| **1338** | `runbox.js` | Local host process and sand coordinator |
+| **8787** | `proxy2.js` | Bridge between Connect protobuf and local inference stream |
+| **1340** | `fakebox.js` | Sand host mock for offline seat validation |
+| — | `routine-guard.js` | Routine sync and offline cron management |
 
 Scripts are also copied to `~/.grok/grokbot-d/`. Official from-agent chrome is not exposed on `sendPrompt`; bot-to-bot still uses `[Bot-to-bot from NAME]:` on the wire. `bot-chatter.js` hides that raw text in the transcript: a run of inter-bot turns collapses to one marker (`3 messages with <Bot>`, `Messaged <marks> 3 Bots`) in each bot’s own colour, and clicking it opens their view-only chat. Outbound sends are read back out of the recipients’ `store.db`, since this box only records them there.
 

@@ -12,7 +12,7 @@
   const READY = path.join(RUNTIME, "ready.json");
   const COMMAND = path.join(RUNTIME, "command.json");
   const RESULT = path.join(RUNTIME, "result.json");
-  const ACTIVE_AGENT = "/tmp/grokbot-hack/box-data/agents/active-agent.json";
+  const ACTIVE_AGENT = path.join(ROOT, "hack", "box-data", "agents", "active-agent.json");
   const AUTH = "Bearer fake-gateway-token";
   let models;
   try { models = require(path.join(ROOT, "model-lib.js")); } catch { models = null; }
