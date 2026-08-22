@@ -205,6 +205,86 @@ async function routeCompletions(body, res) {
   // 2. Resolve Multi-Provider Route
   const provider = resolveProvider(targetModel, cfg);
   if (provider && provider.key) {
+    // Special handling for Anthropic direct API key
+    if (provider.target === "anthropic") {
+      try {
+        const systemMsg = (body.messages || []).find(m => m.role === "system")?.content || "";
+        const userMessages = (body.messages || []).filter(m => m.role !== "system").map(m => ({
+          role: m.role === "assistant" ? "assistant" : "user",
+          content: typeof m.content === "string" ? m.content : JSON.stringify(m.content)
+        }));
+
+        const anthropicBody = {
+          model: provider.model || "claude-3-7-sonnet-20250219",
+          max_tokens: body.max_tokens || 4096,
+          stream: true,
+          messages: userMessages.length ? userMessages : [{ role: "user", content: "Hello" }]
+        };
+        if (systemMsg) anthropicBody.system = systemMsg;
+
+        const up = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": provider.key,
+            "anthropic-version": "2023-06-01"
+          },
+          body: JSON.stringify(anthropicBody)
+        });
+
+        if (up.ok) {
+          res.writeHead(200, {
+            "content-type": "text/event-stream",
+            "cache-control": "no-cache",
+            "connection": "keep-alive"
+          });
+          const reader = up.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split("\n");
+            buf = lines.pop() || "";
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                const dataStr = line.slice(6).trim();
+                if (dataStr === "[DONE]") continue;
+                try {
+                  const ev = JSON.parse(dataStr);
+                  if (ev.type === "content_block_delta" && ev.delta?.text) {
+                    const chunk = {
+                      id: "chatcmpl-" + Date.now(),
+                      object: "chat.completion.chunk",
+                      created: Math.floor(Date.now() / 1000),
+                      model: targetModel,
+                      choices: [{ index: 0, delta: { content: ev.delta.text }, finish_reason: null }]
+                    };
+                    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+                  }
+                } catch (_) {}
+              }
+            }
+          }
+          const endChunk = {
+            id: "chatcmpl-" + Date.now(),
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: targetModel,
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }]
+          };
+          res.write(`data: ${JSON.stringify(endChunk)}\n\n`);
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+      } catch (e) {
+        console.error("[openburnbar-proxy] Anthropic native forward failed:", e.message);
+      }
+    }
+
+    // Standard OpenAI-Compatible Multi-Provider Forward
     try {
       const headers = { "content-type": "application/json", ...(provider.header ? provider.header(provider.key) : { "authorization": `Bearer ${provider.key}` }) };
       const remoteUrl = `${provider.baseUrl.replace(/\/+$/, "")}/chat/completions`;
