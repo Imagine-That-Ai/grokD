@@ -82,6 +82,43 @@ function writeModelConfig(patch) {
   }
 }
 
+let _cachedFreeOpenRouterModels = null;
+let _cachedFreeOpenRouterModelsTime = 0;
+const FREE_MODELS_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+async function getDynamicOpenRouterFreeModels() {
+  const now = Date.now();
+  if (_cachedFreeOpenRouterModels && (now - _cachedFreeOpenRouterModelsTime < FREE_MODELS_CACHE_TTL)) {
+    return _cachedFreeOpenRouterModels;
+  }
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/models", { signal: AbortSignal.timeout(3500) });
+    if (res.ok) {
+      const json = await res.json();
+      const free = (json.data || []).filter(m => {
+        const p = m.pricing;
+        const isZero = p && Number(p.prompt) === 0 && Number(p.completion) === 0;
+        const isFreeTag = (m.id || "").endsWith(":free");
+        return isZero || isFreeTag;
+      }).map(m => m.id);
+      if (free.length > 0) {
+        _cachedFreeOpenRouterModels = free;
+        _cachedFreeOpenRouterModelsTime = now;
+        return free;
+      }
+    }
+  } catch (err) {
+    console.error("[openburnbar-proxy] Could not fetch dynamic OpenRouter free models:", err.message);
+  }
+  return _cachedFreeOpenRouterModels || [
+    "deepseek/deepseek-r1:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "liquid/lfm-2.5-2.6b:free",
+    "z-ai/glm-5.2:free"
+  ];
+}
+
 async function getAvailableOllamaModels() {
   try {
     const res = await fetch("http://127.0.0.1:11434/api/tags", { signal: AbortSignal.timeout(1500) });
@@ -422,6 +459,7 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/v1/models" && req.method === "GET") {
     const ollama = await getAvailableOllamaModels();
     const lm = await getAvailableLMStudioModels();
+    const openrouterFree = await getDynamicOpenRouterFreeModels();
     const cfg = readModelConfig();
     const providerModels = [];
     if (cfg.openrouterApiKey || cfg.providers?.openrouter?.apiKey) {
@@ -444,7 +482,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     const curated = ["grok-4.6", "grok-composer-2.5-fast", "gpt-5.6-luna", "claude-opus-5", "deepseek-v4-pro:cloud"];
-    const all = [...new Set([...curated, ...providerModels, ...ollama, ...lm])].map(id => ({
+    const all = [...new Set([...curated, ...openrouterFree, ...providerModels, ...ollama, ...lm])].map(id => ({
       id,
       object: "model",
       created: 1700000000,
