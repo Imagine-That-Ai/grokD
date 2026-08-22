@@ -55,7 +55,27 @@ if [ -z "$SRC" ]; then
     if [ -d "$c" ]; then SRC="$c"; break; fi
   done
 fi
-[ -d "$SRC" ] || die "Official Grok Bot not found. Install it from xAI, then run this again."
+
+if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then
+  cat <<'EOF' >&2
+
+========================================================================
+⚠️  Whoops! You don't have Grok Bot installed yet — you need that!
+
+Grok "D" supercharges the official desktop app with local AI models,
+multi-account Cursor seats, and the OpenBurnBar AI gateway.
+
+👉 Download the official Grok Bot app here:
+   https://grok.com/
+   (or https://x.ai/grok)
+
+Once downloaded and moved to /Applications/Grok Bot.app, run this 1-liner again:
+   git -c credential.helper= clone --depth=1 https://github.com/Imagine-That-Ai/grokD.git ~/.grok/grokbot-d && bash ~/.grok/grokbot-d/install.sh --replace
+========================================================================
+
+EOF
+  exit 1
+fi
 [ -f "$SRC/Contents/Resources/app.asar" ] || die "That app has no app.asar — is it official Grok Bot?"
 case "$SRC" in
   *"Grok Bot D.app"|*grok\"D\".app|*"Grok Bot B.app"|*"Grok Bot C.app")

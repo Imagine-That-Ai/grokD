@@ -73,11 +73,23 @@ for c in "/Applications/Grok Bot.app" "$HOME/Applications/Grok Bot.app"; do
 done
 
 if [ -z "$SRC" ]; then
-  echo ""
-  echo "⚠️  Official Grok Bot.app not found in /Applications."
-  echo "Please install official Grok Bot from xAI, then run this installer again."
-  echo "Download: https://x.ai/grok-bot"
-  echo ""
+  cat <<'EOF' >&2
+
+========================================================================
+⚠️  Whoops! You don't have Grok Bot installed yet — you need that!
+
+Grok "D" supercharges the official desktop app with local AI models,
+multi-account Cursor seats, and the OpenBurnBar AI gateway.
+
+👉 Download the official Grok Bot app here:
+   https://grok.com/
+   (or https://x.ai/grok)
+
+Once downloaded and moved to /Applications/Grok Bot.app, run this 1-liner again:
+   git -c credential.helper= clone --depth=1 https://github.com/Imagine-That-Ai/grokD.git ~/.grok/grokbot-d && bash ~/.grok/grokbot-d/install.sh --replace
+========================================================================
+
+EOF
   exit 1
 fi
 echo "✓ Found official Grok Bot base at $SRC"
