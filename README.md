@@ -16,31 +16,23 @@ git -c credential.helper= clone --depth=1 https://github.com/Imagine-That-Ai/gro
 
 ---
 
-## 🚀 Setting Up Your AI Providers & Models
+## 🚀 Use Your Existing AI Subscriptions (No API Keys Needed)
 
-Grok "D" uses **OpenBurnBar** as its local AI gateway on port `:8320`. You can link your existing AI subscriptions or API keys in 1 click:
+Grok "D" and OpenBurnBar (:8320) support **1-Click OAuth Browser Logins** so you can use your existing monthly subscriptions without paying for separate API credits:
 
-### 1. 🌐 OpenRouter OAuth (All Frontier Models with 1 Click)
-* Click **"⚡ OpenBurnBar & Models"** in the seat menu.
-* Click **"Connect with OAuth"** to authenticate OpenRouter in your browser.
-* Instantly unlocks Claude 3.7 Sonnet, DeepSeek R1, GPT-4o, and Llama 3.3 at raw token cost.
+### 1. ⚡ 1-Click OAuth Subscriptions
+Open **"⚡ AI Subscriptions & Provider Hub"** in the seat menu:
+* 🤖 **ChatGPT Plus & Pro (Codex OAuth)**: Tap **"Login with ChatGPT"** to authenticate via browser. Grok D routes GPT-4o, o3-mini, and o1 through your monthly ChatGPT subscription!
+* 🧠 **Claude Pro / Team (Claude OAuth)**: Tap **"Login with Claude"** to use Claude 3.7 Sonnet and Opus using your Claude subscription.
+* 🚀 **xAI / Grok Subscription**: Tap **"Login with xAI"** for Grok 2 & Grok Beta.
+* 🌐 **OpenRouter OAuth**: Tap **"Connect OpenRouter"** for 1-click access to DeepSeek R1, Llama 3.3, and all frontier models.
+* ✨ **Cursor Multi-Seat**: Fast switch between multiple Cursor accounts in the bottom-left menu.
 
-### 2. 🔑 Direct API Keys (OpenAI, xAI, Anthropic, MiniMax, DeepSeek, Gemini)
-* Paste your API key into the **OpenBurnBar & AI Providers** settings modal:
-  * **OpenAI / ChatGPT**: `sk-proj-...`
-  * **xAI Grok**: `xai-...`
-  * **Anthropic Claude**: `sk-ant-...`
-  * **DeepSeek / ZAI**: `sk-...`
-  * **MiniMax (Text-01 / abab)**: `sk-cp-...`
-  * **Google Gemini**: `AIzaSy...`
-  * **Groq / Together**: High-speed inference tokens
+### 2. 🔑 Direct API Keys (Optional)
+If you prefer standard API keys, you can also paste keys for **OpenAI** (`sk-...`), **xAI** (`xai-...`), **Anthropic** (`sk-ant-...`), **DeepSeek** (`sk-...`), **MiniMax** (`sk-cp-...`), and **Google Gemini** (`AIzaSy...`).
 
-### 3. ⚡ Offline Local AI (Ollama & LM Studio)
-* Run **Ollama** (`ollama run llama3.2` or `ollama run deepseek-r1`) or **LM Studio**.
-* OpenBurnBar auto-discovers your local engines on `:11434` / `:1234` — zero API keys required!
-
-### 4. ✨ Cursor Multi-Seat Accounts
-* Link multiple Cursor accounts in the bottom-left seat menu to share pro quotas across workspaces.
+### 3. 💻 Offline Local AI (Ollama & LM Studio)
+Run [Ollama](https://ollama.com) (`ollama run llama3.2`) or LM Studio on your Mac. OpenBurnBar auto-detects them on `:11434` / `:1234` instantly.
 
 ---
 

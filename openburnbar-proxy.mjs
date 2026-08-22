@@ -300,7 +300,20 @@ async function routeCompletions(body, res) {
     }
   }
 
-  // 3. Local LM Studio (:1234) Auto-Forward
+  // 3. CLIProxy (:8322) Active OAuth Subscriptions (Codex / ChatGPT Plus / Claude Pro / xAI)
+  try {
+    const up = await fetch("http://127.0.0.1:8322/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", "authorization": "Bearer local-cliproxy" },
+      body: JSON.stringify({ ...body, model: targetModel }),
+      signal: AbortSignal.timeout(3000)
+    });
+    if (up.ok) return pipeStream(up, res);
+  } catch (_) {
+    // CLIProxy not running or model not in CLIProxy catalog, continue to local engines
+  }
+
+  // 4. Local LM Studio (:1234) Auto-Forward
   const lmModels = await getAvailableLMStudioModels();
   if (lmModels.length > 0) {
     const lmModel = lmModels.includes(targetModel) ? targetModel : lmModels[0];
@@ -316,7 +329,7 @@ async function routeCompletions(body, res) {
     }
   }
 
-  // 4. Local Ollama (:11434) Auto-Forward
+  // 5. Local Ollama (:11434) Auto-Forward
   const ollamaModels = await getAvailableOllamaModels();
   if (ollamaModels.length > 0) {
     const ollamaModel = ollamaModels.includes(targetModel) ? targetModel : ollamaModels[0];
@@ -461,6 +474,39 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ ok: true, config: updated }));
       } catch (e) {
         res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // OAuth Subscription Trigger API (Codex / ChatGPT Plus, Claude Pro, xAI)
+  if (url.pathname === "/api/oauth/login" && req.method === "POST") {
+    let raw = "";
+    req.on("data", c => raw += c);
+    req.on("end", async () => {
+      try {
+        const body = JSON.parse(raw || "{}");
+        const provider = String(body.provider || "codex").toLowerCase();
+        let flag = "-codex-login";
+        if (provider === "claude" || provider === "anthropic") flag = "-claude-login";
+        if (provider === "xai" || provider === "grok") flag = "-xai-login";
+        if (provider === "kimi") flag = "-kimi-login";
+        if (provider === "antigravity") flag = "-antigravity-login";
+
+        const cliproxyBin = "/Users/albertonunez/.homebrew/bin/cliproxyapi";
+        if (fs.existsSync(cliproxyBin)) {
+          const { spawn } = await import("node:child_process");
+          const child = spawn(cliproxyBin, [flag], { detached: true, stdio: "ignore" });
+          child.unref();
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: true, message: `Launched ${provider} OAuth browser login` }));
+        } else {
+          res.writeHead(404, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "cliproxyapi binary not found" }));
+        }
+      } catch (e) {
+        res.writeHead(500, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: e.message }));
       }
     });
