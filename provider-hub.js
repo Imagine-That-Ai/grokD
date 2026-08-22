@@ -55,7 +55,7 @@
 
     const modal = document.createElement("div");
     modal.id = "grok-provider-hub-modal";
-    modal.style.cssText = \`
+    modal.style.cssText = `
       position: fixed;
       inset: 0;
       z-index: 999999;
@@ -69,9 +69,9 @@
       color: #f0f6fc;
       opacity: 0;
       transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-    \`;
+    `;
 
-    modal.innerHTML = \`
+    modal.innerHTML = `
       <div style="
         width: 660px;
         max-width: 94vw;
@@ -252,7 +252,7 @@
           </div>
         </div>
       </div>
-    \`;
+    `;
 
     document.body.appendChild(modal);
     requestAnimationFrame(() => { modal.style.opacity = "1"; });

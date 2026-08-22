@@ -9,6 +9,8 @@ import path from "node:path";
 const PORT = parseInt(process.env.OPENBURNBAR_PORT || process.argv.slice(2).find((_, i, a) => a[i-1] === "--port") || "8320", 10);
 const HOST = "127.0.0.1";
 const CONFIG_PATH = path.join(os.homedir(), ".grok", "grokbot-d", "model-config.json");
+// Self-heal: configs created before the 0600 hardening must not stay world-readable.
+try { if (fs.existsSync(CONFIG_PATH)) fs.chmodSync(CONFIG_PATH, 0o600); } catch (_) {}
 
 const PROVIDER_DEFAULTS = {
   openrouter: {
@@ -224,6 +226,7 @@ async function routeCompletions(body, res) {
   const customBaseUrl = process.env.OPENBURNBAR_PROVIDER_BASE_URL || cfg.providerBaseUrl;
   const customApiKey = process.env.OPENBURNBAR_PROVIDER_API_KEY || cfg.providerApiKey;
   let targetModel = body.model || cfg.model || "grok-4.6";
+  let authFailure = null;
 
   // 1. Custom Provider Endpoint Override
   if (customBaseUrl && customApiKey) {
@@ -316,6 +319,8 @@ async function routeCompletions(body, res) {
           res.write("data: [DONE]\n\n");
           res.end();
           return;
+        } else if ([401, 403, 429].includes(up.status)) {
+          authFailure = `Anthropic rejected your key (HTTP ${up.status}).`;
         }
       } catch (e) {
         console.error("[openburnbar-proxy] Anthropic native forward failed:", e.message);
@@ -332,6 +337,7 @@ async function routeCompletions(body, res) {
         body: JSON.stringify({ ...body, model: provider.model || targetModel })
       });
       if (up.ok) return pipeStream(up, res);
+      if ([401, 403, 429].includes(up.status)) authFailure = `${provider.name} rejected your credentials (HTTP ${up.status}).`;
     } catch (e) {
       console.error(`[openburnbar-proxy] ${provider.name} forward failed:`, e.message);
     }
@@ -382,8 +388,10 @@ async function routeCompletions(body, res) {
     }
   }
 
-  // 5. Rich Onboarding & Provider Setup Fallback
-  const text = `👋 **Welcome to Grok "D" — Powered by OpenBurnBar!**\n\nYour local AI gateway is active on \`http://127.0.0.1:8320\`.\n\nTo connect your AI subscriptions and keys:\n\n* 🌐 **OpenRouter / All Models**: Connect via OAuth or add an OpenRouter key to unlock Claude 3.7, DeepSeek R1, GPT-4o & Llama 3.3.\n* ⚡ **Free Local AI**: Run [Ollama](https://ollama.com) (\`ollama run llama3.2\`) or LM Studio. OpenBurnBar auto-detects local models instantly.\n* 🔑 **Direct API Keys**: Configure OpenAI, xAI, Anthropic, MiniMax, DeepSeek, or Gemini in the **OpenBurnBar & Models** settings menu.\n* ✨ **Cursor Multi-Seat**: Click the bottom-left seat menu to manage multiple Cursor accounts.\n* 🔥 **BurnBar Mac App**: Check out [burnbar.app](https://burnbar.app) for system-wide AI spend tracking.`;
+  // 6. Rich Onboarding & Provider Setup Fallback (or honest auth-error card)
+  const text = authFailure
+    ? `⚠️ **Provider authentication problem**\n\n${authFailure}\n\nOpen **⚡ OpenBurnBar & Models** in the seat menu to refresh your key or subscription login — or start a local engine (Ollama / LM Studio) and I'll route there automatically.`
+    : `👋 **Welcome to Grok "D" — Powered by OpenBurnBar!**\n\nYour local AI gateway is active on \`http://127.0.0.1:8320\`.\n\nTo connect your AI subscriptions and keys:\n\n* 🌐 **OpenRouter / All Models**: Connect via OAuth or add an OpenRouter key to unlock Claude 3.7, DeepSeek R1, GPT-4o & Llama 3.3.\n* ⚡ **Free Local AI**: Run [Ollama](https://ollama.com) (\`ollama run llama3.2\`) or LM Studio. OpenBurnBar auto-detects local models instantly.\n* 🔑 **Direct API Keys**: Configure OpenAI, xAI, Anthropic, MiniMax, DeepSeek, or Gemini in the **OpenBurnBar & Models** settings menu.\n* ✨ **Cursor Multi-Seat**: Click the bottom-left seat menu to manage multiple Cursor accounts.\n* 🔥 **BurnBar Mac App**: Check out [burnbar.app](https://burnbar.app) for system-wide AI spend tracking.`;
 
   if (body.stream === false) {
     res.writeHead(200, { "content-type": "application/json" });
@@ -427,10 +435,40 @@ async function routeCompletions(body, res) {
   res.end();
 }
 
+// --- Loopback request guards ---------------------------------------------
+// Host must be loopback form (DNS-rebinding defense): a page at evil.com that
+// resolves to 127.0.0.1 sends Host: evil.com and gets rejected here.
+function hostIsLoopback(h) {
+  const hp = String(h || "").toLowerCase();
+  return hp === `127.0.0.1:${PORT}` || hp === `localhost:${PORT}` || hp === "127.0.0.1" || hp === "localhost";
+}
+// Writes and OAuth callbacks require a trusted web origin: no header at all
+// (curl / node server-to-server), file://, null, loopback, or the app's own
+// remote origins. Random websites are rejected before they can touch config.
+function originAllowed(o) {
+  if (!o) return true;
+  if (o === "null") return true; // Electron file:// renderer
+  try {
+    const u = new URL(String(o));
+    if (u.protocol === "file:") return true;
+    const h = u.hostname;
+    if (h === "127.0.0.1" || h === "localhost" || h === "[::1]") return true;
+    if (/(^|\.)cursor\.(com|sh)$/i.test(h)) return true;
+    if (/(^|\.)grok\.com$/i.test(h) || /(^|\.)x\.ai$/i.test(h)) return true;
+    const extra = (process.env.OPENBURNBAR_ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
+    return extra.some(a => { try { return new URL(a).origin === u.origin; } catch { return false; } });
+  } catch { return false; }
+}
+
 const server = http.createServer(async (req, res) => {
-  res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("access-control-allow-headers", "*");
-  res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+  // CORS: reflect only allowlisted origins. Reads stay usable from anywhere
+  // because every read endpoint is fully redacted of secrets.
+  const origin = req.headers.origin;
+  if (!origin || originAllowed(origin)) {
+    res.setHeader("access-control-allow-origin", origin || "*");
+    res.setHeader("access-control-allow-headers", "content-type, authorization, x-openburnbar-client");
+    res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+  }
 
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -438,7 +476,20 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const url = new URL(req.url, `http://${req.headers.host || "127.0.0.1"}`);
+  if (!hostIsLoopback(req.headers.host)) {
+    res.writeHead(403, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "Forbidden: non-loopback Host header" } }));
+    return;
+  }
+
+  const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
+
+  const isWrite = req.method !== "GET" && req.method !== "HEAD";
+  if ((isWrite || url.pathname.startsWith("/auth/")) && !originAllowed(req.headers.origin)) {
+    res.writeHead(403, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "Forbidden: untrusted origin" } }));
+    return;
+  }
 
   // OAuth Callback Handler (OpenRouter / Custom OAuth)
   if (url.pathname === "/auth/callback" || url.pathname === "/oauth/callback") {
@@ -453,6 +504,13 @@ const server = http.createServer(async (req, res) => {
       res.end(`<!DOCTYPE html><html><body style="font-family:system-ui,-apple-system;background:#0b0d13;color:#e6edf3;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><div style="text-align:center;padding:32px;background:#161b22;border:1px solid #30363d;border-radius:16px;box-shadow:0 12px 36px rgba(0,0,0,0.5);max-width:440px;"><h2 style="margin:0 0 12px;color:#58a6ff;">⚡ OpenBurnBar Connected!</h2><p style="color:#8b949e;line-height:1.5;">${safeProvider.toUpperCase()} has been authenticated and linked to your local Grok "D" workspace.</p><p style="color:#58a6ff;font-size:13px;margin-top:20px;">You can close this window now.</p><script>setTimeout(() => window.close(), 1500);</script></div></body></html>`);
       return;
     }
+  }
+
+  // Identity probe (used by ensure-local-box.sh to verify who owns :8320)
+  if (url.pathname === "/api/openburnbar-identity" && req.method === "GET") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ service: "openburnbar-hub", version: "0.2.0", pid: process.pid }));
+    return;
   }
 
   // Model List Endpoint
@@ -496,14 +554,29 @@ const server = http.createServer(async (req, res) => {
   // Provider Config API
   if (url.pathname === "/api/providers" && req.method === "GET") {
     const cfg = readModelConfig();
+    // Redact secrets before serving: this endpoint is readable cross-origin by design.
+    const redact = (val) => {
+      if (Array.isArray(val)) return val.map(redact);
+      if (val && typeof val === "object") {
+        const out = {};
+        for (const [k, v] of Object.entries(val)) {
+          out[k] = (/api_?key|token|secret/i.test(k) && typeof v === "string" && v)
+            ? (v.length > 8 ? `${v.slice(0, 4)}•••${v.slice(-3)}` : "•••")
+            : redact(v);
+        }
+        return out;
+      }
+      return val;
+    };
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, config: cfg, defaults: PROVIDER_DEFAULTS }));
+    res.end(JSON.stringify({ ok: true, config: redact(cfg), defaults: PROVIDER_DEFAULTS }));
     return;
   }
 
   if (url.pathname === "/api/providers" && req.method === "POST") {
     let raw = "";
-    req.on("data", c => raw += c);
+    let bytes = 0;
+    req.on("data", (c) => { bytes += c.length; if (bytes > 10 * 1024 * 1024) { req.destroy(); return; } raw += c; });
     req.on("end", () => {
       try {
         const body = JSON.parse(raw || "{}");
@@ -521,7 +594,8 @@ const server = http.createServer(async (req, res) => {
   // OAuth Subscription Trigger API (Codex / ChatGPT Plus, Claude Pro, xAI)
   if (url.pathname === "/api/oauth/login" && req.method === "POST") {
     let raw = "";
-    req.on("data", c => raw += c);
+    let bytes = 0;
+    req.on("data", (c) => { bytes += c.length; if (bytes > 10 * 1024 * 1024) { req.destroy(); return; } raw += c; });
     req.on("end", async () => {
       try {
         const body = JSON.parse(raw || "{}");
@@ -532,7 +606,14 @@ const server = http.createServer(async (req, res) => {
         if (provider === "kimi") flag = "-kimi-login";
         if (provider === "antigravity") flag = "-antigravity-login";
 
-        const cliproxyBin = "/Users/albertonunez/.homebrew/bin/cliproxyapi";
+        const candidates = [
+          process.env.CLIPROXY_BIN,
+          path.join(os.homedir(), ".homebrew", "bin", "cliproxyapi"),
+          "/opt/homebrew/bin/cliproxyapi",
+          "/usr/local/bin/cliproxyapi",
+          path.join(os.homedir(), ".local", "bin", "cliproxyapi"),
+        ].filter(Boolean);
+        const cliproxyBin = candidates.find((c) => { try { return fs.existsSync(c); } catch { return false; } });
         if (fs.existsSync(cliproxyBin)) {
           const { spawn } = await import("node:child_process");
           const child = spawn(cliproxyBin, [flag], { detached: true, stdio: "ignore" });
@@ -554,7 +635,8 @@ const server = http.createServer(async (req, res) => {
   // Chat Completions Endpoint
   if (url.pathname === "/v1/chat/completions" && req.method === "POST") {
     let raw = "";
-    req.on("data", c => raw += c);
+    let bytes = 0;
+    req.on("data", (c) => { bytes += c.length; if (bytes > 10 * 1024 * 1024) { req.destroy(); return; } raw += c; });
     req.on("end", async () => {
       try {
         const body = JSON.parse(raw || "{}");

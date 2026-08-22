@@ -61,6 +61,8 @@ Local mode runs entirely on your Mac, routing prompts through the local OpenBurn
 | **1340** | `fakebox.js` | Sand host mock for offline seat validation |
 | — | `routine-guard.js` | Routine sync and offline cron management |
 
+> **If another app owns port 8320:** `ensure-local-box.sh` verifies the port's identity at startup. If a foreign service (e.g. another local proxy) holds it, you'll see a loud `WARN` and the gateway starts on a fallback port (`:8330+`) so nothing silently breaks. Free the port (or move the other service) and re-run `bash ~/.grok/grokbot-d/ensure-local-box.sh` to restore full provider routing on `:8320`.
+
 Scripts are also copied to `~/.grok/grokbot-d/`. Official from-agent chrome is not exposed on `sendPrompt`; bot-to-bot still uses `[Bot-to-bot from NAME]:` on the wire. `bot-chatter.js` hides that raw text in the transcript: a run of inter-bot turns collapses to one marker (`3 messages with <Bot>`, `Messaged <marks> 3 Bots`) in each bot’s own colour, and clicking it opens their view-only chat. Outbound sends are read back out of the recipients’ `store.db`, since this box only records them there.
 
 The seat cover draws its own sky. `space-field-gl.js` back-traces **one** event
