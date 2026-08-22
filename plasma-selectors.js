@@ -1489,7 +1489,7 @@
     modelMenu.style.cssText += 'width: auto; min-width: 96px; height: auto; max-height: 520px; display: none; padding: 18px 8px;';
 
     let draggedProxyItem = null;
-    let selectedProxy = null; // When null, show proxies list. When set, show its providers/auth!
+    let selectedProxy = PROXIES.find(p => p.id === modelCfg.proxyTarget) || PROXIES[0]; // Default to active proxy so models are immediately visible!
     let activeExpandedProviderId = null;
 
     function renderModelMenuContent(showCreateProxyForm = false) {
