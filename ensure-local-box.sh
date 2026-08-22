@@ -126,12 +126,12 @@ if ! is_listen 8787; then
 fi
 
 if ! is_listen 8320; then
-  if command -v npx >/dev/null 2>&1; then
-    nohup npx -y openburnbar@latest proxy --port 8320 --allow-local-key >"$HACK/openburnbar-proxy.out" 2>&1 &
-    echo "started openburnbar proxy via npx pid $! (:8320)"
-  elif [ -f "$RUN_JS/openburnbar-proxy.mjs" ]; then
+  if [ -f "$RUN_JS/openburnbar-proxy.mjs" ]; then
     nohup "$NODE" "$RUN_JS/openburnbar-proxy.mjs" --port 8320 >"$HACK/openburnbar-proxy.out" 2>&1 &
     echo "started openburnbar-proxy pid $! (:8320)"
+  elif command -v npx >/dev/null 2>&1; then
+    nohup npx -y openburnbar@latest proxy --port 8320 --allow-local-key >"$HACK/openburnbar-proxy.out" 2>&1 &
+    echo "started openburnbar proxy via npx pid $! (:8320)"
   fi
 fi
 
