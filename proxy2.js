@@ -407,7 +407,7 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
   }
 
   const personaVoice = getActivePersonaPrompt();
-  const ENV_HINT = `Environment: LOCAL rig on Alberto's Mac. Shell/ExternalShell run live on this machine (projects under /Users/albertonunez, gh/npm/git/Brew available). Read/WebSearch/WebFetch work. GetMcpTools/CallMcpTool run via bridge. Don't claim tools are unavailable — use them. ${personaVoice}`;
+  const ENV_HINT = `Environment: LOCAL rig on this Mac. Shell/ExternalShell run live on this machine (projects under the home folder). Read/WebSearch/WebFetch work. GetMcpTools/CallMcpTool run via bridge. Don't claim tools are unavailable — use them. ${personaVoice}`;
   const payload = [
     { role: "system", content: ENV_HINT },
     ...messages.slice(-40),
@@ -1419,7 +1419,7 @@ function syntheticEnsureSandBox() {
   try { fs.mkdirSync(terminalsFolder, { recursive: true }); } catch {}
   return Buffer.concat([
     pbStr(1, "local"),                       // cluster
-    pbStr(2, "alberto-local"),                // tenant_id
+    pbStr(2, "grokbot-local"),                // tenant_id
     pbStr(3, "pod-fakelocal-0001"),           // pod_id
     pbStr(4, "nto-fake-local-token"),         // network_token
     pbStr(5, "fake-daemon-auth-token"),       // exec_daemon_auth_token
@@ -1485,7 +1485,7 @@ const server = http.createServer((req, res) => {
     // DEV LOGIN: no Cursor account needed. App asks for a local session token; we mint one.
     if (req.url.startsWith("/auth/cursor_dev_session_token")) {
       const b64u = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
-      const jwt = `${b64u({ alg: "none", typ: "JWT" })}.${b64u({ sub: "alberto-local", email: "alberto@local", exp: Math.floor(Date.now() / 1000) + 86400 * 365 })}.localsig`;
+      const jwt = `${b64u({ alg: "none", typ: "JWT" })}.${b64u({ sub: "grokbot-local", email: "local@grokbot", exp: Math.floor(Date.now() / 1000) + 86400 * 365 })}.localsig`;
       const out = Buffer.from(JSON.stringify({ accessToken: jwt, refreshToken: jwt }));
       console.log(`[${id}] DEV LOGIN -> local session token minted`);
       entry.status = 200; entry.mutated = "DEV-LOGIN-local";
@@ -1497,7 +1497,7 @@ const server = http.createServer((req, res) => {
     // TOKEN REFRESH: answer /oauth/token locally so the app never revokes itself
     if (req.url.startsWith("/oauth/token")) {
       const b64u = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
-      const jwt = `${b64u({ alg: "none", typ: "JWT" })}.${b64u({ sub: "alberto-local", email: "alberto@local", exp: Math.floor(Date.now() / 1000) + 86400 * 365 })}.localsig`;
+      const jwt = `${b64u({ alg: "none", typ: "JWT" })}.${b64u({ sub: "grokbot-local", email: "local@grokbot", exp: Math.floor(Date.now() / 1000) + 86400 * 365 })}.localsig`;
       const out = Buffer.from(JSON.stringify({ access_token: jwt, refresh_token: jwt }));
       console.log(`[${id}] REFRESH -> local token re-minted`);
       entry.status = 200; entry.mutated = "REFRESH-local";
@@ -1583,8 +1583,9 @@ const server = http.createServer((req, res) => {
 
     // AUTH FAKES: keep the app believing our local JWT is a real account
     if (req.url.includes("DashboardService/GetMe")) {
-      const out = Buffer.concat([pbStr(1, "local-auth-0001"), pbStr(3, "alberto@local"), pbStr(4, "Alberto"), pbStr(5, "Nunez-Garcia")]);
-      console.log(`[${id}] FAKE GetMe -> alberto@local`);
+      const os = require("os"); const u = os.userInfo(); const localName = u.username || "local";
+      const out = Buffer.concat([pbStr(1, "local-auth-0001"), pbStr(3, localName + "@local"), pbStr(4, localName), pbStr(5, "User")]);
+      console.log(`[${id}] FAKE GetMe -> ` + localName + "@local");
       entry.status = 200; entry.mutated = "FAKE-GetMe"; fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
       res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
       return res.end(out);

@@ -1,11 +1,13 @@
 #!/bin/bash
 # First-run / update: copy bundled scripts into ~/.grok/grokbot-d.
 # Never overwrites profiles.json, profile-data, or secrets.
-set -u
+set -euo pipefail
+umask 077
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOME_DST="${GROK_PROFILE_ROOT:-$HOME/.grok/grokbot-d}"
 APP_SRC="${1:-}"
 if [ -z "$APP_SRC" ]; then
-  APP_SRC="$(cd "$(dirname "$0")" && pwd)"
+  APP_SRC="$SCRIPT_DIR"
   # When launched from the .app, pass Resources/grokbot-d as $1.
 fi
 
@@ -86,35 +88,136 @@ fi
 
 # Official host-main spawns sibling workers (agent-store-worker, etc).
 # Copy the whole host tree — host-main alone makes "Bot failed to respond".
-sync_host_tree() {
-  local src dest="$HOME_DST/host"
-  mkdir -p "$dest"
-  for src in "$APP_SRC/host" "/tmp/grokbot-asar/dist/host"; do
-    if [ -f "$src/host-main.cjs" ] && [ -f "$src/agent-isolation/agent-store-worker.cjs" ]; then
-      rsync -a "$src/" "$dest/"
-      return 0
-    fi
+HOST_FILES=(
+  "host-main.cjs"
+  "agent-isolation/agent-store-worker.cjs"
+  "agent-isolation/transcript-mirror-worker.cjs"
+  "extensions/box-store-sync/box-store-vacuum-worker.cjs"
+  "extensions/content-search/search-index-worker.cjs"
+)
+
+host_tree_complete() {
+  local root="$1" rel
+  for rel in "${HOST_FILES[@]}"; do
+    [ -s "$root/$rel" ] || return 1
   done
-  local asar=""
-  for asar in \
+  return 0
+}
+
+missing_host_files() {
+  local root="$1" rel missing=""
+  for rel in "${HOST_FILES[@]}"; do
+    [ -s "$root/$rel" ] || missing="${missing}${missing:+, }$rel"
+  done
+  printf '%s\n' "$missing"
+}
+
+find_app_asar() {
+  local candidate
+  if [ -n "${GROK_D_APP_ASAR:-}" ]; then
+    if [ ! -f "$GROK_D_APP_ASAR" ]; then
+      echo "install-runtime: GROK_D_APP_ASAR does not exist: $GROK_D_APP_ASAR" >&2
+      return 1
+    fi
+    printf '%s\n' "$GROK_D_APP_ASAR"
+    return 0
+  fi
+  for candidate in \
+    "$APP_SRC/../app.asar" \
     "$HOME/Applications/grok\"D\".app/Contents/Resources/app.asar" \
     "$HOME/Applications/Grok Bot D.app/Contents/Resources/app.asar" \
     "/Applications/grok\"D\".app/Contents/Resources/app.asar" \
     "/Applications/Grok Bot D.app/Contents/Resources/app.asar"
   do
-    [ -f "$asar" ] || continue
-    if command -v npx >/dev/null 2>&1; then
-      mkdir -p "$dest/agent-isolation" "$dest/extensions/box-store-sync" "$dest/extensions/content-search"
-      [ -f "$dest/host-main.cjs" ] || npx --yes asar extract-file "$asar" dist/host/host-main.cjs "$dest/host-main.cjs" 2>/dev/null || true
-      npx --yes asar extract-file "$asar" dist/host/agent-isolation/agent-store-worker.cjs "$dest/agent-isolation/agent-store-worker.cjs" 2>/dev/null || true
-      npx --yes asar extract-file "$asar" dist/host/agent-isolation/transcript-mirror-worker.cjs "$dest/agent-isolation/transcript-mirror-worker.cjs" 2>/dev/null || true
-      npx --yes asar extract-file "$asar" dist/host/extensions/box-store-sync/box-store-vacuum-worker.cjs "$dest/extensions/box-store-sync/box-store-vacuum-worker.cjs" 2>/dev/null || true
-      npx --yes asar extract-file "$asar" dist/host/extensions/content-search/search-index-worker.cjs "$dest/extensions/content-search/search-index-worker.cjs" 2>/dev/null || true
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
     fi
-    break
   done
+  return 1
 }
-sync_host_tree
+
+resolve_node() {
+  local candidate
+  if [ -n "${NODE:-}" ] && [ -x "$NODE" ]; then
+    printf '%s\n' "$NODE"
+    return 0
+  fi
+  for candidate in \
+    /opt/homebrew/bin/node \
+    /usr/local/bin/node \
+    "$HOME/.local/bin/node" \
+    "$HOME/.homebrew/bin/node"
+  do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  command -v node 2>/dev/null || return 1
+}
+
+resolve_asar_helper() {
+  local candidate
+  for candidate in "$APP_SRC/asar-file.js" "$SCRIPT_DIR/asar-file.js" "$HOME_DST/asar-file.js"; do
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+sync_host_tree() {
+  local src="$APP_SRC/host" dest="$HOME_DST/host" asar="" node_bin="" helper="" entry="" i
+  mkdir -p "$dest"
+
+  if host_tree_complete "$src"; then
+    if [ "$src" != "$dest" ]; then
+      rsync -a "$src/" "$dest/"
+    fi
+    if ! host_tree_complete "$dest"; then
+      echo "install-runtime: bundled host tree became incomplete: $(missing_host_files "$dest")" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if asar="$(find_app_asar)"; then
+    if ! node_bin="$(resolve_node)"; then
+      echo "install-runtime: Node.js is required to recover the local host from app.asar" >&2
+      return 1
+    fi
+    if ! helper="$(resolve_asar_helper)"; then
+      echo "install-runtime: asar-file.js is missing from the packaged runtime" >&2
+      return 1
+    fi
+    mkdir -p "$dest/agent-isolation" "$dest/extensions/box-store-sync" "$dest/extensions/content-search"
+    for i in "${!HOST_FILES[@]}"; do
+      entry="dist/host/${HOST_FILES[$i]}"
+      if ! "$node_bin" "$helper" extract-file "$asar" "$entry" "$dest/${HOST_FILES[$i]}"; then
+        echo "install-runtime: failed to extract $entry from $asar" >&2
+        return 1
+      fi
+    done
+  elif host_tree_complete "$dest"; then
+    return 0
+  else
+    echo "install-runtime: no usable app.asar and no complete local host tree" >&2
+    return 1
+  fi
+
+  if ! host_tree_complete "$dest"; then
+    echo "install-runtime: local host tree is incomplete: $(missing_host_files "$dest")" >&2
+    return 1
+  fi
+  return 0
+}
+
+if ! sync_host_tree; then
+  echo "install-runtime: runtime is NOT ready at $HOME_DST" >&2
+  exit 1
+fi
 
 chmod +x "$HOME_DST"/*.sh 2>/dev/null || true
 echo "runtime ready $HOME_DST"

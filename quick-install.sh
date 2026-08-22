@@ -1,6 +1,6 @@
 #!/bin/bash
 # Grok "D" Universal Zero-Friction Installer for Any Mac
-# Usage: curl -fsSL https://raw.githubusercontent.com/Imagine-That-Ai/grok-D/main/quick-install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/Imagine-That-Ai/grokD/main/quick-install.sh | bash
 set -euo pipefail
 
 echo ""

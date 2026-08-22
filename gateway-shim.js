@@ -377,6 +377,15 @@ async function proxyRaw(req, res, raw) {
 async function onRequest(req, res) {
   try {
     const u = new URL(req.url || "/", "http://127.0.0.1");
+    if (u.pathname === "/health" && (req.method === "GET" || req.method === "HEAD")) {
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      return void res.end(req.method === "HEAD" ? "" : JSON.stringify({
+        ok: true,
+        status: "healthy",
+        service: "grok-d-gateway-shim",
+        contract: 2,
+      }));
+    }
     if (u.pathname === "/install/openburnbar" && (req.method === "GET" || req.method === "HEAD")) {
       let payload = { npmProxy: false };
       try { payload = require("./openburnbar-install").info(); } catch (_) {}

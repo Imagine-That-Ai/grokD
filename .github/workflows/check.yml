@@ -29,45 +29,70 @@ jobs:
           node test-install-look.js
           node test-liquid-glass-btn.js
           node test-enter-chat.js
-      - name: no identity leak
+      - name: no kitchen leftovers
         run: |
           python3 - <<'PY'
-          import subprocess, sys
-          needles = [
-              "alberto" + "nunez",
-              "alberto" + "@local",
-              "alberto" + "-local",
-              "Nunez" + "-Garcia",
-              "Alberto" + "'s Mac",
-              "Alberto" + " · Personal",
-              "alberto" + "@example.com",
-              "alberto" + "8793",
-              "/Users/" + "alberto" + "nunez",
-          ]
-          skip = {
-              "export-public.sh",
+          import os, pathlib, subprocess, sys
+
+          decode = bytes.fromhex
+          needles = (
+              decode("6e756e657a2d676172636961"),
+              decode("74776572706269746368"),
+              decode("646577636c6177"),
+              decode("6d3170726f"),
+              decode("696d6167696e652d746861742d61692f67726f6b2d64"),
+              decode("70656e64696e6720656c6f6e"),
+              decode("656c6f6e206d75736b"),
+              decode("66756e64696e672066726f6e74696572"),
+              decode("676f6f676c652d6f61757468327c757365725f"),
+          )
+          allowed_contact = decode("616c626572746f40696d6167696e652d746861742e6169")
+          personal_name = decode("616c626572746f")
+          banned_paths = (
+              "NOTES.md",
               "PROMPT-npm-openburnbar-proxy.md",
+              "deploy.sh",
+              "export-public.sh",
+              "live-cursor-chat.js",
+              "loop-grok-d.js",
+              "sync-to-tmp.sh",
               "test-export-public.js",
-              "pack-asar.sh",
-              "proxy2.js",
-              "profile-auth-preload.js",
-              "local-mcp.js",
-          }
-          proc = subprocess.run(
-              ["git", "grep", "-I", "-n", "-e", "."],
-              capture_output=True, text=True,
+              "workflows",
+              "profiles.json",
+              "active-env.json",
+              "model-config.json",
+              "host",
+              "local-d-secrets",
+              "browser-profiles",
+              "profile-data",
+              "runtime",
+              "dist",
+              "hack",
+              "proof",
           )
           hits = []
-          for line in (proc.stdout or "").splitlines():
-              path = line.split(":", 1)[0]
-              if path in skip or path.startswith(".git"):
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0")
+          for raw_path in tracked:
+              if not raw_path:
                   continue
-              for n in needles:
-                  if n in line:
-                      hits.append(line)
+              path = os.fsdecode(raw_path)
+              if any(path == banned or path.startswith(banned + "/") for banned in banned_paths):
+                  hits.append(f"{path}: banned path")
+                  continue
+              file_path = pathlib.Path(path)
+              data = os.fsencode(os.readlink(file_path)) if file_path.is_symlink() else file_path.read_bytes()
+              lowered = data.lower()
+              for needle in needles:
+                  if needle in lowered:
+                      hits.append(f"{path}: forbidden content")
                       break
+              if personal_name in lowered.replace(allowed_contact, b""):
+                  hits.append(f"{path}: personal identity")
+              lowered_path = raw_path.lower()
+              if personal_name in lowered_path or any(needle in lowered_path for needle in needles):
+                  hits.append(f"{path}: forbidden path")
           if hits:
-              print("identity leak", file=sys.stderr)
+              print("kitchen leftover", file=sys.stderr)
               print("\n".join(hits[:50]), file=sys.stderr)
               sys.exit(1)
           PY

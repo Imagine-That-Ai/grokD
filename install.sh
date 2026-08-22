@@ -5,7 +5,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC=""
-DEST="$HOME/Applications/grok\"D\".app"
+DEST="$HOME/Applications/Grok Bot D.app"
 ROOT="$HOME/.grok/grokbot-d"
 REPLACE=0
 OPEN_APP=1
@@ -49,6 +49,7 @@ fi
 if ! command -v npx >/dev/null 2>&1; then
   die "npx is required (it ships with Node)."
 fi
+[ -f "$HERE/asar-cli.sh" ] || die "missing asar-cli.sh"
 
 if [ -z "$SRC" ]; then
   for c in "/Applications/Grok Bot.app" "$HOME/Applications/Grok Bot.app"; do
@@ -210,7 +211,7 @@ rsync -a \
 ASAR_SRC="$WORK/asar"
 mkdir -p "$ASAR_SRC"
 echo "extract asar…"
-npx --yes asar extract "$DEST/Contents/Resources/app.asar" "$ASAR_SRC"
+bash "$HERE/asar-cli.sh" extract "$DEST/Contents/Resources/app.asar" "$ASAR_SRC"
 node "$HERE/patch-asar.js" "$ASAR_SRC"
 
 PRELOAD="$ASAR_SRC/dist/electron-preload/preload.cjs"
@@ -229,7 +230,7 @@ EOF
 fi
 
 echo "pack asar…"
-npx --yes asar pack "$ASAR_SRC" "$WORK/app.asar"
+bash "$HERE/asar-cli.sh" pack "$ASAR_SRC" "$WORK/app.asar"
 cp "$WORK/app.asar" "$DEST/Contents/Resources/app.asar"
 
 python3 - "$DEST" <<'PY'
@@ -325,7 +326,11 @@ fi
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f -r -u "$DEST" 2>/dev/null || true
 chmod +x "$ROOT"/*.sh 2>/dev/null || true
 if [ -f "$ROOT/ensure-local-box.sh" ]; then
-  bash "$ROOT/ensure-local-box.sh" >/dev/null 2>&1 || true
+  ENSURE_LOG="$ROOT/runtime/ensure-local-box.log"
+  mkdir -p "$ROOT/runtime"
+  if ! bash "$ROOT/ensure-local-box.sh" >"$ENSURE_LOG" 2>&1; then
+    die "local host failed its readiness check (see $ENSURE_LOG)"
+  fi
 fi
 if [ "$OPEN_APP" -eq 1 ]; then
   open -na "$DEST" || open "$DEST"

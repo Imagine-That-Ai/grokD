@@ -1,6 +1,7 @@
 #!/bin/bash
 # Keep Grok Bot D's local box, shim, exec fake, inference proxy, and routine guard alive.
 set -u
+umask 077
 DURABLE="${GROK_PROFILE_ROOT:-$HOME/.grok/grokbot-d}"
 HACK="${GROKBOT_HACK:-$DURABLE/hack}"
 NODE="${NODE:-$(command -v node)}"
@@ -9,6 +10,10 @@ if [ -z "$NODE" ] || [ ! -x "$NODE" ]; then
   for cand in /usr/local/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node" "$HOME/.homebrew/bin/node"; do
     [ -x "$cand" ] && { NODE="$cand"; break; }
   done
+fi
+if [ -z "$NODE" ] || [ ! -x "$NODE" ]; then
+  echo "ERROR: Node.js is required to start Grok D's local host" >&2
+  exit 1
 fi
 mkdir -p "$HACK/box-data/agents" "$HACK/box-data/workspace"
 
@@ -26,7 +31,10 @@ EOF
 fi
 
 if [ -x "$DURABLE/install-runtime.sh" ]; then
-  "$DURABLE/install-runtime.sh" "$DURABLE" >/tmp/grokbot-d-install.log 2>&1 || true
+  if ! "$DURABLE/install-runtime.sh" "$DURABLE" >/tmp/grokbot-d-install.log 2>&1; then
+    echo "ERROR: Grok D runtime installation is incomplete; see /tmp/grokbot-d-install.log" >&2
+    exit 1
+  fi
 fi
 
 # Old scripts hardcode /tmp/grokbot-hack. Recreate that path if reboot wiped /tmp.
@@ -53,8 +61,8 @@ is_listen() {
 }
 
 wait_listen() {
-  local port="$1" n=0
-  while [ "$n" -lt 40 ]; do
+  local port="$1" limit="${2:-120}" n=0
+  while [ "$n" -lt "$limit" ]; do
     is_listen "$port" && return 0
     sleep 0.1
     n=$((n + 1))
@@ -64,6 +72,78 @@ wait_listen() {
 
 RUN_JS="$DURABLE"
 [ -f "$DURABLE/runbox.js" ] || RUN_JS="$HACK"
+
+gateway_token() {
+  if [ -n "${SAND_HOST_GATEWAY_TOKEN:-}" ]; then
+    printf '%s\n' "$SAND_HOST_GATEWAY_TOKEN"
+    return 0
+  fi
+  if [ -f "$RUN_JS/security-guard.js" ]; then
+    "$NODE" -e "try{process.stdout.write(require(process.argv[1]).getGatewayToken())}catch(e){process.exit(1)}" "$RUN_JS/security-guard.js" 2>/dev/null
+    return $?
+  fi
+  printf '%s\n' "fake-gateway-token"
+}
+
+HOST_TOKEN="$(gateway_token 2>/dev/null || true)"
+
+host_api_ready() {
+  is_listen 1338 || return 1
+  command -v curl >/dev/null 2>&1 || return 0
+  [ -n "$HOST_TOKEN" ] || return 1
+  curl -fsS --max-time 1 \
+    -X POST \
+    -H "content-type: application/json" \
+    -H "authorization: Bearer $HOST_TOKEN" \
+    http://127.0.0.1:1338/api/listAgents \
+    -d '{}' >/dev/null 2>&1
+}
+
+shim_healthy() {
+  is_listen 1337 || return 1
+  command -v curl >/dev/null 2>&1 || return 0
+  curl -fsS --max-time 1 http://127.0.0.1:1337/health 2>/dev/null \
+    | grep -Eq '"service"[[:space:]]*:[[:space:]]*"grok-d-gateway-shim"'
+}
+
+wait_ready() {
+  local kind="$1" limit="${2:-120}" n=0
+  while [ "$n" -lt "$limit" ]; do
+    if [ "$kind" = "host" ]; then
+      host_api_ready && return 0
+    else
+      shim_healthy && return 0
+    fi
+    sleep 0.1
+    n=$((n + 1))
+  done
+  return 1
+}
+
+stop_stale_listener() {
+  local port="$1" kind="$2" pid cmd n=0
+  pid="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -1)"
+  [ -n "$pid" ] || return 0
+  cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  case "$kind:$cmd" in
+    host:*host-main.cjs*|shim:*gateway-shim.js*)
+      echo "restarting stale Grok D $kind listener on :$port (pid $pid)"
+      kill "$pid" 2>/dev/null || true
+      while [ "$n" -lt 30 ] && is_listen "$port"; do
+        sleep 0.1
+        n=$((n + 1))
+      done
+      if is_listen "$port"; then
+        echo "ERROR: stale Grok D $kind listener on :$port did not stop" >&2
+        return 1
+      fi
+      ;;
+    *)
+      echo "ERROR: port $port is occupied by an unhealthy non-Grok-D process: ${cmd:-unknown}" >&2
+      return 1
+      ;;
+  esac
+}
 
 # host-main.cjs needs tree-sitter from the unpacked Electron app, not a global npm tree.
 resolve_node_deps() {
@@ -110,15 +190,36 @@ fi
 
 # Real host on 1338; shim owns 1337 (idle-wait + broadcast retry).
 # NODE_PATH is exported above so host-main can load tree-sitter.
+if is_listen 1338 && ! host_api_ready; then
+  stop_stale_listener 1338 host || exit 1
+fi
 if ! is_listen 1338; then
   nohup env SAND_HOST_PORT=1338 GROKBOT_HACK="$HACK" GROK_HOST_MAIN="${GROK_HOST_MAIN:-$DURABLE/host/host-main.cjs}" "$NODE" "$RUN_JS/runbox.js" >"$HACK/runbox.out" 2>&1 &
   echo "started runbox pid $! (host :1338)"
-  wait_listen 1338 || echo "warn: host :1338 not up yet"
+fi
+if ! wait_listen 1338 "${GROK_D_HOST_WAIT_TICKS:-120}" \
+  || ! wait_ready host "${GROK_D_HOST_API_WAIT_TICKS:-40}"; then
+  echo "ERROR: local host :1338 did not become API-ready" >&2
+  tail -n 80 "$HACK/runbox.out" >&2 2>/dev/null || true
+  exit 1
 fi
 
-if ! is_listen 1337 && [ -f "$RUN_JS/gateway-shim.js" ]; then
+if is_listen 1337 && ! shim_healthy; then
+  stop_stale_listener 1337 shim || exit 1
+fi
+if ! is_listen 1337; then
+  if [ ! -f "$RUN_JS/gateway-shim.js" ]; then
+    echo "ERROR: gateway-shim.js is missing" >&2
+    exit 1
+  fi
   nohup env GROKBOT_HACK="$HACK" "$NODE" "$RUN_JS/gateway-shim.js" >"$HACK/gateway-shim.out" 2>&1 &
   echo "started gateway-shim pid $! (:1337 -> :1338)"
+fi
+if ! wait_listen 1337 "${GROK_D_SHIM_WAIT_TICKS:-120}" \
+  || ! wait_ready shim "${GROK_D_SHIM_HEALTH_WAIT_TICKS:-40}"; then
+  echo "ERROR: gateway shim :1337 did not become healthy" >&2
+  tail -n 80 "$HACK/gateway-shim.out" >&2 2>/dev/null || true
+  exit 1
 fi
 
 if ! is_listen 1340 && [ -f "$RUN_JS/fakebox.js" ]; then
