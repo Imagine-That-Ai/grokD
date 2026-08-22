@@ -4,6 +4,12 @@ set -u
 DURABLE="${GROK_PROFILE_ROOT:-$HOME/.grok/grokbot-d}"
 HACK="${GROKBOT_HACK:-$DURABLE/hack}"
 NODE="${NODE:-$(command -v node)}"
+# Non-login ssh shells often lack Homebrew/local paths; resolve absolutely.
+if [ -z "$NODE" ] || [ ! -x "$NODE" ]; then
+  for cand in /usr/local/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node" "$HOME/.homebrew/bin/node"; do
+    [ -x "$cand" ] && { NODE="$cand"; break; }
+  done
+fi
 mkdir -p "$HACK/box-data/agents" "$HACK/box-data/workspace"
 
 if [ -z "$(ls -A "$HACK/box-data/agents" 2>/dev/null)" ]; then
@@ -134,20 +140,34 @@ if ! is_listen 8320; then
     echo "started openburnbar proxy via npx pid $! (:8320)"
   fi
 else
-  # Port is taken — make sure it's actually OUR hub, not some other local service.
+  # Port is taken — make sure it's actually OUR hub, and a CURRENT one.
   IDENTITY="$(curl -s --max-time 1 http://127.0.0.1:8320/api/openburnbar-identity 2>/dev/null || true)"
   case "$IDENTITY" in
-    *openburnbar-hub*) : ;; # ours (or a compatible OpenBurnBar install) — all good
+    *openburnbar-hub*) : ;; # current hub already serving — all good
     *)
-      WHO="$(lsof -nP -iTCP:8320 -sTCP:LISTEN 2>/dev/null | tail -n +2 | awk '{print $1" pid "$2}' | head -1)"
-      echo "⚠️  WARN: port 8320 is held by ${WHO:-unknown} — NOT the Grok D gateway. Prompts will bypass provider routing." | tee -a "$HACK/openburnbar-proxy.out"
-      echo "   Fix: free the port (e.g. TOOLS_BUDGET_PORT=8321 for tools-budget-proxy) or set OPENBURNBAR_PORT, then re-run ensure-local-box.sh." | tee -a "$HACK/openburnbar-proxy.out"
-      FALLBACK=8330
-      while is_listen "$FALLBACK"; do FALLBACK=$((FALLBACK + 1)); done
-      if [ -f "$RUN_JS/openburnbar-proxy.mjs" ]; then
-        nohup "$NODE" "$RUN_JS/openburnbar-proxy.mjs" --port "$FALLBACK" >"$HACK/openburnbar-proxy-$FALLBACK.out" 2>&1 &
-        echo "started openburnbar-proxy pid $! (fallback :$FALLBACK — point clients here until 8320 is freed)"
-      fi
+      OWNER_PID="$(lsof -ti:8320 -sTCP:LISTEN 2>/dev/null | head -1)"
+      OWNER_CMD="$(ps -p "$OWNER_PID" -o command= 2>/dev/null || true)"
+      case "$OWNER_CMD" in
+        *openburnbar-proxy*)
+          # It's an outdated copy of our own hub: converge it to the shipped code.
+          echo "restarting outdated openburnbar hub (pid $OWNER_PID) -> current code"
+          kill "$OWNER_PID" 2>/dev/null || true
+          sleep 1
+          nohup "$NODE" "$RUN_JS/openburnbar-proxy.mjs" --port 8320 >"$HACK/openburnbar-proxy.out" 2>&1 &
+          echo "restarted openburnbar-proxy pid $! (:8320)"
+        ;;
+        *)
+          WHO="$(lsof -nP -iTCP:8320 -sTCP:LISTEN 2>/dev/null | tail -n +2 | awk '{print $1" pid "$2}' | head -1)"
+          echo "⚠️  WARN: port 8320 is held by ${WHO:-unknown} — NOT the Grok D gateway. Prompts will bypass provider routing." | tee -a "$HACK/openburnbar-proxy.out"
+          echo "   Fix: free the port (e.g. TOOLS_BUDGET_PORT=8321 for tools-budget-proxy) or set OPENBURNBAR_PORT, then re-run ensure-local-box.sh." | tee -a "$HACK/openburnbar-proxy.out"
+          FALLBACK=8330
+          while is_listen "$FALLBACK"; do FALLBACK=$((FALLBACK + 1)); done
+          if [ -f "$RUN_JS/openburnbar-proxy.mjs" ]; then
+            nohup "$NODE" "$RUN_JS/openburnbar-proxy.mjs" --port "$FALLBACK" >"$HACK/openburnbar-proxy-$FALLBACK.out" 2>&1 &
+            echo "started openburnbar-proxy pid $! (fallback :$FALLBACK — point clients here until 8320 is freed)"
+          fi
+        ;;
+      esac
     ;;
   esac
 fi
