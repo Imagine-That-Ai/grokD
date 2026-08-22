@@ -11,6 +11,41 @@
   const ROOT = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
   const CONFIG_PATH = path.join(ROOT, "model-config.json");
   const HUB = "http://127.0.0.1:8320";
+  const LOBE = path.join(ROOT, "assets", "lobe");
+  const logoCache = new Map();
+
+  // Load an official brand SVG from assets/lobe and namespace its internal ids
+  // so multiple inline copies can't collide (same approach as bot-chatter.js).
+  function lobeSvg(file, fill) {
+    if (!file) return "";
+    const key = file + ":" + (fill || "");
+    if (logoCache.has(key)) return logoCache.get(key);
+    let raw = "";
+    try { raw = fs.readFileSync(path.join(LOBE, file), "utf8"); } catch {}
+    if (raw) {
+      const tag = "gph-" + String(file).replace(/\W+/g, "-") + "-";
+      raw = raw
+        .replace(/\sid="([^"]+)"/g, (_, n) => ` id="${tag}${n}"`)
+        .replace(/url\(#([^)]+)\)/g, (_, n) => `url(#${tag}${n})`)
+        .replace(/href="#([^"]+)"/g, (_, n) => `href="#${tag}${n}"`)
+        .replace(/\s(width)="[^"]*"/g, "")
+        .replace(/\s(height)="[^"]*"/g, "");
+      if (fill) raw = raw.replace(/fill="currentColor"/g, `fill="${fill}"`);
+      raw = `<span class="gd-logo">${raw}</span>`;
+    }
+    logoCache.set(key, raw);
+    return raw;
+  }
+
+  // The real BurnBar mark for the header/footer.
+  let BURNBAR_MARK = "";
+  try {
+    BURNBAR_MARK = fs.readFileSync(path.join(ROOT, "assets", "burnbar-mark.svg"), "utf8")
+      .replace(/\sid="([^"]+)"/g, (_, n) => ` id="gbb-${n}"`)
+      .replace(/url\(#([^)]+)\)/g, (_, n) => `url(#gbb-${n})`)
+      .replace(/\s(width)="[^"]*"/g, "")
+      .replace(/\s(height)="[^"]*"/g, "");
+  } catch {}
 
   function readConfig() {
     try {
@@ -77,23 +112,33 @@
   }
 
   // ---- providers -----------------------------------------------------------
+  const FALLBACK_GLYPHS = {
+    openrouter: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3.8v16.4M3.8 12h16.4" stroke="currentColor" stroke-width="2"/></svg>',
+    openai: '<svg viewBox="0 0 24 24"><path d="M12 4.5a5 5 0 0 1 4.9 4 4.4 4.4 0 0 1-1.2 8.6H8.3A4.4 4.4 0 0 1 7.1 8.5 5 5 0 0 1 12 4.5Z" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    claude: '<svg viewBox="0 0 24 24"><path d="M6 18 12 5l6 13M8.6 13.6h6.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    xai: '<svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5 5 19" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M12 10.4 17.6 5M12 10.4 6.4 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    deepseek: '<svg viewBox="0 0 24 24"><path d="M12 3.5c4.7 0 8.5 3.8 8.5 8.5s-3.8 8.5-8.5 8.5S3.5 16.7 3.5 12 7.3 3.5 12 3.5Zm0 4.2a4.3 4.3 0 1 0 0 8.6 4.3 4.3 0 0 0 0-8.6Z" fill="currentColor"/></svg>',
+    gemini: '<svg viewBox="0 0 24 24"><path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9L12 3Z" fill="currentColor"/></svg>',
+    minimax: '<svg viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="4.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 12h7M12 8.5v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  };
   const PROVIDERS = [
-    { id: "openrouter", name: "OpenRouter", sub: "Every model · free tier included", brand: "#6c7bff", oauth: true,
-      glyph: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3.8v16.4M3.8 12h16.4" stroke="currentColor" stroke-width="2"/></svg>' },
-    { id: "openai", name: "ChatGPT", sub: "Plus & Pro via Codex login", brand: "#19c39c", oauth: true,
-      glyph: '<svg viewBox="0 0 24 24"><path d="M12 4.5a5 5 0 0 1 4.9 4 4.4 4.4 0 0 1-1.2 8.6H8.3A4.4 4.4 0 0 1 7.1 8.5 5 5 0 0 1 12 4.5Z" fill="none" stroke="currentColor" stroke-width="2"/></svg>' },
-    { id: "claude", name: "Claude", sub: "Pro & Team · native messages API", brand: "#f08057", oauth: true,
-      glyph: '<svg viewBox="0 0 24 24"><path d="M6 18 12 5l6 13M8.6 13.6h6.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
-    { id: "xai", name: "xAI Grok", sub: "Grok subscription · x.ai", brand: "#e8e8ee", oauth: true,
-      glyph: '<svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5 5 19" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M12 10.4 17.6 5M12 10.4 6.4 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' },
-    { id: "deepseek", name: "DeepSeek", sub: "chat · reasoner", brand: "#5b8cff", oauth: false,
-      glyph: '<svg viewBox="0 0 24 24"><path d="M12 3.5c4.7 0 8.5 3.8 8.5 8.5s-3.8 8.5-8.5 8.5S3.5 16.7 3.5 12 7.3 3.5 12 3.5Zm0 4.2a4.3 4.3 0 1 0 0 8.6 4.3 4.3 0 0 0 0-8.6Z" fill="currentColor"/></svg>' },
-    { id: "gemini", name: "Gemini", sub: "Flash & Pro · Google AI", brand: "#8ab4ff", oauth: false,
-      glyph: '<svg viewBox="0 0 24 24"><path d="M12 3l1.9 6.1L20 11l-6.1 1.9L12 19l-1.9-6.1L4 11l6.1-1.9L12 3Z" fill="currentColor"/></svg>' },
+    { id: "openrouter", name: "OpenRouter", sub: "Every model · free tier included", brand: "#6c7bff", oauth: true, logo: "openrouter-color.svg" },
+    { id: "openai", name: "ChatGPT", sub: "Plus & Pro via Codex login", brand: "#19c39c", oauth: true, logo: "openai.svg" },
+    { id: "claude", name: "Claude", sub: "Pro & Team · native messages API", brand: "#f08057", oauth: true, logo: "claude-color.svg" },
+    { id: "xai", name: "xAI Grok", sub: "Grok subscription · x.ai", brand: "#e8e8ee", oauth: true, logo: "xai.svg" },
+    { id: "deepseek", name: "DeepSeek", sub: "chat · reasoner", brand: "#5b8cff", oauth: false, logo: "deepseek-color.svg" },
+    { id: "gemini", name: "Gemini", sub: "Flash & Pro · Google AI", brand: "#8ab4ff", oauth: false, logo: "gemini-color.svg" },
   ];
-  // MiniMax keeps parity with the proxy's PROVIDER_DEFAULTS.
+  // MiniMax has no official mark in the lobe set — monogram tile keeps it honest.
   PROVIDERS.push({ id: "minimax", name: "MiniMax", sub: "Text-01 · abab", brand: "#ff5c72", oauth: false,
-    glyph: '<svg viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="4.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 12h7M12 8.5v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' });
+    monogram: "M",
+    glyph: FALLBACK_GLYPHS.minimax });
+  const glyphOf = (p) => {
+    const official = p.logo && lobeSvg(p.logo);
+    if (official) return official;
+    if (p.monogram) return `<span class="gd-logo gd-mono">${p.monogram}</span>`;
+    return `<span class="gd-logo">${p.glyph || ""}</span>`;
+  };
 
   const maskOf = (v) => (!v ? "" : v.length > 8 ? `${v.slice(0, 4)}•••${v.slice(-3)}` : "•••");
   const connected = (cfg, p) => Boolean(cfg.providers?.[p]?.apiKey || cfg[p === "claude" ? "anthropicApiKey" : `${p}ApiKey`]);
@@ -116,9 +161,9 @@
       background:linear-gradient(90deg,transparent 4%,rgba(255,255,255,.5) 50%,transparent 96%);opacity:.55}
     #grok-provider-hub-modal .gd-head{display:flex;align-items:center;gap:13px;padding:20px 22px 16px}
     #grok-provider-hub-modal .gd-mark{width:38px;height:38px;border-radius:13px;flex:0 0 auto;display:grid;place-items:center;
-      background:radial-gradient(140% 160% at 30% 10%,rgba(255,176,88,.85),rgba(158,52,10,.92) 70%);border:1px solid rgba(255,190,120,.35);
-      box-shadow:inset 0 1px 0 rgba(255,220,170,.55),0 6px 18px rgba(180,70,10,.45)}
-    #grok-provider-hub-modal .gd-mark svg{width:21px;height:21px;color:#ffe9d2}
+      background:var(--gdg-chip,radial-gradient(150% 170% at 28% 8%,rgba(255,255,255,.13),rgba(16,16,28,.66)));
+      border:1px solid var(--gdg-border,rgba(255,255,255,.18));box-shadow:inset 0 1px 0 rgba(255,255,255,.2)}
+    #grok-provider-hub-modal .gd-mark>svg{width:23px;height:23px;display:block}
     #grok-provider-hub-modal .gd-title{font-size:16px;font-weight:750;letter-spacing:-.01em;line-height:1.15}
     #grok-provider-hub-modal .gd-sub{font-size:11.5px;color:var(--gdg-text-dim,rgba(255,255,255,.56));margin-top:2px}
     #grok-provider-hub-modal .gd-pill{margin-left:auto;display:flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;
@@ -144,7 +189,10 @@
     #grok-provider-hub-modal .gd-crow{display:flex;align-items:center;gap:10px}
     #grok-provider-hub-modal .gd-glyph{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;flex:0 0 auto;
       color:var(--brand);background:color-mix(in srgb,var(--brand) 14%,transparent);border:1px solid color-mix(in srgb,var(--brand) 30%,transparent)}
-    #grok-provider-hub-modal .gd-glyph svg{width:16px;height:16px}
+    #grok-provider-hub-modal .gd-glyph svg{width:17px;height:17px;display:block}
+    #grok-provider-hub-modal .gd-logo{display:grid;place-items:center;width:17px;height:17px}
+    #grok-provider-hub-modal .gd-logo svg{width:100%;height:100%;display:block}
+    #grok-provider-hub-modal .gd-mono{font-size:13px;font-weight:850;color:var(--brand);letter-spacing:-.02em}
     #grok-provider-hub-modal .gd-name{font-size:13px;font-weight:700}
     #grok-provider-hub-modal .gd-desc{font-size:10.5px;color:var(--gdg-text-dim,rgba(255,255,255,.56));margin-top:1px}
     #grok-provider-hub-modal .gd-state{display:flex;align-items:center;justify-content:space-between;margin-top:11px;min-height:24px}
@@ -274,9 +322,7 @@
           <svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </div>
         <div class="gd-head">
-          <div class="gd-mark">
-            <svg viewBox="0 0 24 24"><path d="M12 3c1 3.2-.8 4.9-2.3 6.5C8 11.3 7 13 7 15a5 5 0 0 0 10 0c0-1.9-.8-3.4-1.7-4.7-.5 1-1.2 1.8-2.3 2.2.6-2.9-.4-6.6-1-9.5Z" fill="currentColor"/></svg>
-          </div>
+          <div class="gd-mark">${BURNBAR_MARK || '<svg viewBox="0 0 24 24"><path d="M12 3c1 3.2-.8 4.9-2.3 6.5C8 11.3 7 13 7 15a5 5 0 0 0 10 0c0-1.9-.8-3.4-1.7-4.7-.5 1-1.2 1.8-2.3 2.2.6-2.9-.4-6.6-1-9.5Z" fill="currentColor"/></svg>'}</div>
           <div>
             <div class="gd-title">Provider Hub</div>
             <div class="gd-sub">One gateway on :8320 · your subscriptions, keys & local engines</div>
@@ -288,7 +334,7 @@
           <div class="gd-cards">${PROVIDERS.map((p) => `
             <div class="gd-card" style="--brand:${p.brand}" data-pid="${p.id}">
               <div class="gd-crow">
-                <div class="gd-glyph">${p.glyph}</div>
+                <div class="gd-glyph">${glyphOf(p)}</div>
                 <div><div class="gd-name">${p.name}</div><div class="gd-desc">${p.sub}</div></div>
               </div>
               <div class="gd-state">
@@ -315,7 +361,7 @@
           </div>
         </div>
         <div class="gd-foot">
-          <a class="gd-link" href="https://burnbar.app" target="_blank" rel="noopener">🔥 BurnBar Mac App ↗</a>
+          <a class="gd-link" href="https://burnbar.app" target="_blank" rel="noopener"><span class="gd-logo" style="width:13px;height:13px">${BURNBAR_MARK}</span>BurnBar Mac App ↗</a>
           <span class="gd-ver">OPENBURNBAR · GATEWAY :8320</span>
         </div>
       </div>`;
