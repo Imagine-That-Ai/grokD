@@ -26,7 +26,16 @@ function activeId() {
 }
 
 function isCursorSeat() {
-  return true; // Active on all seats (Local D and Cursor profiles)
+  const id = activeId();
+  if (String(id).indexOf("cursor-") === 0) return true;
+  try {
+    const p = (JSON.parse(fs.readFileSync(path.join(ROOT, "profiles.json"), "utf8")).profiles || [])
+      .find((x) => x.id === id);
+    return !!(p && p.kind === "cursor");
+  } catch (err) {
+    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[cursor-bubble] isCursorSeat err: " + (err.message || err) + "\n"); } catch (_) {}
+    return false;
+  }
 }
 
 function readSvg(rel, fill) {
@@ -69,83 +78,6 @@ function applyModel(id) {
 
 const PROVIDERS = [
   {
-    id: "anthropic",
-    name: "Anthropic Claude",
-    glow: "rgba(217,119,87,0.95)",
-    file: "lobe/claude-color.svg",
-    models: [
-      { id: "claude-opus-5", name: "Claude Opus 5" },
-      { id: "claude-fable-5", name: "Claude Fable 5" },
-      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
-      { id: "claude-3-7-sonnet", name: "Claude 3.7 Sonnet" },
-      { id: "claude-3-5-haiku", name: "Claude 3.5 Haiku" },
-    ],
-  },
-  {
-    id: "openai",
-    name: "OpenAI",
-    glow: "rgba(16,185,129,0.95)",
-    file: "lobe/openai.svg",
-    models: [
-      { id: "gpt-5.6-luna", name: "GPT-5.6 Luna" },
-      { id: "gpt-5-codex", name: "GPT-5 Codex" },
-      { id: "o3-mini", name: "o3-mini" },
-      { id: "gpt-4o", name: "GPT-4o" },
-    ],
-  },
-  {
-    id: "grok",
-    name: "xAI Grok",
-    glow: "rgba(56,189,248,0.95)",
-    file: "lobe/grok.svg",
-    models: [
-      { id: "grok-4.6", name: "Grok 4.6" },
-      { id: "cursor/cursor-grok-4.5-high", name: "Grok 4.5 High" },
-      { id: "grok-composer-2.5-fast", name: "Composer 2.5 Fast" },
-    ],
-  },
-  {
-    id: "deepseek",
-    name: "DeepSeek",
-    glow: "rgba(129,140,248,0.95)",
-    file: "lobe/deepseek-color.svg",
-    models: [
-      { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
-      { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash" },
-      { id: "deepseek-v4-pro:cloud", name: "DeepSeek V4 Pro (Ollama)" },
-    ],
-  },
-  {
-    id: "meta",
-    name: "Meta AI",
-    glow: "rgba(236,72,153,0.95)",
-    file: "lobe/meta-color.svg",
-    models: [
-      { id: "meta/muse-spark-1.2-contributor", name: "Meta Muse Spark" },
-      { id: "meta/llama-3.3-70b-instruct", name: "Llama 3.3 70B" },
-    ],
-  },
-  {
-    id: "gemini",
-    name: "Google Gemini",
-    glow: "rgba(168,85,247,0.95)",
-    file: "lobe/gemini-color.svg",
-    models: [
-      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-    ],
-  },
-  {
-    id: "moonshot",
-    name: "Moonshot / Qwen",
-    glow: "rgba(244,63,94,0.95)",
-    file: "lobe/moonshot.svg",
-    models: [
-      { id: "kimi/k3", name: "Kimi K3" },
-      { id: "qwen/qwen-2.5-coder-32b-instruct", name: "Qwen 2.5 Coder 32B" },
-    ],
-  },
-  {
     id: "cursor",
     name: "Cursor",
     metal: true,
@@ -155,6 +87,27 @@ const PROVIDERS = [
       { id: "grok-4.6", name: "Grok 4.6" },
       { id: "cursor/cursor-grok-4.5-high", name: "Grok 4.5 High" },
       { id: "grok-composer-2.5-fast", name: "Composer 2.5 Fast" },
+    ],
+  },
+  {
+    id: "grok",
+    name: "Grok",
+    glow: "rgba(244,244,245,0.9)",
+    file: "lobe/grok.svg",
+    models: [
+      { id: "grok-4.6", name: "Grok 4.6" },
+      { id: "grok-4.5", name: "Grok 4.5" },
+      { id: "grok-composer-2.5-fast", name: "Composer 2.5 Fast" },
+    ],
+  },
+  {
+    id: "xai",
+    name: "xAI",
+    glow: "rgba(244,244,245,0.88)",
+    file: "lobe/xai.svg",
+    models: [
+      { id: "grok-4.6", name: "Grok 4.6" },
+      { id: "grok-4.5", name: "Grok 4.5" },
     ],
   },
 ];
