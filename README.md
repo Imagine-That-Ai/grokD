@@ -16,31 +16,31 @@ git -c credential.helper= clone --depth=1 https://github.com/Imagine-That-Ai/gro
 
 ---
 
-## 🚀 Setting Up Your Provider & Adding Models
+## 🚀 Setting Up Your AI Providers & Models
 
-Grok "D" uses **OpenBurnBar** as its local OpenAI-compatible gateway on port `:8320`.
+Grok "D" uses **OpenBurnBar** as its local AI gateway on port `:8320`. You can link your existing AI subscriptions or API keys in 1 click:
 
-### 1. Offline Local Models (Zero Config)
-* Run **Ollama** (`ollama run deepseek-coder` or `ollama run llama3`) or **LM Studio**.
-* OpenBurnBar auto-discovers your local engines on `:11434` / `:1234` — no API keys required!
+### 1. 🌐 OpenRouter OAuth (All Frontier Models with 1 Click)
+* Click **"⚡ OpenBurnBar & Models"** in the seat menu.
+* Click **"Connect with OAuth"** to authenticate OpenRouter in your browser.
+* Instantly unlocks Claude 3.7 Sonnet, DeepSeek R1, GPT-4o, and Llama 3.3 at raw token cost.
 
-### 2. Cloud Models (xAI, OpenAI, Anthropic)
-Set your API key in your shell or pass it to OpenBurnBar:
-```bash
-# xAI Grok Models
-export XAI_API_KEY="xai-..."
+### 2. 🔑 Direct API Keys (OpenAI, xAI, Anthropic, MiniMax, DeepSeek, Gemini)
+* Paste your API key into the **OpenBurnBar & AI Providers** settings modal:
+  * **OpenAI / ChatGPT**: `sk-proj-...`
+  * **xAI Grok**: `xai-...`
+  * **Anthropic Claude**: `sk-ant-...`
+  * **DeepSeek / ZAI**: `sk-...`
+  * **MiniMax (Text-01 / abab)**: `sk-cp-...`
+  * **Google Gemini**: `AIzaSy...`
+  * **Groq / Together**: High-speed inference tokens
 
-# Or any OpenAI / OpenRouter endpoint
-export OPENBURNBAR_PROVIDER_BASE_URL="https://api.openai.com/v1"
-export OPENBURNBAR_PROVIDER_API_KEY="sk-..."
-```
+### 3. ⚡ Offline Local AI (Ollama & LM Studio)
+* Run **Ollama** (`ollama run llama3.2` or `ollama run deepseek-r1`) or **LM Studio**.
+* OpenBurnBar auto-discovers your local engines on `:11434` / `:1234` — zero API keys required!
 
-### 3. Cursor Multi-Account Seats
-* Open the bottom-left seat menu in Grok "D".
-* Click **"Log in with Cursor"** to link your accounts and access Cursor cloud models.
-
-### 4. Switch Models Live
-* Click the glowing **plasma orb** in the top-left header to switch between active models (`Grok 4.6`, `Claude Opus 5`, `GPT-5.6 Luna`, `DeepSeek`, `Local Ollama`).
+### 4. ✨ Cursor Multi-Seat Accounts
+* Link multiple Cursor accounts in the bottom-left seat menu to share pro quotas across workspaces.
 
 ---
 

@@ -3113,11 +3113,12 @@
         e.preventDefault();
         e.stopPropagation();
         closeSeatActionMenu();
-        const modelOrb = document.getElementById("pure-model-plasma-orb") || document.querySelector(".pure-plasma-orb-2");
-        if (modelOrb) {
-          modelOrb.click();
-        } else {
-          try { require(path.join(ROOT, "cursor-model-bubble.js")).render(); } catch (_) {}
+        try {
+          const hub = require(path.join(ROOT, "provider-hub.js"));
+          hub.renderProviderModal();
+        } catch (err) {
+          const modelOrb = document.getElementById("pure-model-plasma-orb") || document.querySelector(".pure-plasma-orb-2");
+          if (modelOrb) modelOrb.click();
         }
       });
     }
