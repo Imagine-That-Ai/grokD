@@ -16,6 +16,34 @@ git -c credential.helper= clone --depth=1 https://github.com/Imagine-That-Ai/gro
 
 ---
 
+## 🚀 Setting Up Your Provider & Adding Models
+
+Grok "D" uses **OpenBurnBar** as its local OpenAI-compatible gateway on port `:8320`.
+
+### 1. Offline Local Models (Zero Config)
+* Run **Ollama** (`ollama run deepseek-coder` or `ollama run llama3`) or **LM Studio**.
+* OpenBurnBar auto-discovers your local engines on `:11434` / `:1234` — no API keys required!
+
+### 2. Cloud Models (xAI, OpenAI, Anthropic)
+Set your API key in your shell or pass it to OpenBurnBar:
+```bash
+# xAI Grok Models
+export XAI_API_KEY="xai-..."
+
+# Or any OpenAI / OpenRouter endpoint
+export OPENBURNBAR_PROVIDER_BASE_URL="https://api.openai.com/v1"
+export OPENBURNBAR_PROVIDER_API_KEY="sk-..."
+```
+
+### 3. Cursor Multi-Account Seats
+* Open the bottom-left seat menu in Grok "D".
+* Click **"Log in with Cursor"** to link your accounts and access Cursor cloud models.
+
+### 4. Switch Models Live
+* Click the glowing **plasma orb** in the top-left header to switch between active models (`Grok 4.6`, `Claude Opus 5`, `GPT-5.6 Luna`, `DeepSeek`, `Local Ollama`).
+
+---
+
 ## 🔄 Safe In-Place Update (Never Breaks Chats or Logins)
 
 Update Grok D to the latest version while preserving all your bots, transcripts, and Cursor seats:

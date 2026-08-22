@@ -12,7 +12,7 @@ if [ -z "$(ls -A "$HACK/box-data/agents" 2>/dev/null)" ]; then
   cat > "$HACK/box-data/agents/$DEFAULT_ID/profile.json" <<'EOF'
 {
   "name": "Local D",
-  "description": "Your local AI companion",
+  "description": "Your local AI companion powered by OpenBurnBar",
   "origin": "user"
 }
 EOF
