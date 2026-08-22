@@ -303,8 +303,10 @@ if [ "$DEST" != "$ALIAS" ] && [ "$(dirname "$DEST")" = "$(dirname "$ALIAS")" ]; 
   ln -s "$(basename "$DEST")" "$ALIAS"
 fi
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f -r -u "$DEST" 2>/dev/null || true
-touch "$DEST"
-killall Dock 2>/dev/null || true
+chmod +x "$ROOT"/*.sh 2>/dev/null || true
+if [ -f "$ROOT/ensure-local-box.sh" ]; then
+  bash "$ROOT/ensure-local-box.sh" >/dev/null 2>&1 || true
+fi
 if [ "$OPEN_APP" -eq 1 ]; then
   open -na "$DEST" || open "$DEST"
   echo "opened. Seat-in can add more than one Cursor account."

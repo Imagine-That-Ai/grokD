@@ -36,8 +36,8 @@ if [ "$MODE" = "local" ]; then
   export SAND_HOST_GATEWAY_URL="${SAND_HOST_GATEWAY_URL:-http://127.0.0.1:1337}"
   export SAND_HOST_GATEWAY_TOKEN="${SAND_HOST_GATEWAY_TOKEN:-fake-gateway-token}"
   export SAND_BACKEND_URL="${SAND_BACKEND_URL:-http://127.0.0.1:8787}"
-  if [ -x "$HOME_DST/ensure-local-box.sh" ]; then
-    "$HOME_DST/ensure-local-box.sh" >/tmp/grokbot-hack/ensure-local-box.log 2>&1 || true
+  if [ -f "$HOME_DST/ensure-local-box.sh" ]; then
+    bash "$HOME_DST/ensure-local-box.sh" >/tmp/grokbot-hack/ensure-local-box.log 2>&1 || true
   fi
 else
   unset SAND_HOST_GATEWAY_URL
