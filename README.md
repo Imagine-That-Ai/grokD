@@ -4,6 +4,20 @@ Local bots on your Mac, seamless multi-account Cursor switching, offline Ollama/
 
 ---
 
+## 🛠 Development (Alberto's machines)
+
+The **dev checkout** lives in `~/Documents/Developer/grok-D`. The **installed runtime** stays at `~/.grok/grokbot-d` (daemons + chat SQLite live there; macOS TCC makes `~/Documents` a bad runtime home).
+
+```bash
+cd ~/Documents/Developer/grok-D
+./deploy.sh          # push tracked files into the local runtime (~/.grok/grokbot-d)
+./deploy.sh --fleet  # also sync code to mini + m1pro and refresh their daemons
+```
+
+`deploy.sh` uses `git archive`, so it can only ever copy tracked repo files — user chats, seats, and keys are untouchable.
+
+---
+
 ## ⚡ Instant 1-Liner Install (For any Mac)
 
 Paste this into Terminal on any Mac with `/Applications/Grok Bot.app` installed:
