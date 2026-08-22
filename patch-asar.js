@@ -68,13 +68,42 @@ function fuzzyIpn(text) {
   if (text.includes('access:{state:"granted",reason:"none"}')) {
     return { text, status: "already", label: "IPn-fuzzy" };
   }
-  const re = /return\{identity:r,access:await t\.readAccess\(\)\.catch\([^)]+\)\}/;
-  if (!re.test(text)) return { text, status: "skipped", label: "IPn-fuzzy", reason: "no-match" };
-  return {
-    text: text.replace(re, 'return{identity:r||e.authId||e.email||"cursor",access:{state:"granted",reason:"none"}}'),
-    status: "patched",
-    label: "IPn-fuzzy",
-  };
+  const re = /return\s*([A-Za-z0-9_$]+)===null\?\{identity:null,access:([A-Za-z0-9_$]+)\.kind==="logged-in"\?[A-Za-z0-9_$]+:[A-Za-z0-9_$]+\}:\{identity:\1,access:await ([A-Za-z0-9_$]+)\.readAccess\(\)\.catch\([^)]+\)\}/;
+  if (re.test(text)) {
+    return {
+      text: text.replace(re, (m, idVar, eVar, paramVar) => {
+        return "return{identity:" + idVar + "||" + eVar + ".authId||" + eVar + ".email||\"cursor\",access:{state:\"granted\",reason:\"none\"}}";
+      }),
+      status: "patched",
+      label: "IPn-fuzzy",
+    };
+  }
+  const fallbackRe = /return\{identity:([A-Za-z0-9_$]+),access:await ([A-Za-z0-9_$]+)\.readAccess\(\)\.catch\([^)]+\)\}/;
+  if (fallbackRe.test(text)) {
+    return {
+      text: text.replace(fallbackRe, (m, idVar, paramVar) => "return{identity:" + idVar + "||" + paramVar + ".authId||\"cursor\",access:{state:\"granted\",reason:\"none\"}}"),
+      status: "patched",
+      label: "IPn-fuzzy",
+    };
+  }
+  return { text, status: "skipped", label: "IPn-fuzzy", reason: "no-match" };
+}
+
+function fuzzyDescriptorRead(text) {
+  if (text.includes("sand-data/local-exec-daemon-connection.json")) {
+    return { text, status: "already", label: "descriptor-read-fuzzy" };
+  }
+  const re = /async read\(([A-Za-z0-9_$]+)\)\{if\(!([A-Za-z0-9_$]+)\.codec\.isAvailable\(\)\)return null;let ([A-Za-z0-9_$]+);try\{\3=await ([A-Za-z0-9_$]+)\.promises\.readFile\(\2\.filePath,"utf8"\)\}catch\(([A-Za-z0-9_$]+)\)/;
+  if (re.test(text)) {
+    return {
+      text: text.replace(re, (m, aArg, rObj, lVar, fsObj, uErr) => {
+        return "async read(" + aArg + "){if(!" + rObj + ".codec.isAvailable())return null;let n=async()=>{try{let p=" + rObj + ".filePath.replace(/gateway-descriptor\\.json$/,\"sand-data/local-exec-daemon-connection.json\");return JSON.parse(await " + fsObj + ".promises.readFile(p,\"utf8\"))}catch{return null}};let " + lVar + ";try{" + lVar + "=await " + fsObj + ".promises.readFile(" + rObj + ".filePath,\"utf8\")}catch(" + uErr + "){return await n()||null}";
+      }),
+      status: "patched",
+      label: "descriptor-read-fuzzy",
+    };
+  }
+  return { text, status: "skipped", label: "descriptor-read-fuzzy", reason: "no-match" };
 }
 
 function ensurePreloadHook(file) {
@@ -100,6 +129,11 @@ function applyPatches(opts) {
   }
   const rd = tryReplace(main, READ_OFFICIAL, READ_PATCH, "descriptor-read");
   main = rd.text;
+  let rdFuzzy = { status: "skipped", label: "descriptor-read-fuzzy" };
+  if (rd.status === "skipped") {
+    rdFuzzy = fuzzyDescriptorRead(main);
+    main = rdFuzzy.text;
+  }
   const auth = tryReplace(main, AUTH_OFFICIAL, AUTH_PATCH, "wrap-main-auth");
   main = auth.text;
   let authFuzzy = { status: "skipped", label: "wrap-main-auth-fuzzy" };
@@ -138,7 +172,7 @@ function applyPatches(opts) {
   const report = {
     main: mainFile,
     IPn: ipn.status === "skipped" ? ipnFuzzy.status : ipn.status,
-    descriptorRead: rd.status,
+    descriptorRead: rd.status === "skipped" ? rdFuzzy.status : rd.status,
     wrapMainAuth: auth.status === "skipped" ? authFuzzy.status : auth.status,
     openExternal: openExt,
     preloadHook: hook,

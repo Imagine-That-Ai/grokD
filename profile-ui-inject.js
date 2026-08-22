@@ -39,6 +39,14 @@
     }
   }
   wrapPageAuth().catch(() => {});
+  if (typeof document !== "undefined") {
+    document.addEventListener("DOMContentLoaded", () => wrapPageAuth().catch(() => {}));
+    window.addEventListener("load", () => wrapPageAuth().catch(() => {}));
+  }
+  const authLoop = setInterval(() => {
+    wrapPageAuth().catch(() => {});
+  }, 350);
+  setTimeout(() => clearInterval(authLoop), 15000);
 
   function activeId() {
     try {
