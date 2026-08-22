@@ -30,7 +30,8 @@ for f in \
   space-kernel.js space-field-gl.js liquid-metal-mark.js cursor-model-bubble.js \
   plasma-selectors.js plasma-selectors.css \
   node-deps.js sqlite-ro.js \
-  ensure-local-box.sh install-runtime.sh pack-asar.sh patch-asar.sh patch-asar.js \
+  asar-file.js asar-cli.sh \
+  ensure-local-box.sh install-runtime.sh launch-d.sh pack-asar.sh patch-asar.sh patch-asar.js \
   repair-overlay.sh \
   sync-to-tmp.sh
  do
@@ -79,9 +80,43 @@ JSON
 printf '%s\n' '{ "mode": "local" }' > "$RT/active-env.starter.json"
 cp "$ROOT/INSTALL.md" "$DEST/../INSTALL.md" 2>/dev/null || true
 
+for required in asar-file.js asar-cli.sh install-runtime.sh ensure-local-box.sh launch-d.sh; do
+  if [ ! -f "$RT/$required" ]; then
+    echo "ERROR: packaged runtime is missing $required" >&2
+    exit 1
+  fi
+done
+
+BIN="$DEST/Contents/MacOS/Grok Bot"
+REAL="$DEST/Contents/MacOS/Grok Bot.real"
+if [ ! -x "$REAL" ]; then
+  echo "ERROR: source app is not an installed Grok D app (missing Grok Bot.real)" >&2
+  exit 1
+fi
+cp "$RT/launch-d.sh" "$BIN"
+
+node - "$RT/asar-file.js" "$DEST/Contents/Resources/app.asar" <<'NODE'
+const helper = require(process.argv[2]);
+const archive = process.argv[3];
+for (const entry of [
+  "dist/host/host-main.cjs",
+  "dist/host/agent-isolation/agent-store-worker.cjs",
+  "dist/host/agent-isolation/transcript-mirror-worker.cjs",
+  "dist/host/extensions/box-store-sync/box-store-vacuum-worker.cjs",
+  "dist/host/extensions/content-search/search-index-worker.cjs",
+]) {
+  const data = helper.readFile(archive, entry);
+  if (!data.length) throw new Error(`empty ASAR host entry: ${entry}`);
+}
+console.log("verified packaged ASAR host recovery");
+NODE
+
 # Drop debug leftovers from the copied user-data? none in the app.
 chmod +x "$DEST/Contents/MacOS/Grok Bot" "$RT"/*.sh 2>/dev/null || true
-codesign --force --sign - "$DEST" >/tmp/grokbot-d-dist-codesign.out 2>&1 || true
+if ! codesign --force --sign - "$DEST" >/tmp/grokbot-d-dist-codesign.out 2>&1; then
+  cat /tmp/grokbot-d-dist-codesign.out >&2
+  exit 1
+fi
 
 echo "packed $DEST"
 echo "scripts $(ls "$RT" | wc -l | tr -d ' ')"

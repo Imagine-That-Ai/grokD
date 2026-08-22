@@ -4,6 +4,7 @@
 // hack/, not only on the build machine.
 "use strict";
 const assert = (c, m) => { if (!c) throw new Error(m); };
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -12,6 +13,13 @@ const { execFileSync, spawnSync } = require("child_process");
 const ROOT = __dirname;
 let n = 0;
 const ok = (name) => { n++; console.log("PASS ", name); };
+const throws = (fn, pattern, message) => {
+  let caught = null;
+  try { fn(); } catch (error) { caught = error; }
+  if (!caught || (pattern && !pattern.test(String(caught && caught.message || caught)))) {
+    throw new Error(message + (caught ? `: ${caught.message || caught}` : ": no error thrown"));
+  }
+};
 
 function read(rel) {
   return fs.readFileSync(path.join(ROOT, rel), "utf8");
@@ -22,6 +30,90 @@ function tracked(rel) {
     cwd: ROOT, encoding: "utf8",
   }).trim();
   return out.split("\n").filter(Boolean);
+}
+
+const HOST_FILES = [
+  "host-main.cjs",
+  "agent-isolation/agent-store-worker.cjs",
+  "agent-isolation/transcript-mirror-worker.cjs",
+  "extensions/box-store-sync/box-store-vacuum-worker.cjs",
+  "extensions/content-search/search-index-worker.cjs",
+];
+
+function sha256(buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+function integrity(buffer, blockSize = 8) {
+  const blocks = [];
+  for (let offset = 0; offset < buffer.length; offset += blockSize) {
+    blocks.push(sha256(buffer.subarray(offset, Math.min(buffer.length, offset + blockSize))));
+  }
+  return { algorithm: "SHA256", hash: sha256(buffer), blockSize, blocks };
+}
+
+function setAsarEntry(files, rel, entry) {
+  const parts = rel.split("/");
+  let cursor = files;
+  for (let i = 0; i < parts.length - 1; i++) {
+    cursor[parts[i]] = cursor[parts[i]] || { files: {} };
+    cursor = cursor[parts[i]].files;
+  }
+  cursor[parts[parts.length - 1]] = entry;
+}
+
+function writeAsarFixture(root, packed, unpacked = {}) {
+  fs.mkdirSync(root, { recursive: true });
+  const archive = path.join(root, "fixture.asar");
+  const header = { files: {} };
+  const chunks = [];
+  let offset = 0;
+  for (const [rel, value] of Object.entries(packed)) {
+    const buffer = Buffer.from(value);
+    setAsarEntry(header.files, rel, {
+      size: buffer.length,
+      offset: String(offset),
+      integrity: integrity(buffer),
+    });
+    chunks.push(buffer);
+    offset += buffer.length;
+  }
+  for (const [rel, value] of Object.entries(unpacked)) {
+    const buffer = Buffer.from(value);
+    setAsarEntry(header.files, rel, {
+      size: buffer.length,
+      unpacked: true,
+      integrity: integrity(buffer),
+    });
+    const destination = path.join(`${archive}.unpacked`, ...rel.split("/"));
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, buffer);
+  }
+  const json = Buffer.from(JSON.stringify(header));
+  const paddedJsonSize = Math.ceil(json.length / 4) * 4;
+  const headerSize = 8 + paddedJsonSize;
+  const pickle = Buffer.alloc(16 + paddedJsonSize);
+  pickle.writeUInt32LE(4, 0);
+  pickle.writeUInt32LE(headerSize, 4);
+  pickle.writeUInt32LE(4 + paddedJsonSize, 8);
+  pickle.writeUInt32LE(json.length, 12);
+  json.copy(pickle, 16);
+  fs.writeFileSync(archive, Buffer.concat([pickle, ...chunks]));
+  return archive;
+}
+
+function hostFixture(prefix = "host") {
+  const files = {};
+  for (const rel of HOST_FILES) files[`dist/host/${rel}`] = `${prefix}:${rel}\n`;
+  return files;
+}
+
+function writeHostTree(root, prefix = "bundled") {
+  for (const rel of HOST_FILES) {
+    const destination = path.join(root, rel);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, `${prefix}:${rel}\n`);
+  }
 }
 
 {
@@ -111,13 +203,61 @@ ok("drop-and-landing");
 {
   const rt = read("install-runtime.sh");
   assert(rt.includes('rsync -a --update "$APP_SRC/assets/"'), "first launch copies assets");
+  assert(rt.includes("GROK_D_APP_ASAR"), "first launch supports an exact ASAR source");
+  assert(rt.includes("host_tree_complete"), "first launch verifies the whole host tree");
+  assert(!rt.includes("npx"), "first launch must not need npm or the network");
+  const asarCli = read("asar-cli.sh");
+  assert(asarCli.includes('ASAR_PACKAGE="@electron/asar@4.3.0"'), "modern ASAR CLI pin missing");
+  assert(asarCli.includes('ASAR_PACKAGE="@electron/asar@3.4.1"'), "legacy Node ASAR CLI pin missing");
+  const install = read("install.sh");
+  assert(install.includes('bash "$HERE/asar-cli.sh"'), "installer bypasses the pinned ASAR CLI");
+  assert(!install.includes("npx --yes asar"), "installer still uses the unpinned ASAR package");
   const pack = read("pack-dist.sh");
   assert(pack.includes('"$ROOT/assets/"'), "shareable .app includes assets");
   assert(pack.includes("grokd-icon.icns"), "shareable .app stamps the mascot");
+  assert(pack.includes("asar-file.js"), "shareable .app includes offline ASAR recovery");
+  assert(pack.includes("verified packaged ASAR host recovery"), "packaging verifies recoverable host entries");
+  assert(pack.includes('cp "$RT/launch-d.sh" "$BIN"'), "shareable .app installs the fail-closed launcher");
   const dock = read("patch-open-external.js");
   assert(dock.includes('path.join(ROOT, "assets", "grokd-icon.icns")'), "Dock uses git icon");
 }
 ok("runtime-and-dist-copy-assets");
+
+{
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "grokD-asar-file-"));
+  try {
+    const archive = writeAsarFixture(work, hostFixture("packed"), {
+      "unpacked/example.txt": "outside archive\n",
+    });
+    const helper = require("./asar-file");
+    const destination = path.join(work, "out", "host-main.cjs");
+    const cli = spawnSync(process.execPath, [
+      path.join(ROOT, "asar-file.js"),
+      "extract-file",
+      archive,
+      "dist/host/host-main.cjs",
+      destination,
+    ], { encoding: "utf8", timeout: 10000 });
+    assert(cli.status === 0, "asar-file CLI failed: " + (cli.stderr || cli.stdout || cli.status));
+    assert(fs.readFileSync(destination, "utf8") === "packed:host-main.cjs\n", "packed ASAR bytes changed");
+    assert((fs.statSync(destination).mode & 0o777) === 0o600, "extracted host file must be private");
+    assert(helper.readFile(archive, "unpacked/example.txt").toString() === "outside archive\n",
+      "unpacked ASAR entry failed");
+    throws(() => helper.readFile(archive, "../outside"), /unsafe entry path/,
+      "ASAR traversal was accepted");
+
+    const corrupt = path.join(work, "corrupt.asar");
+    const corruptBytes = fs.readFileSync(archive);
+    const meta = helper.readHeader(archive);
+    corruptBytes[meta.dataOffset] ^= 0xff;
+    fs.writeFileSync(corrupt, corruptBytes);
+    throws(() => helper.readFile(corrupt, "dist/host/host-main.cjs"), /SHA-256/,
+      "corrupt ASAR entry passed integrity verification");
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+}
+ok("offline-asar-extraction-is-safe-and-verified");
 
 {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "grokD-look-home-"));
@@ -126,6 +266,7 @@ ok("runtime-and-dist-copy-assets");
   fs.writeFileSync(path.join(src, "assets", "grokd-icon.icns"), "icns-fixture");
   fs.writeFileSync(path.join(src, "assets", "lobe", "xai.svg"), "<svg/>");
   fs.writeFileSync(path.join(src, "space-kernel.js"), "module.exports = {};\n");
+  writeHostTree(path.join(src, "host"));
   const r = spawnSync("bash", [path.join(ROOT, "install-runtime.sh"), src], {
     encoding: "utf8",
     env: Object.assign({}, process.env, { GROK_PROFILE_ROOT: home }),
@@ -143,4 +284,137 @@ ok("runtime-and-dist-copy-assets");
 }
 ok("install-runtime-copies-look");
 
-console.log("\n" + n + "/6 install-look checks passed");
+{
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "grokD-first-run-"));
+  const home = path.join(work, "home");
+  const src = path.join(work, "empty-app-runtime");
+  const fakeBin = path.join(work, "bin");
+  const npxMarker = path.join(work, "npx-was-called");
+  fs.mkdirSync(src, { recursive: true });
+  fs.mkdirSync(fakeBin, { recursive: true });
+  fs.writeFileSync(path.join(fakeBin, "npx"), `#!/bin/sh\nprintf called > "${npxMarker}"\nexit 91\n`);
+  fs.chmodSync(path.join(fakeBin, "npx"), 0o755);
+  const archive = writeAsarFixture(work, hostFixture("fresh"));
+  const r = spawnSync("bash", [path.join(ROOT, "install-runtime.sh"), src], {
+    encoding: "utf8",
+    env: Object.assign({}, process.env, {
+      GROK_D_APP_ASAR: archive,
+      GROK_PROFILE_ROOT: home,
+      NODE: process.execPath,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    }),
+    timeout: 20000,
+  });
+  assert(r.status === 0, "fresh install-runtime failed: " + (r.stderr || r.stdout || r.status));
+  assert(/runtime ready/.test(r.stdout), "fresh install did not report readiness");
+  for (const rel of HOST_FILES) {
+    const got = fs.readFileSync(path.join(home, "host", rel), "utf8");
+    assert(got === `fresh:${rel}\n`, `fresh host mismatch: ${rel}`);
+  }
+  assert(!fs.existsSync(npxMarker), "first-run extraction called npx");
+  fs.rmSync(work, { recursive: true, force: true });
+}
+ok("fresh-first-run-recovers-host-offline");
+
+{
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "grokD-incomplete-run-"));
+  const src = path.join(work, "empty-app-runtime");
+  fs.mkdirSync(src, { recursive: true });
+  const missing = path.join(work, "missing.asar");
+  const r = spawnSync("bash", [path.join(ROOT, "install-runtime.sh"), src], {
+    encoding: "utf8",
+    env: Object.assign({}, process.env, {
+      GROK_D_APP_ASAR: missing,
+      GROK_PROFILE_ROOT: path.join(work, "home"),
+      NODE: process.execPath,
+    }),
+    timeout: 20000,
+  });
+  assert(r.status !== 0, "incomplete first run reported success");
+  assert(!/runtime ready/.test(r.stdout), "incomplete first run printed runtime ready");
+  assert(/NOT ready|does not exist/.test(r.stderr), "incomplete first run lacked a useful error");
+  fs.rmSync(work, { recursive: true, force: true });
+}
+ok("incomplete-first-run-fails-closed");
+
+{
+  const launch = read("launch-d.sh");
+  const ensure = read("ensure-local-box.sh");
+  const shim = read("gateway-shim.js");
+  assert(launch.includes("startup_fail"), "launcher has no actionable startup failure");
+  assert(!/install-runtime\.sh[^\n]*\|\| true/.test(launch), "launcher swallows runtime install failure");
+  assert(!/ensure-local-box\.sh[^\n]*\|\| true/.test(launch), "launcher swallows local-box failure");
+  assert(ensure.includes('limit="${2:-120}"'), "readiness wait is not bounded/configurable");
+  assert(ensure.includes("local host :1338 did not become API-ready"), "host API readiness is not enforced");
+  assert(ensure.includes("gateway shim :1337 did not become healthy"), "shim health is not enforced");
+  assert(ensure.includes("grok-d-gateway-shim"), "shim readiness cannot reject stale gateway code");
+  assert(shim.includes('u.pathname === "/health"'), "gateway has no health endpoint");
+  assert(shim.includes("contract: 2"), "gateway health contract is not versioned");
+}
+ok("startup-contract-fails-closed");
+
+{
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "grokD-launch-fail-"));
+  const macos = path.join(work, "Test D.app", "Contents", "MacOS");
+  const runtime = path.join(work, "Test D.app", "Contents", "Resources", "grokbot-d");
+  const marker = path.join(work, "real-app-launched");
+  fs.mkdirSync(macos, { recursive: true });
+  fs.mkdirSync(runtime, { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "launch-d.sh"), path.join(macos, "Grok Bot"));
+  fs.writeFileSync(path.join(macos, "Grok Bot.real"), `#!/bin/sh\nprintf launched > "${marker}"\n`);
+  fs.writeFileSync(path.join(runtime, "install-runtime.sh"), "#!/bin/sh\nexit 23\n");
+  fs.chmodSync(path.join(macos, "Grok Bot"), 0o755);
+  fs.chmodSync(path.join(macos, "Grok Bot.real"), 0o755);
+  fs.chmodSync(path.join(runtime, "install-runtime.sh"), 0o755);
+  const home = path.join(work, "runtime-home");
+  const r = spawnSync("bash", [path.join(macos, "Grok Bot")], {
+    encoding: "utf8",
+    env: Object.assign({}, process.env, {
+      GROK_D_NO_ALERT: "1",
+      GROK_PROFILE_ROOT: home,
+      GROK_SEAT4: path.join(work, "user-data"),
+    }),
+    timeout: 10000,
+  });
+  assert(r.status !== 0, "launcher continued after installer failure");
+  assert(!fs.existsSync(marker), "real app launched after installer failure");
+  const startupLog = path.join(home, "runtime", "startup.log");
+  assert(fs.existsSync(startupLog), "launcher did not write startup diagnostics");
+  assert(/STARTUP FAILED/.test(fs.readFileSync(startupLog, "utf8")), "startup diagnostics omitted the failure");
+  fs.rmSync(work, { recursive: true, force: true });
+}
+ok("launcher-never-opens-an-infinite-spinner-after-bootstrap-failure");
+
+{
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "grokD-launch-normal-"));
+  const macos = path.join(work, "Test D.app", "Contents", "MacOS");
+  const runtime = path.join(work, "Test D.app", "Contents", "Resources", "grokbot-d");
+  const marker = path.join(work, "real-app-args");
+  fs.mkdirSync(macos, { recursive: true });
+  fs.mkdirSync(runtime, { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "launch-d.sh"), path.join(macos, "Grok Bot"));
+  fs.writeFileSync(path.join(macos, "Grok Bot.real"), `#!/bin/sh\nprintf '%s\\n' "$@" > "${marker}"\n`);
+  fs.writeFileSync(path.join(runtime, "install-runtime.sh"), `#!/bin/sh\nmkdir -p "$GROK_PROFILE_ROOT"\nprintf '%s\\n' '{ "mode": "cursor" }' > "$GROK_PROFILE_ROOT/active-env.json"\n`);
+  fs.chmodSync(path.join(macos, "Grok Bot"), 0o755);
+  fs.chmodSync(path.join(macos, "Grok Bot.real"), 0o755);
+  fs.chmodSync(path.join(runtime, "install-runtime.sh"), 0o755);
+  const userData = path.join(work, "user-data");
+  const r = spawnSync("bash", [path.join(macos, "Grok Bot")], {
+    encoding: "utf8",
+    env: Object.assign({}, process.env, {
+      GROK_D_NO_ALERT: "1",
+      GROK_PROFILE_ROOT: path.join(work, "runtime-home"),
+      GROK_SEAT4: userData,
+      GROK_D_CDP: "",
+    }),
+    timeout: 10000,
+  });
+  assert(r.status === 0, "normal no-CDP launch failed: " + (r.stderr || r.stdout || r.status));
+  const args = fs.readFileSync(marker, "utf8");
+  assert(args.includes(`--user-data-dir=${userData}`), "normal launch omitted its user-data directory");
+  assert(!args.includes("--remote-debugging-port"), "normal launch unexpectedly enabled CDP");
+  fs.rmSync(work, { recursive: true, force: true });
+}
+ok("launcher-works-with-cdp-disabled-on-macos-bash");
+
+console.log("\n" + n + " install-look checks passed");

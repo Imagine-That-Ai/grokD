@@ -6,7 +6,7 @@ const crypto = require("crypto");
 const { execFileSync } = require("child_process");
 const { tryParse } = require("./protoutil");
 
-const KEYCHAIN_ACCOUNT = "alberto-local";
+const KEYCHAIN_ACCOUNT = "grokbot-local";
 const MEM0_SERVICE = "grokd-mem0-api-key";
 const X_TOKEN_SERVICE = "grokd-x-token";
 const GITHUB_TOKEN_SERVICE = "grokd-github-token";
@@ -220,14 +220,14 @@ const SERVERS = {
 
 const ACCOUNT_SLOTS = {
   x: [
-    { key: "alberto8793", service: X_TOKEN_SERVICE },
+    { key: "x-1", service: X_TOKEN_SERVICE },
     { key: "x-2", service: `${X_TOKEN_SERVICE}-2` },
     { key: "x-3", service: `${X_TOKEN_SERVICE}-3` },
-    { key: "cubelove.ai", service: `${X_TOKEN_SERVICE}-4` },
+    { key: "x-4", service: `${X_TOKEN_SERVICE}-4` },
   ],
   github: [{ key: "default", service: GITHUB_TOKEN_SERVICE }],
   google: [
-    { key: "alberto8793", service: `${GOOGLE_TOKEN_SERVICE}-1` },
+    { key: "gmail-1", service: `${GOOGLE_TOKEN_SERVICE}-1` },
     { key: "gmail-2", service: `${GOOGLE_TOKEN_SERVICE}-2` },
   ],
   mem0: [{ key: "default", service: null }],

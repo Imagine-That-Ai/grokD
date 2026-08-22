@@ -18,13 +18,13 @@ command -v node >/dev/null || exit 1
 command -v npx >/dev/null || exit 1
 WORK="${TMPDIR:-/tmp}/grokD-repair-$$"
 mkdir -p "$WORK"
-npx --yes asar extract "$ASAR" "$WORK/asar" || exit 1
+bash "$HERE/asar-cli.sh" extract "$ASAR" "$WORK/asar" || exit 1
 node "$HERE/patch-asar.js" "$WORK/asar" || true
 if ! grep -a -q -F "profile-ui-inject.js" "$WORK/asar/dist/electron-preload/preload.cjs" 2>/dev/null; then
   rm -rf "$WORK"
   exit 1
 fi
-npx --yes asar pack "$WORK/asar" "$WORK/app.asar" || exit 1
+bash "$HERE/asar-cli.sh" pack "$WORK/asar" "$WORK/app.asar" || exit 1
 cp "$WORK/app.asar" "$ASAR"
 python3 - "$APP" <<'PY'
 import hashlib, plistlib, sys

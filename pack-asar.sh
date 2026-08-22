@@ -3,7 +3,7 @@
 set -euo pipefail
 ASAR_SRC=/tmp/grokbot-asar
 PRELOAD="$ASAR_SRC/dist/electron-preload/preload.cjs"
-APP="$HOME/Applications/grok\"D\".app"
+APP="$HOME/Applications/Grok Bot D.app"
 [ -d "$APP" ] || APP="$HOME/Applications/Grok Bot D.app"
 DEST="$APP/Contents/Resources/app.asar"
 HOOK='require(require("os").homedir() + "/.grok/grokbot-d/profile-ui-inject.js")'
@@ -25,13 +25,13 @@ else
   echo "disk-eval hook already present"
 fi
 
-npx --yes asar pack "$ASAR_SRC" /tmp/grokbot-hack/app.asar
+bash "$(dirname "$0")/asar-cli.sh" pack "$ASAR_SRC" /tmp/grokbot-hack/app.asar
 cp /tmp/grokbot-hack/app.asar "$DEST"
 
 # Update ElectronAsarIntegrity in Info.plist
 python3 - <<'PY'
 import hashlib, re, os
-app_path = os.path.expanduser('~/Applications/grok"D".app')
+app_path = os.path.expanduser("~/Applications/Grok Bot D.app")
 if not os.path.isdir(app_path):
     app_path = os.path.expanduser("~/Applications/Grok Bot D.app")
 dest = os.path.join(app_path, "Contents/Resources/app.asar")
@@ -45,11 +45,15 @@ with open(plist, "w", encoding="utf-8") as f:
     f.write(c)
 PY
 
-codesign --force --deep --sign - "$APP" >/tmp/grokbot-hack/codesign.out 2>&1 || true
+if ! codesign --force --deep --sign - "$APP" >/tmp/grokbot-hack/codesign.out 2>&1; then
+  cat /tmp/grokbot-hack/codesign.out >&2
+  exit 1
+fi
 echo "packed $DEST"
 # prove hook landed
-python3 - <<'PY'
-p="/Users/albertonunez/Applications/Grok Bot D.app/Contents/Resources/app.asar"
-data=open(p,"rb").read()
+python3 - "$DEST" <<'PY'
+import sys
+p = sys.argv[1]
+data = open(p, "rb").read()
 print("HOOK_OK" if b"profile-ui-inject.js" in data else "HOOK_MISSING")
 PY

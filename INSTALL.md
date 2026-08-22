@@ -1,66 +1,22 @@
 # Install grok"D"
 
-This is the custom Grok Bot. One app. Two ways to work:
-
-1. **Local** — bots run on this Mac. No Cursor login.
-2. **Cursor** — sign in with your own Cursor account. The app talks to *your* computer, not someone else’s.
-
-You do not need extra official Grok Bot copies. Official Grok Bot on this Mac can be imported as Grok A. Grok B and Grok C are not seats in this app.
-
-## Install
-
-1. Install official **Grok Bot** from xAI.
-2. Drag **grok"D"** (the face-tat icon) into your Applications folder.
-3. Open it. The first launch builds D from the Grok Bot already on this Mac.
-
-That drop is `drop/grok"D".app` from `./pack-drop.sh`. Node is required on PATH for that first build.
-
-To rebuild from Terminal:
+1. Install official Grok Bot from xAI.
+2. Install Node from https://nodejs.org
+3. From this repo:
 
 ```bash
-./install.sh --replace
+./install.sh --src "/Applications/Grok Bot.app" --dest "$HOME/Applications/Grok Bot D.app"
+./install.sh --dest /tmp/Grok-Bot-D-test.app --root /tmp/grokD-runtime --no-open
 ```
 
-## First launch
+`install.sh` copies official Grok Bot to `~/Applications/Grok Bot D.app`, stamps the face-tat mascot (`assets/grokd-icon.icns`), applies the space-kernel overlay (event horizons, nebulas, orbiting provider logos, light/dark), and extracts the local-box host from *your* app. It does not upload or download xAI’s binary. The script `open`s the app it just built.
 
-After the splash, **Seat in** walks you through a working setup:
+For This Mac mode, first launch extracts the five required host files from the installed `app.asar` without npm or network access, verifies their SHA-256 integrity, and waits for both local services before opening the renderer. If bootstrap fails, the app exits with an actionable alert and writes diagnostics under `~/.grok/grokbot-d/runtime/` instead of showing an endless setup screen.
 
-- **This Mac** — start the local box, pick a proxy (CLI Proxy / OpenBurnBar / Vibe), pick a first model.
-- **Cursor** — import an existing Grok Bot on this Mac, or sign in here.
+`--replace` overwrites dest if it already exists. Without it, an existing dest is left alone. Do not point `--dest` at a running grok"D".
 
-Skip anytime. To run it again, delete `~/.grok/grokbot-d/onboarding.json` or run `onboard` from the command bus.
+A notarized drag-into-Applications drop is built with `./pack-drop.sh` on a Mac that has Imagine That’s Developer ID, then notarized. This repo does not attach that `.app` (it would include xAI’s binary). If you already have the drop, drag the grok"D" icon into Applications; first open builds D from official Grok Bot.
 
-## Add your Cursor login
+First open: Seat in can sign in **more than one** Cursor account. Skip anytime. Official Grok B and C are not imported.
 
-In the app: new profile → **Cursor ID** → **Sign in here (no import)** → Create → switch to it.
-
-The official Cursor sign-in window should appear. After that, this app saves *your* box connection in `~/.grok/grokbot-d/profile-data/`. Switching away and back does not need another Grok Bot running.
-
-If official Grok Bot is already signed in on this Mac, Grok A is offered as an import. Import copies that login. It does not change the other app. Grok B and Grok C are not imported.
-
-## Switch
-
-```bash
-node ~/.grok/grokbot-d/switch-profile.js list
-node ~/.grok/grokbot-d/switch-profile.js switch local-d
-node ~/.grok/grokbot-d/switch-profile.js switch cursor-a
-```
-
-## What is yours vs the app
-
-| Path | What |
-| --- | --- |
-| `Grok Bot D.app` | The app |
-| `~/.grok/grokbot-d` | Profiles, scripts, local box data |
-| `~/Library/Application Support/GrokBotSeat4` | This app’s live session |
-
-Do not zip `profile-data` or `GrokBotSeat4` when you send the app to someone else. That is your login.
-
-## Rebuild from a stock Grok Bot
-
-```bash
-# extract official asar to /tmp/grokbot-asar, then:
-node ~/.grok/grokbot-d/patch-asar.js /tmp/grokbot-asar
-bash ~/.grok/grokbot-d/pack-asar.sh
-bash ~/.grok/grokbot-d/pack-dist.sh
-```
+Do not zip `~/.grok/grokbot-d/profile-data` or `~/Library/Application Support/GrokBotSeat4` when you send the app to someone else. That is your login.

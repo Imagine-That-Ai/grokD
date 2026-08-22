@@ -76,13 +76,18 @@ function seedEncryptedDescriptor(opts) {
   }
 }
 
-const LOCAL_STATUS = {
-  kind: "logged-in",
-  authId: "google-oauth2|user_01KX4ZNEM0JA0VXBG7EEG5FBQ7",
-  email: "alberto@local",
-  name: "Alberto",
-  isAnysphereUser: false,
-};
+const LOCAL_STATUS = (function () {
+  const os = require("os");
+  const u = os.userInfo();
+  const localName = u.username || "local";
+  return {
+    kind: "logged-in",
+    authId: "local|" + localName,
+    email: localName + "@local",
+    name: localName,
+    isAnysphereUser: false,
+  };
+})();
 
 function applyAuthPolicy(Q) {
   const mode = readMode();

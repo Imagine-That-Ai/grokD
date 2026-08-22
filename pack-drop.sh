@@ -4,7 +4,7 @@
 # same icon, and relaunches. We do not ship xAI's binary.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-OUT="${1:-$HERE/drop/grok\"D\".app}"
+OUT="${1:-$HERE/drop/Grok Bot D.app}"
 ICON="$HERE/assets/grokd-icon.icns"
 [ -f "$ICON" ] || { echo "missing $ICON" >&2; exit 1; }
 [ -f "$HERE/install.sh" ] || { echo "missing install.sh" >&2; exit 1; }
