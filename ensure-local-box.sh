@@ -135,7 +135,7 @@ if ! is_listen 8320; then
   fi
 fi
 
-if ! pgrep -f "$RUN_JS/routine-guard.js" >/dev/null 2>&1; then
+if ! ps aux | grep -q "[r]outine-guard.js"; then
   if [ -f "$RUN_JS/routine-guard.js" ]; then
     nohup env GROKBOT_HACK="$HACK" "$NODE" "$RUN_JS/routine-guard.js" >"$HACK/routine-guard.out" 2>&1 &
     echo "started routine-guard pid $!"
