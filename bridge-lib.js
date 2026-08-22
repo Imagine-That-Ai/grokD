@@ -72,6 +72,7 @@ function resolveTeammate(agents, raw) {
   const tokens = (s) => norm(s).split(/\s+/).filter((w) => w && w !== "bot" && w !== "the" && w !== "a");
   const want = norm(q);
   const wantTok = tokens(q);
+  if (!want) return null;
   const exact = list.find((a) => norm(a.name) === want);
   if (exact) return exact;
   const scored = list.map((a) => {
@@ -79,14 +80,14 @@ function resolveTeammate(agents, raw) {
     const have = tokens(a.name);
     let score = 0;
     if (name === want) score = 100;
-    else if (name.includes(want) || want.includes(name)) score = 80;
-    else if (wantTok.length && wantTok.every((t) => have.includes(t) || name.includes(t))) score = 70;
-    else if (wantTok.some((t) => t.length >= 3 && (have.includes(t) || name.includes(t)))) score = 40;
+    else if (name && (name === wantTok.join(" "))) score = 95;
+    else if (name.length >= 3 && want.includes(name)) score = 85;
+    else if (want.length >= 3 && name.includes(want)) score = 80;
+    else if (wantTok.length && wantTok.every((t) => t.length >= 2 && (have.includes(t) || (name.length >= t.length && name.includes(t))))) score = 70;
     return { a, score };
-  }).filter((x) => x.score > 0).sort((x, y) => y.score - x.score);
+  }).filter((x) => x.score >= 70).sort((x, y) => y.score - x.score);
   if (!scored.length) return null;
-  if (scored.length === 1 || scored[0].score >= 70) return scored[0].a;
-  if (scored[0].score >= scored[1].score + 20) return scored[0].a;
+  if (scored[0].score >= 70) return scored[0].a;
   return null;
 }
 

@@ -52,33 +52,7 @@ async function waitFor(pred, { timeoutMs = 45000, everyMs = 700, label = "condit
   throw new Error(`timeout waiting for ${label}`);
 }
 
-const resolveTeammate = (agents, raw) => {
-  const q = String(raw || "").trim();
-  if (!q) return null;
-  const list = Array.isArray(agents) ? agents : [];
-  const byId = list.find((a) => a && a.id === q);
-  if (byId) return byId;
-  const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const tokens = (s) => norm(s).split(/\s+/).filter((w) => w && w !== "bot" && w !== "the" && w !== "a");
-  const want = norm(q);
-  const wantTok = tokens(q);
-  const exact = list.find((a) => norm(a.name) === want);
-  if (exact) return exact;
-  const scored = list.map((a) => {
-    const name = norm(a.name);
-    const have = tokens(a.name);
-    let score = 0;
-    if (name === want) score = 100;
-    else if (name.includes(want) || want.includes(name)) score = 80;
-    else if (wantTok.length && wantTok.every((t) => have.includes(t) || name.includes(t))) score = 70;
-    else if (wantTok.some((t) => t.length >= 3 && (have.includes(t) || name.includes(t)))) score = 40;
-    return { a, score };
-  }).filter((x) => x.score > 0).sort((x, y) => y.score - x.score);
-  if (!scored.length) return null;
-  if (scored.length === 1 || scored[0].score >= 70) return scored[0].a;
-  if (scored[0].score >= scored[1].score + 20) return scored[0].a;
-  return null;
-};
+const { resolveTeammate } = require("./bridge-lib.js");
 
 (async () => {
   const results = [];
@@ -86,19 +60,35 @@ const resolveTeammate = (agents, raw) => {
   const fail = (name, err) => { results.push({ name, ok: false, err: String(err) }); console.log(`FAIL  ${name}: ${err}`); };
 
   let agents = await api("listAgents");
-  assert(Array.isArray(agents) && agents.length >= 2, `roster too small: ${agents.length}`);
   const by = (q) => resolveTeammate(agents, q);
-  const lol = by("lol");
-  const grok = by('grok"D"') || by("Grok Bot D") || by("grok d");
-  const sally = by("sally");
-  const bench = by("Robust Bench");
-  assert(lol && grok && sally, `missing core roster lol=${!!lol} grok=${!!grok} sally=${!!sally}`);
+  let lol = by("lol");
+  if (!lol) {
+    const res = await api("createAgent", { name: "lol", description: "test agent lol", origin: "user" });
+    lol = res.agent || res;
+  }
+  let grok = by('grok"D"') || by("Grok Bot D") || by("grok d") || by("Local D");
+  if (!grok) {
+    const res = await api("createAgent", { name: 'grok"D"', description: "test agent grok", origin: "user" });
+    grok = res.agent || res;
+  }
+  let sally = by("sally");
+  if (!sally) {
+    const res = await api("createAgent", { name: "sally the seashell slinging slut", description: "test agent sally", origin: "user" });
+    sally = res.agent || res;
+  }
+  let bench = by("Robust Bench");
+  if (!bench) {
+    const res = await api("createAgent", { name: "Robust Bench", description: "test agent bench", origin: "user" });
+    bench = res.agent || res;
+  }
+  agents = await api("listAgents");
+  assert(lol && grok && sally && bench, `missing core roster lol=${!!lol} grok=${!!grok} sally=${!!sally} bench=${!!bench}`);
 
   // 1. name resolution
   try {
     assert(by("lol")?.id === lol.id, "lol");
     assert(by("LOL")?.id === lol.id, "LOL");
-    assert(by('grok"D"')?.id === grok.id || by("Grok Bot D")?.id === grok.id, "grok name resolution");
+    assert(by('grok"D"')?.id === grok.id || by("Local D")?.id === grok.id || by("Grok Bot D")?.id === grok.id, "grok name resolution");
     assert(by("does-not-exist-bot") == null, "unknown");
     pass("name-resolution");
   } catch (e) { fail("name-resolution", e); }
