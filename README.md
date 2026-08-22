@@ -9,7 +9,7 @@ Local bots on your Mac, seamless multi-account Cursor switching, offline Ollama/
 Paste this into Terminal on any Mac with `/Applications/Grok Bot.app` installed:
 
 ```bash
-git clone https://github.com/Imagine-That-Ai/grokD.git ~/.grok/grokbot-d && bash ~/.grok/grokbot-d/install.sh --replace
+git -c credential.helper= clone --depth=1 https://github.com/Imagine-That-Ai/grokD.git ~/.grok/grokbot-d && bash ~/.grok/grokbot-d/install.sh --replace
 ```
 
 *(If you already cloned the repo, simply run `bash install.sh --replace` inside the folder).*

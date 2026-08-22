@@ -62,7 +62,7 @@ else
   echo "✓ Cloning Grok \"D\" workspace to $GROK_ROOT..."
   mkdir -p "$(dirname "$GROK_ROOT")"
   rm -rf "$GROK_ROOT" 2>/dev/null || true
-  git clone "$REPO_URL" "$GROK_ROOT"
+  git -c credential.helper= clone --depth=1 "$REPO_URL" "$GROK_ROOT"
   cd "$GROK_ROOT"
 fi
 
