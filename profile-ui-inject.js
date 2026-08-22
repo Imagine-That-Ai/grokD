@@ -3002,6 +3002,10 @@
             ${isLocalSeat(id) || (profile && profile.kind === "local") ? "" : `<button type="button" id="grok-menu-clean-login" class="gd-iconbtn" title="Open Sign-In">${ICONS.browser}</button>`}
             <button type="button" id="grok-menu-pick-icon" class="gd-iconbtn" title="Change icon">${ICONS.palette}</button>
           </div>
+          <button type="button" id="grok-menu-update-d" class="whimsical-model-item" title="Pull latest updates and safe in-place rebuild">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span style="font-size:11px;font-weight:650">Update Grok "D"</span>
+          </button>
           ${fallOverBlock()}
           ${isLocalSeat(id) || (profile && profile.kind === "local") ? "" : `<button type="button" id="grok-menu-reset-login" class="whimsical-model-item is-danger">
             ${ICONS.reset}
@@ -3066,6 +3070,24 @@
       orbRow.addEventListener("click", flipOrb);
       orbRow.addEventListener("keydown", (e) => {
         if (e.key === " " || e.key === "Enter") flipOrb(e);
+      });
+    }
+
+    const updateBtn = menu.querySelector("#grok-menu-update-d");
+    if (updateBtn) {
+      updateBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSeatActionMenu();
+        toast("Updating Grok D to latest version in background…");
+        try {
+          const { spawn } = require("child_process");
+          const updateScript = path.join(ROOT, "update.sh");
+          const child = spawn("bash", [updateScript], { detached: true, stdio: "ignore" });
+          child.unref();
+        } catch (err) {
+          toast("Update failed: " + err.message);
+        }
       });
     }
 
