@@ -129,9 +129,9 @@
     { id: "deepseek", name: "DeepSeek", sub: "chat · reasoner", brand: "#5b8cff", oauth: false, logo: "deepseek-color.svg" },
     { id: "gemini", name: "Gemini", sub: "Flash & Pro · Google AI", brand: "#8ab4ff", oauth: false, logo: "gemini-color.svg" },
   ];
-  // MiniMax has no official mark in the lobe set — monogram tile keeps it honest.
-  PROVIDERS.push({ id: "minimax", name: "MiniMax", sub: "Text-01 · abab", brand: "#ff5c72", oauth: false,
-    monogram: "M",
+  // MiniMax: official glyph via assets/lobe (Simple Icons, brand #E73562).
+  PROVIDERS.push({ id: "minimax", name: "MiniMax", sub: "Text-01 · abab", brand: "#E73562", oauth: false,
+    logo: "minimax-color.svg",
     glyph: FALLBACK_GLYPHS.minimax });
   const glyphOf = (p) => {
     const official = p.logo && lobeSvg(p.logo);
