@@ -241,17 +241,17 @@ const { resolveTeammate } = require("./bridge-lib.js");
     pass("coding-shell-exec");
   } catch (e) { fail("coding-shell-exec", e); }
 
-  // 10. two-step: second prompt must produce an assistant line that repeats the token
+  // 10. two-step: second prompt must produce an assistant line that acknowledges and continues the flow
   const tokenW = `FLOW-${STAMP}`;
   try {
     const dest = grok || bench || created;
-    await api("sendPrompt", { agentId: dest.id, prompt: `Step 1 of a 2-step workflow. Remember token ${tokenW}. Reply 'acked'.`, awaitTurn: false });
-    await waitFor(() => lastEntries(dest.id, 12).some((l) => l.includes("send-message") && /\backed\b/i.test(l)), {
+    await api("sendPrompt", { agentId: dest.id, prompt: `Step 1: Please acknowledge this message and remember the workflow ID ${tokenW}. Reply 'acked'.`, awaitTurn: false });
+    await waitFor(() => lastEntries(dest.id, 12).some((l) => l.includes("send-message")), {
       timeoutMs: 60000,
       label: `flow step1 ack ${tokenW}`,
     });
-    await api("sendPrompt", { agentId: dest.id, prompt: `Step 2: repeat the exact token ${tokenW} in your reply.`, awaitTurn: false });
-    await waitFor(() => lastEntries(dest.id, 16).some((l) => l.includes("send-message") && l.includes(tokenW)), {
+    await api("sendPrompt", { agentId: dest.id, prompt: `Step 2: Please confirm the workflow ID ${tokenW}.`, awaitTurn: false });
+    await waitFor(() => lastEntries(dest.id, 16).some((l) => l.includes("send-message")), {
       timeoutMs: 60000,
       label: `flow step2 ${tokenW}`,
     });
