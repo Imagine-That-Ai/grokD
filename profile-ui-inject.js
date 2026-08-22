@@ -3002,6 +3002,14 @@
             ${isLocalSeat(id) || (profile && profile.kind === "local") ? "" : `<button type="button" id="grok-menu-clean-login" class="gd-iconbtn" title="Open Sign-In">${ICONS.browser}</button>`}
             <button type="button" id="grok-menu-pick-icon" class="gd-iconbtn" title="Change icon">${ICONS.palette}</button>
           </div>
+          <button type="button" id="grok-menu-setup-provider" class="whimsical-model-item" title="Configure OpenBurnBar, local models & API keys">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            <span style="font-size:11px;font-weight:650">OpenBurnBar & Models</span>
+          </button>
+          <a href="https://burnbar.app" target="_blank" id="grok-menu-burnbar-app" class="whimsical-model-item" title="Check out the official BurnBar macOS menu bar app" style="text-decoration:none;display:flex;align-items:center;">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            <span style="font-size:11px;font-weight:650;color:#38bdf8">BurnBar Mac App ↗</span>
+          </a>
           <button type="button" id="grok-menu-update-d" class="whimsical-model-item" title="Pull latest updates and safe in-place rebuild">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
             <span style="font-size:11px;font-weight:650">Update Grok "D"</span>
@@ -3087,6 +3095,21 @@
           child.unref();
         } catch (err) {
           toast("Update failed: " + err.message);
+        }
+      });
+    }
+
+    const setupProviderBtn = menu.querySelector("#grok-menu-setup-provider");
+    if (setupProviderBtn) {
+      setupProviderBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSeatActionMenu();
+        const modelOrb = document.getElementById("pure-model-plasma-orb") || document.querySelector(".pure-plasma-orb-2");
+        if (modelOrb) {
+          modelOrb.click();
+        } else {
+          try { require(path.join(ROOT, "cursor-model-bubble.js")).render(); } catch (_) {}
         }
       });
     }
