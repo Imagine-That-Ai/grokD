@@ -10,26 +10,100 @@ const { execFileSync, spawn } = require("child_process");
 const store = require("./profile-store");
 const paths = require("./paths");
 const box = require("./box-state");
+const secGuard = require("./security-guard");
 
-const SEAT4 = process.env.GROK_SEAT4 || paths.SEAT4;
-const BOX_AGENTS = paths.agentsDir();
-const LOCAL_SECRETS_BAK = path.join(store.ROOT, "local-d-secrets");
+let _switchLocked = false;
+function isSwitchLocked() { return _switchLocked; }
+function withSwitchLock(fn) {
+  if (_switchLocked) return fn();
+  const lockFile = path.join(store.ROOT, ".switch-profile.lock");
+  const fd = secGuard.acquireFileLock(lockFile, { waitMs: 15000, staleMs: 30000 });
+  if (fd === null) {
+    throw new Error("Failed to acquire profile switch lock: another profile switch is in progress");
+  }
+  _switchLocked = true;
+  try {
+    return fn();
+  } finally {
+    _switchLocked = false;
+    secGuard.releaseFileLock(lockFile, fd);
+  }
+}
+function getSeat4() {
+  return process.env.GROK_SEAT4 || paths.SEAT4;
+}
+
+function getBoxAgents() {
+  return paths.agentsDir();
+}
 
 function copyTree(src, dst) {
   if (!src || !fs.existsSync(src)) return 0;
-  let entries = [];
-  try { entries = fs.readdirSync(src); } catch { return 0; }
-  if (!entries.length) return 0;
-  fs.mkdirSync(dst, { recursive: true });
-  execFileSync("rsync", ["-a", "--delete", src.replace(/\/?$/, "/") , dst.replace(/\/?$/, "/")]);
+  const stSrc = fs.lstatSync(src);
+  if (stSrc.isSymbolicLink() || !stSrc.isDirectory()) {
+    throw new Error(`copyTree: source is not a regular directory or is a symlink: ${src}`);
+  }
+  secGuard.ensureDir0700(dst);
+  const stDst = fs.lstatSync(dst);
+  if (stDst.isSymbolicLink() || !stDst.isDirectory()) {
+    throw new Error(`copyTree: destination is not a regular directory or is a symlink: ${dst}`);
+  }
+  const realSrc = fs.realpathSync(src);
+  const realDst = fs.realpathSync(dst);
+
+  function copyRec(curSrc, curDst) {
+    secGuard.ensureDir0700(curDst);
+    const stCurDst = fs.lstatSync(curDst);
+    if (stCurDst.isSymbolicLink() || !stCurDst.isDirectory()) {
+      throw new Error(`copyTree: destination component is not a directory or is a symlink: ${curDst}`);
+    }
+    const rCurDst = fs.realpathSync(curDst);
+    if (rCurDst !== realDst && !rCurDst.startsWith(realDst + path.sep)) {
+      throw new Error(`copyTree: destination escape detected: ${curDst}`);
+    }
+
+    const srcEntries = fs.readdirSync(curSrc, { withFileTypes: true });
+    const srcNames = new Set(srcEntries.map((e) => e.name));
+
+    const dstEntries = fs.readdirSync(curDst, { withFileTypes: true });
+    for (const dEnt of dstEntries) {
+      if (!srcNames.has(dEnt.name)) {
+        const dPath = path.join(curDst, dEnt.name);
+        fs.rmSync(dPath, { recursive: true, force: true });
+      }
+    }
+
+    for (const ent of srcEntries) {
+      const sPath = path.join(curSrc, ent.name);
+      const dPath = path.join(curDst, ent.name);
+      const st = fs.lstatSync(sPath);
+      if (st.isSymbolicLink()) {
+        throw new Error(`copyTree: symlink rejected at ${sPath}`);
+      }
+      if (fs.existsSync(dPath)) {
+        const dSt = fs.lstatSync(dPath);
+        if (dSt.isSymbolicLink()) {
+          fs.rmSync(dPath, { force: true, recursive: true });
+        }
+      }
+      if (st.isDirectory()) {
+        const rSub = fs.realpathSync(sPath);
+        if (!rSub.startsWith(realSrc + path.sep)) {
+          throw new Error(`copyTree: directory escape detected: ${sPath}`);
+        }
+        copyRec(sPath, dPath);
+      } else if (st.isFile()) {
+        secGuard.copyFile0600(sPath, dPath);
+      }
+    }
+  }
+  copyRec(realSrc, realDst);
   return 1;
 }
 
 function copyFile(src, dst) {
   if (!src || !fs.existsSync(src)) return false;
-  fs.mkdirSync(path.dirname(dst), { recursive: true });
-  fs.copyFileSync(src, dst);
-  return true;
+  return secGuard.copyFile0600(src, dst);
 }
 
 function snapshotModel(dir) {
@@ -38,30 +112,40 @@ function snapshotModel(dir) {
 
 function applyModel(dir) {
   const saved = path.join(dir, "model-config.json");
-  if (fs.existsSync(saved)) copyFile(saved, path.join(store.ROOT, "model-config.json"));
+  const target = path.join(store.ROOT, "model-config.json");
+  if (fs.existsSync(saved)) {
+    copyFile(saved, target);
+  } else {
+    // Reset to clean default config for empty profile to eliminate cross-profile model leak
+    const cleanDefault = Object.assign(require("./model-lib").defaultConfig(), {
+      apiKey: "",
+      savedAt: Date.now(),
+    });
+    try { secGuard.writeFile0600(target, JSON.stringify(cleanDefault, null, 2) + "\n"); } catch {}
+  }
+}
+
+// A seat carries its own MCP tokens and tool cache; drop the previous seat's.
+function rebindLocalMcp(profileId) {
+  try {
+    const localMcp = require("./local-mcp");
+    localMcp.clearCaches();
+    localMcp.bindProfile(profileId);
+  } catch {}
 }
 
 function snapshot(profile) {
+  const seat4 = getSeat4();
+  const boxAgents = getBoxAgents();
   const dir = store.profileDataDir(profile.id);
-  const persistSrc = path.join(SEAT4, "sand-client-persistence");
+  const persistSrc = path.join(seat4, "sand-client-persistence");
   copyTree(persistSrc, path.join(dir, "persistence"));
-  box.snapshotHost(SEAT4, dir);
+  box.snapshotHost(seat4, dir, { allowSwitchLock: true });
   snapshotModel(dir);
-  if (profile.kind === "local" && fs.existsSync(BOX_AGENTS)) {
-    copyTree(BOX_AGENTS, path.join(dir, "box-data", "agents"));
-    copyFile(path.join(SEAT4, "sand-secrets.json"), path.join(LOCAL_SECRETS_BAK, "sand-secrets.json"));
-    copyFile(path.join(SEAT4, "gateway-descriptor.json"), path.join(LOCAL_SECRETS_BAK, "gateway-descriptor.json"));
+  if (profile.kind === "local" && fs.existsSync(boxAgents)) {
+    copyTree(boxAgents, path.join(dir, "box-data", "agents"));
   }
   return dir;
-}
-
-function ensureLocalSecretBackup() {
-  fs.mkdirSync(LOCAL_SECRETS_BAK, { recursive: true });
-  const dest = path.join(LOCAL_SECRETS_BAK, "sand-secrets.json");
-  if (!fs.existsSync(dest) && fs.existsSync(path.join(SEAT4, "sand-secrets.json"))) {
-    copyFile(path.join(SEAT4, "sand-secrets.json"), dest);
-    copyFile(path.join(SEAT4, "gateway-descriptor.json"), path.join(LOCAL_SECRETS_BAK, "gateway-descriptor.json"));
-  }
 }
 
 function applyContinueModel(dir) {
@@ -73,12 +157,12 @@ function applyContinueModel(dir) {
   try { if (fs.existsSync(saved)) local = JSON.parse(fs.readFileSync(saved, "utf8")); } catch {}
   const next = {
     proxyTarget: local.proxyTarget || "openburnbar",
-    apiKey: local.apiKey || "local-cliproxy",
+    apiKey: (typeof local.apiKey === "string" && !secGuard.isGatewayOrLoopbackMarker(local.apiKey)) ? local.apiKey : "",
     model: live.model || local.model || "grok-4.6",
     cursorAccount: local.cursorAccount || live.cursorAccount || "Primary Cursor Account",
   };
   const text = JSON.stringify(next, null, 2) + "\n";
-  try { fs.writeFileSync(path.join(store.ROOT, "model-config.json"), text); } catch {}
+  try { secGuard.writeFile0600(path.join(store.ROOT, "model-config.json"), text); } catch {}
   if (!isolatedRoot()) {
     try { require("./model-lib").writeConfig(next); } catch {}
   }
@@ -87,39 +171,76 @@ function applyContinueModel(dir) {
 function applyLocal(profile, opts) {
   opts = opts || {};
   const takeover = !!opts.takeover;
+  const seat4 = getSeat4();
+  const boxAgents = getBoxAgents();
   const dir = store.profileDataDir(profile.id);
   const persist = path.join(dir, "persistence");
   const agents = path.join(dir, "box-data", "agents");
 
   // Drop the previous Cursor VM or leftover gateway. Otherwise the official
   // app keeps that computer and the sidebar never becomes the local box.
-  box.clearCursorHost(SEAT4);
+  box.clearCursorHost(seat4);
+
+  // clearCursorHost already dropped the descriptor; the tokens file is the
+  // piece it leaves behind, so Local D never inherits foreign Cursor tokens.
+  try { fs.rmSync(path.join(seat4, "sand-secrets.json"), { force: true }); } catch {}
+
+  const localSecFile = path.join(dir, "secrets", "sand-secrets.json");
+  if (fs.existsSync(localSecFile)) {
+    let localSec = {};
+    try { localSec = JSON.parse(fs.readFileSync(localSecFile, "utf8")); } catch { localSec = {}; }
+    // Strictly sanitize: Local D must never have cursor access/refresh tokens
+    delete localSec["cursor-access-token"];
+    delete localSec["cursor-refresh-token"];
+    delete localSec["cursor-dev-token"];
+    delete localSec["cursor_access_token"];
+    delete localSec["cursor_refresh_token"];
+    delete localSec["cursorAuthToken"];
+    delete localSec["accessToken"];
+    delete localSec["refreshToken"];
+    delete localSec["token"];
+    delete localSec["sand-token"];
+    secGuard.writeFile0600(path.join(seat4, "sand-secrets.json"), JSON.stringify(localSec, null, 2) + "\n");
+  }
 
   const sand = path.join(dir, "sand-data");
   if (fs.existsSync(sand)) {
-    copyFile(path.join(sand, "local-exec-daemon-credential.json"), path.join(SEAT4, "sand-data", "local-exec-daemon-credential.json"));
-    copyFile(path.join(sand, "settings.json"), path.join(SEAT4, "sand-data", "settings.json"));
+    copyFile(path.join(sand, "local-exec-daemon-credential.json"), path.join(seat4, "sand-data", "local-exec-daemon-credential.json"));
+    copyFile(path.join(sand, "settings.json"), path.join(seat4, "sand-data", "settings.json"));
   }
-  box.installLocalCredential(SEAT4, [dir, path.join(store.ROOT, "profile-data", "local-d")]);
-  box.writeLocalHost(SEAT4);
+  box.installLocalCredential(seat4, [dir, path.join(store.ROOT, "profile-data", "local-d")]);
+  box.writeLocalHost(seat4);
 
+  const persistDst = path.join(seat4, "sand-client-persistence");
   if (!takeover && fs.existsSync(persist) && fs.readdirSync(persist).length) {
-    copyTree(persist, path.join(SEAT4, "sand-client-persistence"));
+    copyTree(persist, persistDst);
+  } else if (!takeover) {
+    try { fs.rmSync(persistDst, { recursive: true, force: true }); } catch {}
+    secGuard.ensureDir0700(persistDst);
   }
+
   if (fs.existsSync(agents) && fs.readdirSync(agents).length) {
-    copyTree(agents, BOX_AGENTS);
+    copyTree(agents, boxAgents);
+  } else {
+    try {
+      if (fs.existsSync(boxAgents)) {
+        for (const f of fs.readdirSync(boxAgents)) {
+          fs.rmSync(path.join(boxAgents, f), { recursive: true, force: true });
+        }
+      }
+    } catch {}
+    secGuard.ensureDir0700(boxAgents);
   }
-  const sec = path.join(dir, "secrets", "sand-secrets.json");
-  if (fs.existsSync(sec)) copyFile(sec, path.join(SEAT4, "sand-secrets.json"));
-  else if (fs.existsSync(path.join(LOCAL_SECRETS_BAK, "sand-secrets.json"))) {
-    copyFile(path.join(LOCAL_SECRETS_BAK, "sand-secrets.json"), path.join(SEAT4, "sand-secrets.json"));
-  }
+
+  rebindLocalMcp(profile.id);
+
   store.writeActiveEnv(profile);
   if (takeover) applyContinueModel(dir);
   else applyModel(dir);
 }
 
 function applyCursor(profile) {
+  const seat4 = getSeat4();
   const dir = store.profileDataDir(profile.id);
   const identity = profile.identitySource || profile.sourceUserData || null;
   const liveSec = identity && fs.existsSync(path.join(identity, "sand-secrets.json"))
@@ -136,17 +257,17 @@ function applyCursor(profile) {
 
   // Never keep the previous profile's computer. A leftover local :1337
   // or another seat's VM is what showed "isn't available on this account".
-  box.clearCursorHost(SEAT4);
+  box.clearCursorHost(seat4);
 
   // D's last in-app login is newer than a sibling official app seed.
   // Prefer that, or the newer of the two files.
   const srcSec = box.newerFile(hasSavedSec ? savedSec : null, liveSec);
-  if (srcSec) copyFile(srcSec, path.join(SEAT4, "sand-secrets.json"));
+  if (srcSec) copyFile(srcSec, path.join(seat4, "sand-secrets.json"));
   else if (!identity && !hasSavedSec) {
     // Fresh in-app sign-in: drop the previous seat's tokens or Cursor
     // will skip login and the new profile inherits the old account.
-    try { fs.rmSync(path.join(SEAT4, "sand-secrets.json"), { force: true }); } catch {}
-    try { fs.rmSync(path.join(SEAT4, "gateway-descriptor.json"), { force: true }); } catch {}
+    try { fs.rmSync(path.join(seat4, "sand-secrets.json"), { force: true }); } catch {}
+    try { fs.rmSync(path.join(seat4, "gateway-descriptor.json"), { force: true }); } catch {}
   }
 
   const savedGd = path.join(dir, "secrets", "gateway-descriptor.json");
@@ -159,18 +280,18 @@ function applyCursor(profile) {
   // dead cursorvm.com pod. Copying that file makes D decrypt it on boot and
   // the Mac looks offline again. A healthy plaintext VM is installed below.
   if (srcGd && !box.officialUsesThisMac(identity)) {
-    copyFile(srcGd, path.join(SEAT4, "gateway-descriptor.json"));
+    copyFile(srcGd, path.join(seat4, "gateway-descriptor.json"));
   }
 
-  box.resetForeignSettings(SEAT4, box.accountScopeFromSecrets(SEAT4));
+  box.resetForeignSettings(seat4, box.accountScopeFromSecrets(seat4));
 
   const remote = box.chooseCursorConnection(identity, dir);
-  if (remote) box.installConnection(remote, SEAT4);
+  if (remote) box.installConnection(remote, seat4);
   // No reachable VM: leave Seat4 empty so official reconnect can mint one.
   // Do not fall back to this-Mac local-exec — D's local box already owns that
   // lease and the daemon dies with "desktop ownership lost".
 
-  const persistDst = path.join(SEAT4, "sand-client-persistence");
+  const persistDst = path.join(seat4, "sand-client-persistence");
   const livePersist = identity && path.join(identity, "sand-client-persistence");
   if (livePersist && fs.existsSync(livePersist) && fs.readdirSync(livePersist).length) {
     copyTree(livePersist, persistDst);
@@ -178,8 +299,15 @@ function applyCursor(profile) {
     const persistSnap = path.join(dir, "persistence");
     if (fs.existsSync(persistSnap) && fs.readdirSync(persistSnap).length) {
       copyTree(persistSnap, persistDst);
+    } else {
+      try { fs.rmSync(persistDst, { recursive: true, force: true }); } catch {}
+      secGuard.ensureDir0700(persistDst);
     }
   }
+
+  rebindLocalMcp(profile.id);
+
+  applyModel(dir);
   store.writeActiveEnv(profile);
 }
 
@@ -275,35 +403,77 @@ function markOrbActive(profile) {
     ? "grok-d"
     : ({ A: "grok-a", B: "grok-b", C: "grok-c" }[profile.seat] || "grok-d");
   try {
-    fs.mkdirSync("/tmp/grokbot-hack", { recursive: true });
-    fs.writeFileSync("/tmp/grokbot-hack/active-profile.json", JSON.stringify({ active: orbId }) + "\n");
+    const runtimeP = path.join(store.ROOT, "runtime", "active-profile.json");
+    secGuard.ensureDir0700(path.dirname(runtimeP));
+    secGuard.writeFile0600(runtimeP, JSON.stringify({ active: orbId }) + "\n");
+    const hackDir = paths.existingHack();
+    if (hackDir && fs.existsSync(hackDir)) {
+      secGuard.ensureDir0700(hackDir);
+      secGuard.writeFile0600(path.join(hackDir, "active-profile.json"), JSON.stringify({ active: orbId }) + "\n");
+    }
   } catch {}
 }
 
-function fulfillDesiredBots(profile) {
+let _switchSequence = 0;
+
+function fulfillDesiredBots(profile, switchSeq) {
   if (isolatedRoot()) return;
   const want = Number(profile.desiredBots);
   if (!Number.isFinite(want) || want < 1 || want > 20) return;
-  try {
-    const raw = execFileSync("curl", [
-      "-sS", "-X", "POST", "http://127.0.0.1:1337/api/listAgents",
-      "-H", "content-type: application/json",
-      "-H", "authorization: Bearer fake-gateway-token",
-      "-d", "{}",
-    ], { encoding: "utf8", timeout: 15000 });
-    const agents = JSON.parse(raw);
-    const have = Array.isArray(agents) ? agents.length : 0;
-    for (let i = have; i < want; i++) {
-      execFileSync("curl", [
-        "-sS", "-X", "POST", "http://127.0.0.1:1337/api/createAgent",
-        "-H", "content-type: application/json",
-        "-H", "authorization: Bearer fake-gateway-token",
-        "-d", JSON.stringify({ name: `Bot ${i + 1}`, description: "profile desired bot", origin: "user" }),
-      ], { encoding: "utf8", timeout: 15000 });
+  const http = require("http");
+  const callApi = (endpoint, payload, aud = "grokbot-proxy") => new Promise((resolve) => {
+    const data = JSON.stringify(payload || {});
+    const token = secGuard.mintSessionJwt({ audience: aud, expiresInSeconds: 60 });
+    const req = http.request({
+      hostname: "127.0.0.1",
+      port: 1337,
+      path: endpoint,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${token}`,
+        "content-length": Buffer.byteLength(data),
+      },
+      timeout: 10000,
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch { resolve(null); }
+      });
+    });
+    req.on("error", () => resolve(null));
+    req.write(data);
+    req.end();
+  });
+
+  (async () => {
+    try {
+      if (switchSeq !== _switchSequence || store.getActive().id !== profile.id) return;
+      const listRes = await callApi("/api/listAgents", {});
+      if (!Array.isArray(listRes)) {
+        return;
+      }
+      let currentAgents = listRes;
+      while (currentAgents.length < want) {
+        if (switchSeq !== _switchSequence || store.getActive().id !== profile.id) break;
+        const i = currentAgents.length;
+        const created = await callApi("/api/createAgent", { name: `Bot ${i + 1}`, description: "profile desired bot", origin: "user" }, "bot-create");
+        if (!created || !created.id) break;
+        if (switchSeq !== _switchSequence || store.getActive().id !== profile.id) {
+          try {
+            await callApi("/api/deleteLocalAgents", { ids: [created.id] }, "agent-control");
+          } catch (_) {}
+          break;
+        }
+        const reList = await callApi("/api/listAgents", {});
+        if (!Array.isArray(reList)) break;
+        currentAgents = reList;
+      }
+    } catch (e) {
+      console.error("desiredBots:", e.message);
     }
-  } catch (e) {
-    console.error("desiredBots:", e.message);
-  }
+  })();
 }
 
 function isolatedRoot() {
@@ -313,10 +483,14 @@ function isolatedRoot() {
 function ensureLocalBox() {
   if (isolatedRoot()) return;
   const sh = path.join(store.ROOT, "ensure-local-box.sh");
-  const fallback = "/tmp/grokbot-hack/ensure-local-box.sh";
-  const script = fs.existsSync(sh) ? sh : fallback;
-  if (fs.existsSync(script)) {
-    execFileSync("bash", [script], { stdio: "ignore" });
+  if (fs.existsSync(sh)) {
+    try {
+      const real = fs.realpathSync(sh);
+      const st = fs.lstatSync(real);
+      if (st.isFile() && (typeof process.getuid !== "function" || st.uid === process.getuid())) {
+        execFileSync("bash", [real], { stdio: "ignore" });
+      }
+    } catch (_) {}
   }
 }
 
@@ -332,49 +506,74 @@ function resolveId(id) {
 }
 
 function switchTo(id, opts) {
-  opts = opts || {};
-  const relaunch = opts.relaunch !== false;
-  const next = store.get(resolveId(id));
-  if (!next) throw new Error(`unknown profile ${id}`);
-  const prev = store.getActive();
-  const takeover = !!(opts.takeover && prev && prev.kind === "cursor" && next.kind === "local");
-  if (prev && prev.id === next.id && !takeover) {
-    store.writeActiveEnv(next);
-    markOrbActive(next);
-    return { ok: true, from: next.id, to: next.id, kind: next.kind, noop: true };
-  }
-  ensureLocalSecretBackup();
-  if (prev && prev.id !== next.id) snapshot(prev);
-  if (next.kind === "local") {
-    applyLocal(next, { takeover });
-    ensureLocalBox();
-    if (takeover) {
-      try {
-        require("./takeover-local").seed({
-          from: prev && prev.id,
-          fromName: prev && prev.name,
-        });
-      } catch (e) {
-        console.error("takeover:", e.message);
-      }
-    } else {
-      fulfillDesiredBots(next);
+  return withSwitchLock(() => {
+    opts = opts || {};
+    const relaunch = opts.relaunch !== false;
+    const next = store.get(resolveId(id));
+    if (!next) throw new Error(`unknown profile ${id}`);
+    const prev = store.getActive();
+    if (opts.expectedFrom && prev && prev.id !== opts.expectedFrom) {
+      return { ok: false, skipped: true, reason: "profile-changed-before-switch", active: prev.id, expected: opts.expectedFrom };
     }
-  } else {
-    applyCursor(next);
-  }
-  store.setActive(next.id);
-  markOrbActive(next);
-  noteSwitch(prev && prev.id, next.id, next.kind);
-  try {
-    const p = path.join(store.ROOT, "runtime", "last-switch.json");
-    const j = JSON.parse(fs.readFileSync(p, "utf8"));
-    j.takeover = takeover;
-    fs.writeFileSync(p, JSON.stringify(j) + "\n");
-  } catch {}
-  try { require("./repair-active-box").repair(); } catch {}
-  if (relaunch) relaunchD();
-  return { ok: true, from: prev && prev.id, to: next.id, kind: next.kind, takeover };
+    const takeover = !!(opts.takeover && prev && prev.kind === "cursor" && next.kind === "local");
+    if (prev && prev.id === next.id && !takeover) {
+      store.writeActiveEnv(next);
+      markOrbActive(next);
+      rebindLocalMcp(next.id);
+      return { ok: true, from: next.id, to: next.id, kind: next.kind, noop: true };
+    }
+    const currentSeq = ++_switchSequence;
+    if (prev && prev.id !== next.id) snapshot(prev);
+    try {
+      if (next.kind === "local") {
+        applyLocal(next, { takeover });
+        ensureLocalBox();
+        if (takeover) {
+          try {
+            require("./takeover-local").seed({
+              from: prev && prev.id,
+              fromName: prev && prev.name,
+            });
+          } catch (e) {
+            console.error("takeover:", e.message);
+          }
+        }
+      } else {
+        applyCursor(next);
+      }
+      store.setActive(next.id);
+      markOrbActive(next);
+      rebindLocalMcp(next.id);
+      if (next.kind === "local" && !takeover) {
+        fulfillDesiredBots(next, currentSeq);
+      }
+      noteSwitch(prev && prev.id, next.id, next.kind);
+      try {
+        const p = path.join(store.ROOT, "runtime", "last-switch.json");
+        const j = JSON.parse(fs.readFileSync(p, "utf8"));
+        j.takeover = takeover;
+        fs.writeFileSync(p, JSON.stringify(j) + "\n");
+      } catch {}
+      try { require("./repair-active-box").repair(); } catch {}
+      if (relaunch && !isolatedRoot()) {
+        relaunchD();
+      }
+      return { ok: true, from: prev && prev.id, to: next.id, kind: next.kind, takeover };
+    } catch (err) {
+      // Rollback to previous active profile environment if switch failed
+      if (prev) {
+        try {
+          if (prev.kind === "local") applyLocal(prev);
+          else applyCursor(prev);
+          store.setActive(prev.id);
+          store.writeActiveEnv(prev);
+          markOrbActive(prev);
+          rebindLocalMcp(prev.id);
+        } catch (_) {}
+      }
+      throw err;
+    }
+  });
 }
 
 function parseArgs(argv) {
@@ -431,4 +630,22 @@ if (require.main === module) {
   }
 }
 
-module.exports = { snapshot, applyLocal, applyCursor, switchTo, dPids, relaunchD, resolveId, isolatedRoot, SEAT4, BOX_AGENTS, box, writeRelaunchPlist };
+module.exports = {
+  snapshot,
+  applyLocal,
+  applyCursor,
+  applyModel,
+  switchTo,
+  dPids,
+  relaunchD,
+  resolveId,
+  isolatedRoot,
+  getSeat4,
+  getBoxAgents,
+  get SEAT4() { return getSeat4(); },
+  get BOX_AGENTS() { return getBoxAgents(); },
+  box,
+  writeRelaunchPlist,
+  withSwitchLock,
+  isSwitchLocked,
+};

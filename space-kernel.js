@@ -393,8 +393,8 @@ function makeHole(existing) {
       w4: 0.006 + rand() * 0.015, p4: rand() * 6.28, a4: 0.008 + rand() * 0.024,
     },
     breathe: {
-      w1: 0.022 + rand() * 0.055, p1: rand() * 6.28, a1: 0.10 + rand() * 0.20,
-      w2: 0.009 + rand() * 0.031, p2: rand() * 6.28, a2: 0.05 + rand() * 0.11,
+      w1: 0.14 + rand() * 0.12, p1: rand() * 6.28, a1: 0.15 + rand() * 0.15,
+      w2: 0.05 + rand() * 0.08, p2: rand() * 6.28, a2: 0.06 + rand() * 0.08,
     },
     life: 0,
     grow: 5 + rand() * 6,
@@ -659,8 +659,10 @@ function resizeCanvases() {
     c.style.width = w + "px";
     c.style.height = h + "px";
     const ctx = c.getContext("2d", { alpha: true });
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c._ctx = ctx;
+    if (ctx) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c._ctx = ctx;
+    }
     c._w = w;
     c._h = h;
     c._dpr = dpr;

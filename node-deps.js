@@ -22,9 +22,13 @@ function candidates() {
 function resolveNodeDeps() {
   for (const dir of candidates()) {
     if (!dir) continue;
-    if (fs.existsSync(path.join(dir, "tree-sitter")) || fs.existsSync(path.join(dir, "web-tree-sitter"))) {
-      return dir;
-    }
+    try {
+      if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+        if (fs.existsSync(path.join(dir, "tree-sitter")) || fs.existsSync(path.join(dir, "web-tree-sitter"))) {
+          return dir;
+        }
+      }
+    } catch {}
   }
   return "";
 }

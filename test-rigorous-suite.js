@@ -24,6 +24,7 @@ const { execFileSync, execSync, spawnSync } = require("child_process");
 
 // Configuration Paths
 const ROOT = path.join(os.homedir(), ".grok", "grokbot-d");
+const ACTIVE_ENV = path.join(ROOT, "active-env.json");
 const SWITCH_PROFILE = path.join(ROOT, "switch-profile.js");
 const PROFILE_STORE = require(path.join(ROOT, "profile-store.js"));
 const MODEL_LIB = require(path.join(ROOT, "model-lib.js"));
@@ -34,9 +35,9 @@ const { waitReady, sendCommand } = require(path.join(ROOT, "command-client.js"))
 const cdpSend = require(path.join(ROOT, "cdp-send.js"));
 const boxState = require(path.join(ROOT, "box-state.js"));
 const SEAT4 = path.join(os.homedir(), "Library/Application Support/GrokBotSeat4");
-const ACTIVE_ENV = path.join(ROOT, "active-env.json");
+const secGuard = require(path.join(ROOT, "security-guard.js"));
 const LOCAL_GATEWAY_HOST = "http://127.0.0.1:1337";
-const GATEWAY_TOKEN = "fake-gateway-token";
+const GATEWAY_TOKEN = secGuard.getGatewayToken();
 const PROXY2_HOST = "http://127.0.0.1:8787";
 const CDP_HOST = "http://127.0.0.1:9224";
 const DEV_ROOT = path.join(os.homedir(), "Documents", "Developer");
@@ -752,8 +753,8 @@ async function testSuitePlugins() {
     const ops = BRIDGE_LIB.parseFileOps(scriptSrc);
     assert(ops.writes.length === 1, `Expected 1 write operation, got ${ops.writes.length}`);
     assert(ops.writes[0].path === testFile, "Write path mismatch");
-    assert(ops.runs.length === 1, "Expected 1 run command");
-    assert(ops.runs[0].startsWith("node "), "Run command must invoke node");
+    // Prompt-marker run execution is disabled by default for security
+    assert(Array.isArray(ops.runs), "Runs must be an array");
 
     fs.writeFileSync(ops.writes[0].path, "const x = 40 + 2; console.log('RESULT:' + x);", "utf8");
     assert(fs.existsSync(testFile), "Generated test script must exist");
@@ -765,7 +766,8 @@ async function testSuitePlugins() {
     fs.writeFileSync(testFile, 'console.log("CODE-EXEC-SUCCESS-" + (100 * 2));\n', "utf8");
 
     const cmd = `node ${testFile}`;
-    assert(BRIDGE_LIB.safeRunCmd(cmd), `safeRunCmd must permit ${cmd}`);
+    // Interpreters are forbidden from arbitrary execution without approval
+    assert(!BRIDGE_LIB.safeRunCmd(cmd), `safeRunCmd must reject unapproved node interpreter invocation: ${cmd}`);
     const stdout = execSync(cmd, { encoding: "utf8" });
     assert(stdout.includes("CODE-EXEC-SUCCESS-200"), `Unexpected execution output: ${stdout}`);
 
@@ -829,7 +831,7 @@ async function testSuiteCodingLoop() {
 
     const ops = BRIDGE_LIB.parseFileOps(taskPrompt);
     assert(ops.writes.length === 1, "Expected write operation parsed");
-    assert(ops.runs.length === 1, "Expected run command parsed");
+    assert(Array.isArray(ops.runs), "Expected runs array");
 
     await waitFor(() => {
       try {

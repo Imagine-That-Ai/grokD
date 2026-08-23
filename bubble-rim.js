@@ -387,10 +387,22 @@ function contentOf(host) {
 // Duplicate ids would break every getElementById the app runs, and a nested
 // rim inside a clone would stack its glow on top of ours.
 function sanitize(node) {
-  if (node.removeAttribute) node.removeAttribute("id");
+  if (node.removeAttribute) {
+    node.removeAttribute("id");
+    node.removeAttribute("name");
+    node.removeAttribute("form");
+  }
   if (node.querySelectorAll) {
     node.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"));
+    node.querySelectorAll("[name]").forEach((n) => n.removeAttribute("name"));
+    node.querySelectorAll("[form]").forEach((n) => n.removeAttribute("form"));
     node.querySelectorAll(CLONE_STRIP).forEach((n) => n.remove());
+    node.querySelectorAll("input, button, select, textarea, form, a, [contenteditable]").forEach((el) => {
+      el.setAttribute("disabled", "true");
+      el.setAttribute("tabindex", "-1");
+      el.removeAttribute("onclick");
+      el.style.pointerEvents = "none";
+    });
   }
   return node;
 }

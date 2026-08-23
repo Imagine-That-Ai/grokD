@@ -40,19 +40,37 @@ function loadConfig() {
 }
 
 function saveConfig(partial) {
-  const next = defaultConfig(Object.assign(loadConfig(), partial || {}));
-  const file = path.join(rootDir(), "failover-config.json");
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n");
-  return next;
+  const root = rootDir();
+  const file = path.join(root, "failover-config.json");
+  const lockFile = path.join(root, ".failover-config.lock");
+  const secGuard = require("./security-guard");
+  const fd = secGuard.acquireFileLock(lockFile, { waitMs: 4000, staleMs: 15000 });
+  if (fd === null) {
+    throw new Error("Failed to acquire failover config lock");
+  }
+  try {
+    const cleanPartial = {};
+    if (partial && typeof partial === "object") {
+      for (const [k, v] of Object.entries(partial)) {
+        if (v !== undefined) cleanPartial[k] = v;
+      }
+    }
+    const next = defaultConfig(Object.assign(loadConfig(), cleanPartial));
+    secGuard.writeJsonAtomic0600(file, next);
+    return next;
+  } finally {
+    secGuard.releaseFileLock(lockFile, fd);
+  }
 }
 
 function isExhausted(q, threshold, now, cacheMaxAgeMs) {
   if (!q || typeof q !== "object") return false;
+  if (q.hasLimit === false) return false;
   const t = Number(threshold);
   const n = Number(now) || Date.now();
   const age = Number(cacheMaxAgeMs) || 10 * 60 * 1000;
-  if (q.at != null && n - Number(q.at) > age) return false;
+  const qAt = Number(q.at);
+  if (q.at != null && (!Number.isFinite(qAt) || qAt > n + 60000 || n - qAt > age)) return false;
   if (q.nextResetMs != null && Number(q.nextResetMs) < n) return false;
   const pct = Number(q.percentUsed);
   if (!Number.isFinite(pct)) return false;
@@ -87,12 +105,15 @@ function isSeatPaused(input, id) {
 
 function nextCursor(profiles, quotas, fromId, threshold, now, cacheMaxAgeMs, input) {
   let unmeasured = null;
+  const n = Number(now) || Date.now();
+  const maxAge = Number(cacheMaxAgeMs) || 10 * 60 * 1000;
   for (const p of cursorOrder(profiles)) {
     if (p.id === fromId) continue;
     if (isSeatPaused(input, p.id)) continue;
     if (isExhausted(quotas && quotas[p.id], threshold, now, cacheMaxAgeMs)) continue;
     const q = quotas && quotas[p.id];
-    if (!q || q.percentUsed == null) {
+    const qAt = Number(q && q.at);
+    if (!q || q.percentUsed == null || (q.at != null && (!Number.isFinite(qAt) || qAt > n + 60000 || n - qAt > maxAge))) {
       if (!unmeasured) unmeasured = p;
       continue;
     }
@@ -105,8 +126,10 @@ function evaluate(input) {
   const cfg = defaultConfig(input && input.config);
   if (!cfg.enabled) return null;
   const now = Number(input && input.now) || Date.now();
-  if (cfg.lastFire && cfg.lastFire.at && now - Number(cfg.lastFire.at) < cfg.cooldownMs) return null;
-  if (input && input.lastFireAt && now - Number(input.lastFireAt) < cfg.cooldownMs) return null;
+  const lastFireAt = Number(cfg.lastFire && cfg.lastFire.at);
+  if (Number.isFinite(lastFireAt) && lastFireAt <= now + 60000 && Math.max(0, now - lastFireAt) < cfg.cooldownMs) return null;
+  const inputLastFire = Number(input && input.lastFireAt);
+  if (Number.isFinite(inputLastFire) && inputLastFire <= now + 60000 && Math.max(0, now - inputLastFire) < cfg.cooldownMs) return null;
 
   const profiles = (input && input.profiles) || [];
   const activeId = input && input.activeId;
@@ -123,10 +146,12 @@ function evaluate(input) {
   const hardHit = isExhausted(payerQ, hard, now, age);
   const warnHit = !hardHit && isExhausted(payerQ, warn, now, age);
 
-  if (warnHit && !isSeatPaused(input, payerId)) {
+  const targetFrom = rails === "local" ? "local-d" : payerId;
+  if (warnHit && !isSeatPaused(input, targetFrom)) {
     return {
       action: "soft-stop",
-      from: payerId,
+      from: targetFrom,
+      payerId: payerId,
       to: null,
       stopFirst: true,
       sameThread: true,
@@ -142,13 +167,26 @@ function evaluate(input) {
       const local = rails === "local" || activeId === "local-d";
       return {
         action: local ? "pin-account" : "cursor",
-        from: payerId,
+        from: local ? activeId : payerId,
+        payerId: payerId,
         to: nxt.id,
         stopFirst: true,
         sameThread: local,
         reason: `${payerId} spent; next ${nxt.id} at ${quotas[nxt.id] && quotas[nxt.id].percentUsed}%`,
       };
     }
+  }
+  if (rails === "local" || activeId === "local-d") {
+    // If local is already active and no other cursor account is available, stop workload
+    return {
+      action: "soft-stop",
+      from: "local-d",
+      payerId: payerId,
+      to: null,
+      stopFirst: true,
+      sameThread: true,
+      reason: `${payerId} spent; no remaining eligible cursor seats`,
+    };
   }
   if (cfg.localChief) {
     return {

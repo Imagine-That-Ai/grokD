@@ -5,6 +5,7 @@
 const crypto = require("crypto");
 const { execFileSync } = require("child_process");
 const { tryParse } = require("./protoutil");
+const secGuard = require("./security-guard");
 
 const KEYCHAIN_ACCOUNT = "grokbot-local";
 const MEM0_SERVICE = "grokd-mem0-api-key";
@@ -220,14 +221,14 @@ const SERVERS = {
 
 const ACCOUNT_SLOTS = {
   x: [
-    { key: "x-1", service: X_TOKEN_SERVICE },
+    { key: "default", service: X_TOKEN_SERVICE },
     { key: "x-2", service: `${X_TOKEN_SERVICE}-2` },
     { key: "x-3", service: `${X_TOKEN_SERVICE}-3` },
     { key: "x-4", service: `${X_TOKEN_SERVICE}-4` },
   ],
   github: [{ key: "default", service: GITHUB_TOKEN_SERVICE }],
   google: [
-    { key: "gmail-1", service: `${GOOGLE_TOKEN_SERVICE}-1` },
+    { key: "default", service: `${GOOGLE_TOKEN_SERVICE}-1` },
     { key: "gmail-2", service: `${GOOGLE_TOKEN_SERVICE}-2` },
   ],
   mem0: [{ key: "default", service: null }],
@@ -259,16 +260,108 @@ const googleRefreshes = new Map();
 const invalidAuth = new Set();
 let rpcCounter = 100;
 let cachedSecrets = new Map();
+let boundProfileId = null;
+let lastObservedProfileId = null;
 
-function keychainGet(service) {
-  if (cachedSecrets.has(service)) return cachedSecrets.get(service);
+function clearCaches() {
+  sessions.clear();
+  toolCache.clear();
+  pendingOAuth.clear();
+  cachedSecrets.clear();
+  googleRefreshes.clear();
+  invalidAuth.clear();
+}
+
+function bindProfile(profileId) {
+  if (profileId && profileId !== boundProfileId) {
+    clearCaches();
+    boundProfileId = String(profileId);
+  }
+}
+
+function getEffectiveProfileId() {
+  if (boundProfileId) return boundProfileId;
+  let curId = "local-d";
   try {
-    const value = execFileSync("security", ["find-generic-password", "-a", KEYCHAIN_ACCOUNT, "-s", service, "-w"], {
+    const store = require("./profile-store");
+    const active = store.getActive();
+    if (active && active.id) curId = active.id;
+  } catch (_) {}
+  if (lastObservedProfileId && lastObservedProfileId !== curId) {
+    clearCaches();
+  }
+  lastObservedProfileId = curId;
+  return curId;
+}
+
+function getProfileKeychainAccount(profileId) {
+  const pid = profileId || getEffectiveProfileId();
+  const safeId = String(pid).replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `${KEYCHAIN_ACCOUNT}:${safeId}`;
+}
+
+const EXPLICIT_READ_ONLY_TOOLS = new Set([
+  "get", "list", "read", "search", "fetch", "describe", "check", "query",
+  "find", "inspect", "show", "status", "view", "info", "lookup", "ping", "echo",
+  "get_file", "list_files", "read_file", "search_files", "fetch_url", "get_status",
+  "list_tools", "get_tools", "get_user", "get_profile", "list_branches", "get_repo",
+  "list_repos", "get_issue", "list_issues", "get_pull_request", "list_pull_requests",
+]);
+
+const MUTATING_SUBSTRINGS = [
+  "create", "delete", "update", "write", "set", "post", "put", "patch",
+  "remove", "execute", "run", "send", "mutate", "add", "insert", "drop",
+  "kill", "exec", "modify", "reset", "destroy", "apply", "import", "export",
+  "mark", "flag", "toggle", "archive", "clear", "touch", "ack", "save", "sync"
+];
+
+function isReadOnlyTool(toolName) {
+  const s = String(toolName || "").trim();
+  if (!s) return false;
+  const norm = s.toLowerCase();
+  for (const mv of MUTATING_SUBSTRINGS) {
+    if (norm.includes(mv)) return false;
+  }
+  if (EXPLICIT_READ_ONLY_TOOLS.has(norm)) return true;
+  const parts = norm.split(/[_.\-:/]/);
+  if (parts.length === 2 && (parts[0] === "get" || parts[0] === "list" || parts[0] === "search" || parts[0] === "describe" || parts[0] === "inspect" || parts[0] === "view" || parts[0] === "read" || parts[0] === "fetch" || parts[0] === "query" || parts[0] === "show")) {
+    return true;
+  }
+  return false;
+}
+
+function isMutatingTool(toolName) {
+  return !isReadOnlyTool(toolName);
+}
+
+function mutationBlockedError(toolName, spec) {
+  return `Mutating MCP tool '${toolName}' on ${spec.displayName} is blocked by default (deny-by-default policy requires explicit approval capability).`;
+}
+
+function isMutationAuthorized(toolName, options = {}) {
+  if (!isMutatingTool(toolName)) return true; // Read-only tools are allowed
+  // Mutating tools are strictly DENY-BY-DEFAULT
+  // Allowed ONLY with explicit external approval capability (configured in options or env), NEVER by model prompt
+  if (options && (options.approved === true || options.allowMutating === true || options.confirmed === true)) {
+    return true;
+  }
+  if (process.env.GROK_ALLOW_MUTATING_MCP_TOOLS === "1") {
+    return true;
+  }
+  return false;
+}
+
+function keychainGet(service, profileId) {
+  const acct = getProfileKeychainAccount(profileId);
+  const cacheKey = `${acct}:${service}`;
+  if (cachedSecrets.has(cacheKey)) return cachedSecrets.get(cacheKey);
+  try {
+    const val = execFileSync("security", ["find-generic-password", "-a", acct, "-s", service, "-w"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    if (value) cachedSecrets.set(service, value);
-    return value || null;
+    cachedSecrets.set(cacheKey, val);
+    return val;
   } catch {
     return null;
   }
@@ -286,16 +379,39 @@ function keychainGetForAccount(account, service) {
   }
 }
 
-function keychainSet(service, value) {
+function keychainSet(service, value, profileId) {
   if (!value) return false;
+  const acct = getProfileKeychainAccount(profileId);
+  const cacheKey = `${acct}:${service}`;
   try {
-    execFileSync("security", ["add-generic-password", "-a", KEYCHAIN_ACCOUNT, "-s", service, "-w", value, "-U"], {
+    execFileSync("security", ["add-generic-password", "-a", acct, "-s", service, "-w", value, "-U"], {
       stdio: "ignore",
     });
-    cachedSecrets.set(service, value);
+    cachedSecrets.set(cacheKey, value);
     return true;
   } catch {
     return false;
+  }
+}
+
+function keychainDelete(service, profileId) {
+  const acct = getProfileKeychainAccount(profileId);
+  const cacheKey = `${acct}:${service}`;
+  cachedSecrets.delete(cacheKey);
+  try {
+    execFileSync("security", ["delete-generic-password", "-a", acct, "-s", service], {
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    try {
+      execFileSync("security", ["delete-generic-password", "-a", KEYCHAIN_ACCOUNT, "-s", service], {
+        stdio: "ignore",
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -311,12 +427,12 @@ function parseTokenPayload(raw) {
   return { access_token: raw };
 }
 
-function readToken(service) {
-  return parseTokenPayload(keychainGet(service));
+function readToken(service, profileId) {
+  return parseTokenPayload(keychainGet(service, profileId));
 }
 
-function saveToken(service, token) {
-  return keychainSet(service, JSON.stringify(token));
+function saveToken(service, token, profileId) {
+  return keychainSet(service, JSON.stringify(token), profileId);
 }
 
 function normalizeAccountKey(value) {
@@ -329,12 +445,20 @@ function slotsForKind(kind) {
 
 function slotFor(spec) {
   const slots = slotsForKind(spec.kind);
-  const key = normalizeAccountKey(spec.accountKey || slots[0].key);
-  return slots.find((slot) => slot.key === key) || slots[0];
+  const requested = spec.accountKey;
+  if (!requested || requested === "default") {
+    const def = slots.find((s) => s.key === "default");
+    return def || slots[0] || null;
+  }
+  const key = normalizeAccountKey(requested);
+  const match = slots.find((slot) => slot.key === key);
+  return match || null;
 }
 
 function accountSpec(base, accountKey) {
-  const slot = slotFor({ ...base, accountKey });
+  if (!base) return null;
+  const slot = slotFor({ ...base, accountKey: accountKey || "default" });
+  if (!slot) return null;
   const key = slot.key;
   return {
     ...base,
@@ -348,7 +472,7 @@ function accountSpec(base, accountKey) {
 function resolveSpec(identifier) {
   const value = String(identifier || "");
   for (const base of Object.values(SERVERS)) {
-    if (value === base.name || value === String(base.id)) return accountSpec(base);
+    if (value === base.name || value === String(base.id)) return accountSpec(base, "default");
     const prefix = `${base.name}--`;
     if (value.startsWith(prefix)) return accountSpec(base, value.slice(prefix.length));
   }
@@ -356,7 +480,7 @@ function resolveSpec(identifier) {
 }
 
 function accountSpecs(base) {
-  return slotsForKind(base.kind).map((slot) => accountSpec(base, slot.key));
+  return slotsForKind(base.kind).map((slot) => accountSpec(base, slot.key)).filter(Boolean);
 }
 
 function mem0Key() {
@@ -372,11 +496,11 @@ function tokenServiceFor(spec) {
   return slot.service || (spec.kind === "google" ? GOOGLE_TOKEN_SERVICE : null);
 }
 
-function tokenFor(spec) {
+function tokenFor(spec, profileId) {
   if (!["x", "github", "google", "notion", "stripe", "cloudflare", "sentry", "linear", "render", "amplitude", "resend"].includes(spec.kind)) return null;
   const service = tokenServiceFor(spec);
   if (!service) return null;
-  const token = readToken(service);
+  const token = readToken(service, profileId);
   return token ? { ...token, _keychainService: service } : null;
 }
 
@@ -387,13 +511,13 @@ function tokenUsable(token) {
   return Number.isFinite(expiry) && expiry > Date.now() + 30_000;
 }
 
-function hasAuth(spec) {
+function hasAuth(spec, profileId) {
   if (spec.kind === "mem0") return Boolean(mem0Key());
   if (spec.kind === "cloudflare-public") return true;
   const runtimeName = spec.runtimeName || spec.name;
   if (invalidAuth.has(runtimeName)) return false;
-  const token = tokenFor(spec);
-  return tokenUsable(token) || (["google", "notion", "stripe", "cloudflare", "sentry", "linear", "render", "amplitude", "resend"].includes(spec.kind) && Boolean(token?.refresh_token));
+  const token = tokenFor(spec, profileId);
+  return tokenUsable(token) || (["google", "notion", "stripe", "cloudflare", "sentry", "linear", "render", "amplitude", "resend", "x"].includes(spec.kind) && Boolean(token?.refresh_token));
 }
 
 function oauthConfigFor(spec) {
@@ -411,14 +535,23 @@ function oauthConfigFor(spec) {
   return { ...configured, resource: configured.resource || spec.url };
 }
 
-async function ensureRefreshableToken(spec) {
-  const current = tokenFor(spec);
+async function ensureRefreshableToken(spec, profileId) {
+  const pid = profileId || getEffectiveProfileId();
+  const current = tokenFor(spec, pid);
   if (!current || tokenUsable(current) || !current.refresh_token) return current;
   const service = current._keychainService || slotFor(spec).service;
   const config = oauthConfigFor(spec);
-  const tokenEndpoint = current.token_endpoint || config.tokenEndpoint;
+  const tokenEndpoint = config.tokenEndpoint;
   if (!tokenEndpoint) return current;
-  if (googleRefreshes.has(service)) return googleRefreshes.get(service);
+  try {
+    const u = new URL(tokenEndpoint);
+    if (u.protocol !== "https:") return current;
+    if (secGuard.isPrivateOrLoopbackIp(u.hostname)) return current;
+  } catch {
+    return current;
+  }
+  const refreshKey = `${pid}:${service}`;
+  if (googleRefreshes.has(refreshKey)) return googleRefreshes.get(refreshKey);
   const params = {
     refresh_token: current.refresh_token,
     grant_type: "refresh_token",
@@ -430,6 +563,7 @@ async function ensureRefreshableToken(spec) {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams(params),
+      redirect: "error",
       signal: AbortSignal.timeout(30_000),
     });
     const text = await response.text();
@@ -437,16 +571,20 @@ async function ensureRefreshableToken(spec) {
     if (!response.ok || !data.access_token) throw new Error(data.error_description || `${spec.displayName} token refresh failed (${response.status})`);
     const updated = { ...current, ...data, token_endpoint: tokenEndpoint, created_at: Date.now(), expires_at: Date.now() + Number(data.expires_in || 3600) * 1000 };
     delete updated._keychainService;
-    saveToken(service, updated);
+    saveToken(service, updated, pid);
     return { ...updated, _keychainService: service };
-  })().finally(() => googleRefreshes.delete(service));
-  googleRefreshes.set(service, promise);
+  })().finally(() => googleRefreshes.delete(refreshKey));
+  googleRefreshes.set(refreshKey, promise);
   return promise;
 }
 
-async function ensureToken(spec) {
-  if (["google", "notion", "stripe", "cloudflare"].includes(spec.kind)) return ensureRefreshableToken(spec);
-  return tokenFor(spec);
+async function ensureToken(spec, profileId) {
+  const pid = profileId || getEffectiveProfileId();
+  const current = tokenFor(spec, pid);
+  if (["google", "notion", "stripe", "cloudflare", "sentry", "linear", "render", "amplitude", "resend", "x", "github"].includes(spec?.kind) || Boolean(current?.refresh_token)) {
+    return ensureRefreshableToken(spec, pid);
+  }
+  return current;
 }
 
 function varint(value) {
@@ -547,6 +685,7 @@ function allConfig() {
 }
 
 function encodeAvailableServer(spec) {
+  const accounts = accountSpecs(spec);
   const parts = [
     pbInt(1, spec.id),
     pbStr(2, spec.name),
@@ -554,10 +693,10 @@ function encodeAvailableServer(spec) {
     pbStr(5, "http"),
     pbStr(8, spec.url),
     pbInt(9, spec.pluginId),
-    pbBool(11, accountSpecs(spec).some((account) => hasAuth(account))),
+    pbBool(11, accounts.some((account) => hasAuth(account))),
     pbStr(15, spec.name),
   ];
-  for (const account of accountSpecs(spec)) {
+  for (const account of accounts) {
     parts.push(pbMsg(17, Buffer.concat([
       pbStr(1, account.accountKey),
       pbStr(2, account.serverIdentifier),
@@ -648,6 +787,7 @@ async function mcpRequest(spec, method, params, options = {}) {
       method: "POST",
       headers: authHeaders(spec),
       body: JSON.stringify(body),
+      redirect: "error",
       signal: AbortSignal.timeout(35_000),
     });
   } catch (error) {
@@ -773,6 +913,7 @@ function authUrlFor(spec) {
     return null;
   }
   pending.createdAt = Date.now();
+  pending.profileId = boundProfileId || getEffectiveProfileId();
   cleanPendingOAuth();
   pendingOAuth.set(state, pending);
   return u.toString();
@@ -790,13 +931,14 @@ async function exchangeXCode(code, pending) {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body,
+    redirect: "error",
     signal: AbortSignal.timeout(30_000),
   });
   const text = await response.text();
   let data; try { data = JSON.parse(text); } catch { data = {}; }
   if (!response.ok || !data.access_token) throw new Error(data.error_description || `X token exchange failed (${response.status})`);
   const service = slotFor({ kind: "x", accountKey: pending.accountKey }).service || X_TOKEN_SERVICE;
-  saveToken(service, { ...data, created_at: Date.now(), expires_at: Date.now() + Number(data.expires_in || 7200) * 1000 });
+  saveToken(service, { ...data, created_at: Date.now(), expires_at: Date.now() + Number(data.expires_in || 7200) * 1000 }, pending.profileId);
   const scoped = accountSpec(SERVERS.x, pending.accountKey);
   sessions.delete(scoped.runtimeName); toolCache.delete(scoped.runtimeName);
 }
@@ -816,13 +958,14 @@ async function exchangeGoogleCode(code, pending) {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body,
+    redirect: "error",
     signal: AbortSignal.timeout(30_000),
   });
   const text = await response.text();
   let data; try { data = JSON.parse(text); } catch { data = {}; }
   if (!response.ok || !data.access_token) throw new Error(data.error_description || `Google token exchange failed (${response.status})`);
   const service = slotFor({ kind: "google", accountKey: pending.accountKey }).service;
-  saveToken(service, { ...data, client_id: client.clientId, client_secret: client.clientSecret, created_at: Date.now(), expires_at: Date.now() + Number(data.expires_in || 3600) * 1000 });
+  saveToken(service, { ...data, client_id: client.clientId, client_secret: client.clientSecret, created_at: Date.now(), expires_at: Date.now() + Number(data.expires_in || 3600) * 1000 }, pending.profileId);
   for (const base of [SERVERS["google-drive"], SERVERS["google-calendar"], SERVERS.gmail]) {
     const scoped = accountSpec(base, pending.accountKey);
     sessions.delete(scoped.runtimeName); toolCache.delete(scoped.runtimeName);
@@ -843,6 +986,7 @@ async function exchangeOAuthCode(code, pending) {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: params,
+    redirect: "error",
     signal: AbortSignal.timeout(30_000),
   });
   const text = await response.text();
@@ -857,7 +1001,7 @@ async function exchangeOAuthCode(code, pending) {
     token_endpoint: pending.tokenEndpoint,
     created_at: Date.now(),
     expires_at: Date.now() + Number(data.expires_in || 3600) * 1000,
-  });
+  }, pending.profileId);
   if (base) {
     const scoped = accountSpec(base, pending.accountKey);
     sessions.delete(scoped.runtimeName); toolCache.delete(scoped.runtimeName); invalidAuth.delete(scoped.runtimeName);
@@ -865,11 +1009,15 @@ async function exchangeOAuthCode(code, pending) {
 }
 
 async function handleOAuthCallback(query) {
+  cleanPendingOAuth();
   const state = query.get("state");
   const pending = state ? pendingOAuth.get(state) : null;
-  if (!pending) return { status: 400, body: "Unknown or expired OAuth state." };
+  if (!pending || !pending.createdAt || (Date.now() - pending.createdAt > 10 * 60 * 1000)) {
+    if (state) pendingOAuth.delete(state);
+    return { status: 400, body: "Unknown or expired OAuth state." };
+  }
   pendingOAuth.delete(state);
-  if (query.get("error")) return { status: 400, body: `OAuth denied: ${query.get("error")}` };
+  if (query.get("error")) return { status: 400, body: `OAuth denied: ${secGuard.escHtml(query.get("error"))}` };
   try {
     if (pending.server === "x") {
       await exchangeXCode(query.get("code") || "", pending);
@@ -881,10 +1029,10 @@ async function handleOAuthCallback(query) {
     }
     if (["notion", "stripe", "cloudflare-bindings", "cloudflare-builds", "cloudflare-observability", "sentry", "linear", "render", "amplitude", "resend"].includes(pending.server)) {
       await exchangeOAuthCode(query.get("code") || "", pending);
-      return { status: 200, body: `${pending.server} authorization completed. You can close this window and refresh Grok D.` };
+      return { status: 200, body: `${secGuard.escHtml(pending.server)} authorization completed. You can close this window and refresh Grok D.` };
     }
   } catch (error) {
-    return { status: 500, body: `OAuth authorization failed: ${error.message}` };
+    return { status: 500, body: `OAuth authorization failed: ${secGuard.escHtml(error.message || String(error))}` };
   }
   return { status: 400, body: "Unsupported local OAuth connector." };
 }
@@ -941,11 +1089,14 @@ async function executeToolResponse(body) {
   const toolName = stringField(body, 2);
   const spec = resolveSpec(serverId);
   if (!spec) return pbMsg(1, mcpResultError(`Unknown local MCP server: ${serverId}`));
+  if (isMutatingTool(toolName) && !isMutationAuthorized(toolName)) {
+    return pbMsg(1, mcpResultError(mutationBlockedError(toolName, spec)));
+  }
   const args = decodeStruct(messageField(body, 3) || Buffer.alloc(0));
   const result = await mcpRequest(spec, "tools/call", { name: toolName, arguments: args });
   if (result.rpc?.result) {
     const rpcResult = result.rpc.result;
-    const text = resultText(result.rpc);
+    const text = secGuard.redactSensitiveText(resultText(result.rpc));
     return pbMsg(1, mcpResultSuccess(text, rpcResult.isError === true, rpcResult.structuredContent));
   }
   if (isAuthFailure(result)) {
@@ -971,12 +1122,15 @@ async function listServerTools(serverId) {
   }
   return { ok: false, error: result.error || `Could not list tools (${result.httpStatus || "unknown"})` };
 }
-async function callTool(serverId, toolName, args) {
+async function callTool(serverId, toolName, args, options = {}) {
   const spec = resolveSpec(String(serverId));
   if (!spec) return { ok: false, error: `Unknown local MCP server: ${serverId}` };
+  if (isMutatingTool(toolName) && !isMutationAuthorized(toolName, options)) {
+    return { ok: false, error: mutationBlockedError(toolName, spec) };
+  }
   const result = await mcpRequest(spec, "tools/call", { name: toolName, arguments: args || {} });
   if (result.rpc?.result) {
-    const text = resultText(result.rpc);
+    const text = secGuard.redactSensitiveText(resultText(result.rpc));
     return { ok: result.rpc.result.isError !== true, text, raw: result };
   }
   if (isAuthFailure(result)) return { ok: false, error: `${spec.displayName} needs authorization — connect it in Grok D first.` };
@@ -1013,7 +1167,19 @@ async function handleBackendRpc(url, body) {
     // standard OAuth completion path compatible if it is used later.
     return Buffer.concat([pbInt(2, 1), pbInt(1, Date.now())]);
   }
-  if (/DeleteMcpOAuthToken$/.test(clean)) return Buffer.alloc(0);
+  if (/DeleteMcpOAuthToken$/.test(clean)) {
+    try {
+      const urlValue = stringField(body, 1);
+      const requestedAccount = stringField(body, 2);
+      const base = Object.values(SERVERS).find((s) => s.url === urlValue || s.name === urlValue || String(s.id) === urlValue);
+      if (base) {
+        const spec = accountSpec(base, requestedAccount || "default");
+        const service = spec && tokenServiceFor(spec);
+        if (service) keychainDelete(service);
+      }
+    } catch (_) {}
+    return Buffer.alloc(0);
+  }
   return null;
 }
 
@@ -1027,4 +1193,14 @@ module.exports = {
   hasAuth,
   callTool,
   listServerTools,
+  resolveSpec,
+  slotFor,
+  accountSpec,
+  clearCaches,
+  bindProfile,
+  getProfileKeychainAccount,
+  isMutatingTool,
+  isMutationAuthorized,
+  ensureRefreshableToken,
+  ensureToken,
 };

@@ -7,16 +7,27 @@ const os = require("os");
 const fs = require("fs");
 const { spawn } = require("child_process");
 
-const PORT = 19337;
-const UP = "http://127.0.0.1:19338";
+const crypto = require("crypto");
 const HACK = fs.mkdtempSync(path.join(os.tmpdir(), "grok-shim-down-"));
+const PROFILE_ROOT = path.join(HACK, "profile-root");
+fs.mkdirSync(PROFILE_ROOT, { recursive: true });
 const AGENTS = path.join(HACK, "box-data", "agents");
 fs.mkdirSync(AGENTS, { recursive: true });
+
+const TEST_TOKEN = crypto.randomBytes(32).toString("hex");
+const PORT = 19000 + Math.floor(Math.random() * 1000);
+const UP_PORT = PORT + 1;
+const UP = `http://127.0.0.1:${UP_PORT}`;
+
+process.env.GROK_PROFILE_ROOT = PROFILE_ROOT;
+process.env.SAND_HOST_GATEWAY_TOKEN = TEST_TOKEN;
 
 const child = spawn(process.execPath, [path.join(__dirname, "gateway-shim.js")], {
   env: {
     ...process.env,
     GROKBOT_HACK: HACK,
+    GROK_PROFILE_ROOT: PROFILE_ROOT,
+    SAND_HOST_GATEWAY_TOKEN: TEST_TOKEN,
     GROK_SHIM_PORT: String(PORT),
     GROK_SHIM_UP: UP,
   },
@@ -34,7 +45,7 @@ function post(method, body) {
       headers: {
         "content-type": "application/json",
         "content-length": data.length,
-        authorization: "Bearer fake-gateway-token",
+        authorization: `Bearer ${TEST_TOKEN}`,
       },
     }, (res) => {
       const chunks = [];

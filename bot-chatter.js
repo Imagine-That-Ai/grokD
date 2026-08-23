@@ -76,21 +76,19 @@ function esc(s) {
 }
 
 function parseChatter(text) {
-  const m = PREFIX_RE.exec(String(text || ""));
+  const s = String(text || "");
+  const m = PREFIX_RE.exec(s);
   if (!m) return null;
-  return { from: m[1].trim(), body: m[2].trim() };
+  const rawSender = m[1].trim().replace(/[^\w\s.-]/g, "").slice(0, 50);
+  if (!rawSender) return null;
+  return { from: rawSender, body: m[2].trim() };
 }
 
-// Names travel with whatever the sending agent was called mid-turn, so "sally"
-// and "sally the seashell slinging slut" are the same teammate.
 function sameBot(a, b) {
   const x = String(a || "").trim().toLowerCase();
   const y = String(b || "").trim().toLowerCase();
   if (!x || !y) return false;
-  if (x === y) return true;
-  const short = x.length < y.length ? x : y;
-  const long = x.length < y.length ? y : x;
-  return short.length >= 3 && long.startsWith(short);
+  return x === y;
 }
 
 function hashIndex(key, mod) {
@@ -203,7 +201,7 @@ function buildRuns(entries, outbox) {
   for (let i = 0; i < list.length; i++) {
     const key = list[i].id;
     const partner = chatterAt[i];
-    if (partner) {
+    if (partner && list[i].origin !== "user_interactive") {
       if (!open) {
         open = addOuts(newRun("hidden", key), pending);
         pending = [];
@@ -338,15 +336,32 @@ function listAgents() {
   const list = [];
   let names = [];
   try { names = fs.readdirSync(dir); } catch { names = []; }
+  let realBase = "";
+  try { realBase = fs.realpathSync(dir); } catch {}
   for (const id of names) {
-    const db = path.join(dir, id, "store.db");
-    let profile;
-    try { profile = JSON.parse(fs.readFileSync(path.join(dir, id, "profile.json"), "utf8")); }
-    catch { continue; }
-    if (!profile || !profile.name || !fs.existsSync(db)) continue;
-    let mtime = 0;
-    try { mtime = fs.statSync(db).mtimeMs; } catch (_) {}
-    list.push({ id, name: String(profile.name), profile, db, mtime });
+    if (!/^[0-9a-fA-F-]{36}$/.test(id) && !/^[a-zA-Z0-9_-]{1,64}$/.test(id)) continue;
+    const agentSubDir = path.join(dir, id);
+    try {
+      const stDir = fs.lstatSync(agentSubDir);
+      if (stDir.isSymbolicLink() || !stDir.isDirectory()) continue;
+      if (realBase) {
+        const realSubDir = fs.realpathSync(agentSubDir);
+        if (!realSubDir.startsWith(realBase + path.sep)) continue;
+      }
+      const profPath = path.join(agentSubDir, "profile.json");
+      const db = path.join(agentSubDir, "store.db");
+      if (!fs.existsSync(profPath) || !fs.existsSync(db)) continue;
+      const stProf = fs.lstatSync(profPath);
+      const stDb = fs.lstatSync(db);
+      if (stProf.isSymbolicLink() || !stProf.isFile() || stDb.isSymbolicLink() || !stDb.isFile()) continue;
+      const profile = JSON.parse(fs.readFileSync(profPath, "utf8"));
+      if (!profile || !profile.name) continue;
+      let mtime = 0;
+      try { mtime = fs.statSync(db).mtimeMs; } catch (_) {}
+      list.push({ id, name: String(profile.name), profile, db, mtime });
+    } catch {
+      continue;
+    }
   }
   agentCache = { at: Date.now(), list };
   return list;
@@ -361,16 +376,24 @@ function agentNamed(name) {
 const txCache = new Map();
 function transcript(agent) {
   if (!agent) return [];
-  let mtime = 0;
-  try { mtime = fs.statSync(agent.db).mtimeMs; } catch { return []; }
+  let fp = "";
+  try {
+    const st = fs.statSync(agent.db);
+    fp = `${st.mtimeMs}:${st.size}`;
+    const wal = `${agent.db}-wal`;
+    if (fs.existsSync(wal)) {
+      const wst = fs.statSync(wal);
+      fp += `:${wst.mtimeMs}:${wst.size}`;
+    }
+  } catch { return []; }
   const hit = txCache.get(agent.db);
-  if (hit && hit.mtime === mtime) return hit.rows;
+  if (hit && hit.fp === fp) return hit.rows;
   let rows = [];
   try {
     rows = rowsOf(agent.db, `select entry from (select entry, seq from transcript_entries
       order by seq desc limit ${WINDOW}) order by seq`).map(normalize);
   } catch (e) { log(e); }
-  txCache.set(agent.db, { mtime, rows });
+  txCache.set(agent.db, { fp, rows });
   return rows;
 }
 

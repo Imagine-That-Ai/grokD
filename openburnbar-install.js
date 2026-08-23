@@ -6,6 +6,8 @@
 
 const DAEMON_PORT = 8317;
 const GROKD_PORT = 8320;
+const DAEMON_URL = "http://127.0.0.1:8317/v1/chat/completions";
+const GROKD_URL = "http://127.0.0.1:8320/v1/chat/completions";
 
 function info() {
   return {
@@ -13,12 +15,12 @@ function info() {
     npmPackage: "openburnbar",
     npmWhat: "Local OpenAI-compatible gateway on port 8320, MCP stdio, obbresume, Pensieve memory, and optional Mac app install.",
     proxy: {
-      daemon: `http://127.0.0.1:${DAEMON_PORT}/v1/chat/completions`,
-      grokD: `http://127.0.0.1:${GROKD_PORT}/v1/chat/completions`,
+      daemon: DAEMON_URL,
+      grokD: GROKD_URL,
     },
     install: {
-      proxy: "npx -y openburnbar proxy --port 8320 --allow-local-key",
-      macApp: "npx -y openburnbar app install",
+      proxy: "npx -y --ignore-scripts openburnbar@0.2.0 proxy --port 8320",
+      macApp: "npx -y --ignore-scripts openburnbar@0.2.0 app install",
       launch: "open -a OpenBurnBar",
       pointGrokD: "node ~/.grok/grokbot-d/model-lib.js set grok-4.6 openburnbar",
     },

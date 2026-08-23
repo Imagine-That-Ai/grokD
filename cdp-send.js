@@ -54,7 +54,7 @@ function send(text, token, timeoutMs = 70000) {
       const after = body.slice(idx + token.length);
       if (after.includes(token) || /is working/i.test(after) || after.length > last.length + 12) {
         if (after.includes(token) || Date.now() - t0 > 8000) {
-          return { ok: after.includes(token) || snap.working, typed, rec: snap.rec, around: body.slice(idx, idx + 400) };
+          return { ok: after.includes(token) || snap.working, typed, rec: snap.rec, matched: after.includes(token), tokenLen: token.length };
         }
       }
       last = after;

@@ -7,6 +7,7 @@ const os = require("os");
 const path = require("path");
 const https = require("https");
 const crypto = require("crypto");
+const secGuard = require("./security-guard");
 
 const ROOT = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
 const CACHE = path.join(ROOT, "runtime", "account-identity.json");
@@ -16,7 +17,7 @@ const SEAT4 = process.env.GROK_SEAT4
 const PROVIDERS = { github: "GitHub", auth0: "Auth0", "google-oauth2": "Google" };
 
 function log(msg) {
-  try { fs.appendFileSync("/tmp/grokbot-hack/auth-policy.log", "[ident] " + msg + "\n"); } catch {}
+  secGuard.auditLog("ident", msg);
 }
 
 function parseAuthId(authId) {
@@ -147,16 +148,27 @@ function readCache(profileId) {
 
 function writeCache(profileId, row) {
   if (!profileId || !row) return row;
-  const all = readAllCache();
-  const prev = all[profileId] || {};
-  const next = Object.assign({}, prev, row, { profileId, updatedAt: Date.now() });
-  if (!next.pictureDataUrl && prev.pictureDataUrl && prev.authId === next.authId) {
-    next.pictureDataUrl = prev.pictureDataUrl;
+  const lockFile = path.join(path.dirname(CACHE), ".account-identity.lock");
+  const fd = secGuard.acquireFileLock(lockFile, { waitMs: 4000, staleMs: 15000 });
+  if (fd === null) {
+    throw new Error("Failed to acquire account-identity lock for writing");
   }
-  all[profileId] = next;
-  fs.mkdirSync(path.dirname(CACHE), { recursive: true });
-  fs.writeFileSync(CACHE, JSON.stringify(all, null, 2) + "\n");
-  return next;
+  try {
+    const all = readAllCache();
+    const prev = all[profileId] || {};
+    const authChanged = (row.authId && prev.authId && row.authId !== prev.authId) ||
+                        (row.email && prev.email && row.email.toLowerCase() !== prev.email.toLowerCase());
+    const base = authChanged ? {} : prev;
+    const next = Object.assign({}, base, row, { profileId, updatedAt: Date.now() });
+    if (!authChanged && !next.pictureDataUrl && prev.pictureDataUrl && prev.authId === next.authId) {
+      next.pictureDataUrl = prev.pictureDataUrl;
+    }
+    all[profileId] = next;
+    secGuard.writeJsonAtomic0600(CACHE, all);
+    return next;
+  } finally {
+    secGuard.releaseFileLock(lockFile, fd);
+  }
 }
 
 function cacheForAuthId(authId) {
@@ -171,8 +183,28 @@ function cacheForAuthId(authId) {
   return best;
 }
 
+function clearCache(profileId) {
+  if (!profileId) return;
+  const lockFile = path.join(path.dirname(CACHE), ".account-identity.lock");
+  const fd = secGuard.acquireFileLock(lockFile, { waitMs: 4000, staleMs: 15000 });
+  if (fd === null) return;
+  try {
+    const all = readAllCache();
+    if (all[profileId]) {
+      delete all[profileId];
+      secGuard.writeJsonAtomic0600(CACHE, all);
+    }
+  } finally {
+    secGuard.releaseFileLock(lockFile, fd);
+  }
+}
+
 function rememberStatus(status, profileId) {
   if (!status || !profileId) return null;
+  if (status.kind === "logged-out" || status.kind === "not-logged-in") {
+    clearCache(profileId);
+    return null;
+  }
   if (status.kind !== "logged-in" && !status.authId && !status.email) return readCache(profileId);
   return writeCache(profileId, {
     kind: status.kind || "logged-in",
@@ -194,8 +226,13 @@ function enrichStatus(status, opts) {
     if (!st.authId) st.authId = "local|d";
     return st;
   }
-  const cached = (st.authId && cacheForAuthId(st.authId)) || (profileId && readCache(profileId)) || null;
-  if (cached && !(st.authId && cached.authId && st.authId !== cached.authId)) {
+  if (st.kind === "logged-out" || st.kind === "not-logged-in") {
+    if (profileId) clearCache(profileId);
+    return st;
+  }
+  const cached = (profileId && readCache(profileId)) || null;
+  const isFreshCache = cached && Number(cached.updatedAt) > 0 && (Date.now() - cached.updatedAt < 24 * 60 * 60 * 1000);
+  if (isFreshCache && !(st.authId && cached.authId && st.authId !== cached.authId) && !(st.email && cached.email && st.email.toLowerCase() !== cached.email.toLowerCase())) {
     if (!st.email && cached.email) st.email = cached.email;
     if (!st.name && !st.displayName && cached.name) st.name = cached.name;
     if (!st.profilePictureUrl && cached.pictureUrl) st.profilePictureUrl = cached.pictureUrl;
@@ -280,20 +317,39 @@ function decryptBlob(safeStorage, b64) {
   }
 }
 
-function fetchHttpsToDataUrl(url, opts) {
+async function fetchHttpsToDataUrl(url, opts) {
   const want = String(url || "");
-  if (!/^https:\/\//i.test(want)) return Promise.resolve(null);
+  if (!/^https:\/\//i.test(want)) return null;
+  if (!secGuard.isApprovedAvatarUrl(want)) return null;
+  let parsed;
+  try { parsed = new URL(want); } catch { return null; }
+  const pinned = await secGuard.resolveAndPinHost(parsed.hostname);
+  if (!pinned || !pinned.address) return null;
+
   const timeoutMs = (opts && opts.timeoutMs) || 8000;
   const acceptMissing = !!(opts && opts.acceptMissing);
   const maxRedirects = opts && typeof opts.redirects === "number" ? opts.redirects : 5;
   return new Promise((resolve) => {
-    const req = https.get(want, {
-      headers: { Accept: "image/*", "User-Agent": "grok-d-identity" },
-    }, (res) => {
+    const req = https.get({
+      protocol: parsed.protocol,
+      hostname: parsed.hostname,
+      port: parsed.port || 443,
+      path: parsed.pathname + parsed.search,
+      lookup: (_hostname, _options, callback) => {
+        callback(null, pinned.address, pinned.family || 4);
+      },
+      headers: { Accept: "image/*", "User-Agent": "grok-d-identity", Host: parsed.host },
+      timeout: timeoutMs,
+      servername: parsed.hostname,
+    }, async (res) => {
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
         if (maxRedirects <= 0) return resolve(null);
-        fetchHttpsToDataUrl(res.headers.location, Object.assign({}, opts, { redirects: maxRedirects - 1 })).then(resolve);
+        const nextLocation = new URL(res.headers.location, want).toString();
+        if (!secGuard.isApprovedAvatarUrl(nextLocation)) {
+          return resolve(null);
+        }
+        fetchHttpsToDataUrl(nextLocation, Object.assign({}, opts, { redirects: maxRedirects - 1 })).then(resolve);
         return;
       }
       if (res.statusCode === 404 && acceptMissing) {
@@ -424,34 +480,6 @@ function readSecrets(root) {
   catch { return null; }
 }
 
-function copyForRead(src) {
-  if (!src || !fs.existsSync(src)) return null;
-  const dest = path.join(os.tmpdir(), "grok-ident-" + path.basename(src) + "-" + process.pid);
-  try {
-    fs.copyFileSync(src, dest);
-    const wal = src + "-wal";
-    const journal = src + "-journal";
-    if (fs.existsSync(wal)) fs.copyFileSync(wal, dest + "-wal");
-    if (fs.existsSync(journal)) fs.copyFileSync(journal, dest + "-journal");
-    return dest;
-  } catch {
-    return null;
-  }
-}
-
-function sqliteQuery(db, sql) {
-  try {
-    const { execFileSync } = require("child_process");
-    const out = execFileSync("sqlite3", ["-separator", "\t", db, sql], {
-      encoding: "utf8",
-      timeout: 3000,
-    });
-    return String(out || "").split("\n").map((l) => l.trim()).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
 function isEmail(s) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || "").trim());
 }
@@ -498,26 +526,25 @@ function identityFromBrowserProfile(profileId, opts) {
       }
     }
   } catch {}
-  if (!out.email) {
-    const web = copyForRead(path.join(def, "Web Data"));
-    if (web) {
-      try {
-        for (const row of sqliteQuery(web, "SELECT value FROM autofill WHERE name='email' ORDER BY date_last_used DESC;")) {
-          const v = row.split("\t")[0];
-          if (isEmail(v)) { out.email = v; break; }
-        }
-      } finally {
-        try { fs.rmSync(web, { force: true }); } catch {}
-        try { fs.rmSync(web + "-wal", { force: true }); } catch {}
-        try { fs.rmSync(web + "-journal", { force: true }); } catch {}
-      }
-    }
-  }
   if (out.email && !out.username) out.username = out.email.split("@")[0];
   if (includePhoto && out.googleId) {
-    const localPic = path.join(def, "Accounts", "Avatar Images", out.googleId);
-    const data = fileToDataUrl(localPic);
-    if (data) out.pictureDataUrl = data;
+    if (/^[a-zA-Z0-9_-]+$/.test(out.googleId)) {
+      const avatarDir = path.join(def, "Accounts", "Avatar Images");
+      const localPic = path.join(avatarDir, out.googleId);
+      try {
+        if (fs.existsSync(localPic)) {
+          const st = fs.lstatSync(localPic);
+          if (!st.isSymbolicLink() && st.isFile()) {
+            const realPic = fs.realpathSync(localPic);
+            const realDir = fs.realpathSync(avatarDir);
+            if (realPic.startsWith(realDir + path.sep)) {
+              const data = fileToDataUrl(localPic);
+              if (data) out.pictureDataUrl = data;
+            }
+          }
+        }
+      } catch (_) {}
+    }
   }
   _browserMemo.id = id;
   _browserMemo.at = Date.now();
@@ -544,10 +571,14 @@ function activeProfileId() {
 
 async function harvestWithSafeStorage(safeStorage, opts) {
   const profileId = (opts && opts.profileId) || activeProfileId();
+  const startProfile = activeProfileId();
   const root = (opts && opts.seat4) || SEAT4;
   const secrets = readSecrets(root);
   const out = { profileId, ok: false };
   const fromBrowser = identityFromBrowserProfile(profileId, { includePhoto: true });
+  if (activeProfileId() !== startProfile || activeProfileId() !== profileId) {
+    return { ok: false, error: "profile-switched-during-harvest", profileId };
+  }
   if (!secrets) {
     if (fromBrowser.email) {
       const ident = Object.assign({}, fromBrowser, { source: "browser" });
@@ -605,6 +636,9 @@ async function harvestWithSafeStorage(safeStorage, opts) {
     if (pic) ident.pictureDataUrl = pic;
   } catch (e) {
     out.picErr = String(e && e.message || e);
+  }
+  if (activeProfileId() !== startProfile || activeProfileId() !== profileId) {
+    return { ok: false, error: "profile-switched-during-harvest", profileId };
   }
   writeCache(profileId, ident);
   out.ok = !!(ident.email || ident.pictureDataUrl || ident.authId);

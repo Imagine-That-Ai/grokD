@@ -20,15 +20,20 @@ mkdir -p "$BACKUP_DIR"
 [ -f "$ROOT/active-env.json" ] && cp "$ROOT/active-env.json" "$BACKUP_DIR/" || true
 [ -f "$ROOT/model-config.json" ] && cp "$ROOT/model-config.json" "$BACKUP_DIR/" || true
 
-# 2. Pull latest code from GitHub
+# 2. Pull code from GitHub
+PINNED_REF="${GROK_PINNED_REF:-main}"
 if [ -d "$ROOT/.git" ]; then
-  echo "✓ Pulling latest updates from GitHub..."
+  echo "✓ Pulling updates from GitHub (ref: $PINNED_REF)..."
   cd "$ROOT"
-  git fetch origin main
-  git reset --hard origin/main
+  git fetch origin "$PINNED_REF"
+  git checkout "$PINNED_REF" 2>/dev/null || git reset --hard "origin/$PINNED_REF"
 else
-  echo "✓ Workspace not initialized. Fresh cloning from GitHub..."
-  git clone https://github.com/Imagine-That-Ai/grokD.git "$ROOT.tmp"
+  echo "✓ Workspace not initialized. Fresh cloning from GitHub (ref: $PINNED_REF)..."
+  rm -rf "$ROOT.tmp"
+  if ! git clone --depth=1 --branch "$PINNED_REF" https://github.com/Imagine-That-Ai/grokD.git "$ROOT.tmp"; then
+    echo "ERROR: Failed to clone ref $PINNED_REF from GitHub" >&2
+    exit 1
+  fi
   mkdir -p "$ROOT"
   cp -R "$ROOT.tmp/"* "$ROOT/"
   rm -rf "$ROOT.tmp"

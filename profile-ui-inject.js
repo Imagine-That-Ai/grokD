@@ -3,6 +3,7 @@
   const fs = require("fs");
   const os = require("os");
   const path = require("path");
+  const http = require("http");
   const { spawn, execFileSync } = require("child_process");
   const ROOT = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
   const STORE = path.join(ROOT, "profiles.json");
@@ -13,7 +14,11 @@
   const COMMAND = path.join(RUNTIME, "command.json");
   const RESULT = path.join(RUNTIME, "result.json");
   const ACTIVE_AGENT = path.join(ROOT, "hack", "box-data", "agents", "active-agent.json");
-  const AUTH = "Bearer fake-gateway-token";
+  // Disk-loaded overlay: the guard may not be installed yet, so every use is optional.
+  function secGuardMod() {
+    try { return require(path.join(ROOT, "security-guard.js")); } catch { return null; }
+  }
+  const AUTH = "Bearer " + ((secGuardMod() || {}).getGatewayToken?.() || "");
   let models;
   try { models = require(path.join(ROOT, "model-lib.js")); } catch { models = null; }
 
@@ -164,8 +169,23 @@
     try { return require(p); } catch { return null; }
   }
 
+  function escHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   function escAttr(s) {
-    return String(s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/\n/g, "&#10;");
+    return escHtml(s).replace(/\n/g, "&#10;");
+  }
+
+  // Fails closed to the mascot/letter avatar when security-guard is unreachable.
+  function sanitizeImageUrl(u) {
+    const g = secGuardMod();
+    return g && g.sanitizeImageUrl ? g.sanitizeImageUrl(u) : null;
   }
 
   // Small, durable UI choices. localStorage would do, but it lives in the seat's
@@ -794,12 +814,23 @@
   const _svgCache = {};
   function getGalleryIconSvg(iconName, asCircle = true) {
     if (!iconName) return null;
+    const secGuard = secGuardMod();
+    if (!secGuard || typeof secGuard.isValidGalleryIconName !== "function" || typeof secGuard.sanitizeSvg !== "function") return null;
+    if (!secGuard.isValidGalleryIconName(iconName)) return null;
     const cacheKey = iconName + (asCircle ? "_circle" : "_raw");
     if (_svgCache[cacheKey]) return _svgCache[cacheKey];
     try {
-      const p = path.join(ROOT, "gallery-icons", iconName);
+      const galleryDir = path.join(ROOT, "gallery-icons");
+      const p = path.resolve(galleryDir, path.basename(iconName));
+      if (!p.startsWith(galleryDir + path.sep)) return null;
       if (fs.existsSync(p)) {
+        const st = fs.lstatSync(p);
+        if (st.isSymbolicLink() || !st.isFile()) return null;
+        const real = fs.realpathSync(p);
+        if (!real.startsWith(galleryDir + path.sep)) return null;
         let raw = fs.readFileSync(p, "utf8");
+        raw = secGuard.sanitizeSvg(raw);
+        if (!raw) return null;
         if (asCircle) {
           raw = raw.replace(/<rect x="0" y="0" width="512" height="512" rx="\d+" ry="\d+"\s*\/>/g, '<circle cx="256" cy="256" r="256" />')
                    .replace(/<rect width="512" height="512" rx="\d+"\s*\/>/g, '<circle cx="256" cy="256" r="256" />')
@@ -823,10 +854,19 @@
     { name: "Platinum Frost", hex: "#e2e8f0", glow: "rgba(255, 255, 255, 0.55)" }
   ];
 
+  function sanitizeHexColor(colorHex, fallback = "#8b5cf6") {
+    const s = String(colorHex || "").trim();
+    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(s)) {
+      return s;
+    }
+    return fallback;
+  }
+
   function getProfileColorInfo(colorHex) {
-    const found = BOT_COLORS.find((c) => c.hex.toLowerCase() === String(colorHex || "").toLowerCase());
+    const sanitized = sanitizeHexColor(colorHex);
+    const found = BOT_COLORS.find((c) => c.hex.toLowerCase() === sanitized.toLowerCase());
     if (found) return found;
-    return { name: "Custom", hex: colorHex || "#8b5cf6", glow: "rgba(139, 92, 246, 0.65)" };
+    return { name: "Custom", hex: sanitized, glow: "rgba(139, 92, 246, 0.65)" };
   }
 
   function getProfileMascotSvg(profile, id) {
@@ -859,20 +899,31 @@
     modal.id = "grok-icon-picker-modal";
 
     let iconFiles = [];
+    const secGuard = secGuardMod();
     try {
       const gDir = path.join(ROOT, "gallery-icons");
       if (fs.existsSync(gDir)) {
-        iconFiles = fs.readdirSync(gDir).filter((f) => f.endsWith(".svg")).sort();
+        iconFiles = fs.readdirSync(gDir).filter((f) => {
+          if (secGuard && secGuard.isValidGalleryIconName) {
+            return secGuard.isValidGalleryIconName(f);
+          }
+          return /^[a-zA-Z0-9_-]+\.svg$/.test(f);
+        }).sort();
       }
     } catch (_) {}
+
+    const escapeAttr = (s) => String(s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const escapeText = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
     const curColor = profile.color || "#8b5cf6";
     const colorSwatchesHtml = BOT_COLORS.map((c) => {
       const isSelected = curColor.toLowerCase() === c.hex.toLowerCase();
+      const safeHex = escapeAttr(c.hex);
+      const safeName = escapeAttr(c.name);
       return `
-        <button type="button" class="gp-color-opt" data-color="${c.hex}" title="${c.name}" style="
+        <button type="button" class="gp-color-opt" data-color="${safeHex}" title="${safeName}" style="
           width:28px;height:28px;border-radius:50%;cursor:pointer;
-          background:${c.hex};border:${isSelected ? "2.5px solid #fff" : "1.5px solid rgba(255,255,255,0.35)"};
+          background:${safeHex};border:${isSelected ? "2.5px solid #fff" : "1.5px solid rgba(255,255,255,0.35)"};
           box-shadow:${isSelected ? "0 0 16px " + c.glow : "0 2px 8px rgba(0,0,0,0.3)"};
           transform:${isSelected ? "scale(1.15)" : "scale(1)"};transition:all 0.15s ease;
         "></button>
@@ -883,8 +934,11 @@
       const isSelected = profile.icon === file;
       const cleanName = file.replace(/^icon_\d+_/, "").replace(/\.svg$/, "").replace(/([A-Z])/g, " $1");
       const iconSvg = getGalleryIconSvg(file, true);
+      const safeFile = escapeAttr(file);
+      const safeTitle = escapeAttr(cleanName);
+      const safeText = escapeText(cleanName);
       return `
-        <button type="button" class="gp-icon-opt" data-file="${file}" title="${cleanName}" style="
+        <button type="button" class="gp-icon-opt" data-file="${safeFile}" title="${safeTitle}" style="
           display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 6px;border-radius:16px;
           background:${isSelected ? "var(--gd-pill-active)" : "var(--gd-btn-sec-bg)"};
           border:1.5px solid ${isSelected ? "var(--gd-green)" : "var(--gd-border-subtle)"};
@@ -895,7 +949,7 @@
             ${iconSvg || ""}
           </div>
           <span style="font-size:9.5px;font-weight:${isSelected ? "700" : "500"};color:var(--gd-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60px;text-transform:capitalize">
-            ${cleanName}
+            ${safeText}
           </span>
         </button>
       `;
@@ -910,7 +964,7 @@
       ">
         <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--gd-border-subtle);padding-bottom:12px">
           <div>
-            <div style="font-weight:700;font-size:16px;color:var(--gd-text)">Customize ${profile.name}</div>
+            <div style="font-weight:700;font-size:16px;color:var(--gd-text)">Customize ${escHtml(profile.name)}</div>
             <div style="font-size:12px;color:var(--gd-text-muted);margin-top:2px">Choose an avatar and accent color for this account</div>
           </div>
           <button type="button" id="gip-close" style="background:none;border:none;color:var(--gd-text-dim);cursor:pointer;padding:4px;display:flex;align-items:center">
@@ -940,22 +994,37 @@
 
     modal.querySelector("#gip-close").addEventListener("click", closeIconPicker);
     
+    // Both pickers write one field on the active profile, then refresh chrome.
+    function persistProfileField(field, value, okMsg, errTag, failMsg) {
+      try {
+        const storeMod = require(path.join(ROOT, "profile-store.js"));
+        const fresh = storeMod.load();
+        const p = (fresh.profiles || []).find((x) => x.id === targetProfileId);
+        if (p) {
+          p[field] = value;
+          storeMod.save(fresh);
+        }
+        toast(okMsg);
+      } catch (err) {
+        logRendererError(errTag, err);
+        toast(failMsg);
+      }
+    }
+
+    function refreshProfileChrome() {
+      paintLoginChip();
+      const v = document.getElementById("grok-profile-veil");
+      if (v) veil();
+    }
+
     modal.querySelectorAll(".gp-color-opt").forEach((btn) => {
       btn.addEventListener("click", () => {
         const pickedColor = btn.getAttribute("data-color");
         if (pickedColor) {
-          profile.color = pickedColor;
-          try {
-            fs.writeFileSync(STORE, JSON.stringify(storeData, null, 2) + "\n");
-            toast("Updated color theme for " + profile.name);
-          } catch (err) {
-            logRendererError("save-color", err);
-            toast("Unable to save color theme");
-          }
+          persistProfileField("color", pickedColor,
+            "Updated color theme for " + profile.name, "save-color", "Unable to save color theme");
           openGalleryIconPicker(targetProfileId);
-          paintLoginChip();
-          const v = document.getElementById("grok-profile-veil");
-          if (v) veil();
+          refreshProfileChrome();
         }
       });
     });
@@ -964,18 +1033,10 @@
       btn.addEventListener("click", () => {
         const pickedFile = btn.getAttribute("data-file");
         if (pickedFile) {
-          profile.icon = pickedFile;
-          try {
-            fs.writeFileSync(STORE, JSON.stringify(storeData, null, 2) + "\n");
-            toast("Updated mascot icon for " + profile.name);
-          } catch (err) {
-            logRendererError("save-icon", err);
-            toast("Unable to save mascot icon");
-          }
+          persistProfileField("icon", pickedFile,
+            "Updated mascot icon for " + profile.name, "save-icon", "Unable to save mascot icon");
           closeIconPicker();
-          paintLoginChip();
-          const v = document.getElementById("grok-profile-veil");
-          if (v) veil();
+          refreshProfileChrome();
         }
       });
     });
@@ -1039,7 +1100,7 @@
       const pColor = getProfileColorInfo(p.color);
       const mascotSvg = getProfileMascotSvg(p, p.id);
       return `
-        <button type="button" class="gv-pill-btn" data-id="${p.id}" style="
+        <button type="button" class="gv-pill-btn" data-id="${escAttr(p.id)}" style="
           flex:1;min-width:68px;padding:7px 8px;border-radius:10px;cursor:pointer;
           background:${isCur ? "var(--gd-pill-active)" : "transparent"};
           border:${isCur ? "1px solid " + pColor.hex : "1px solid transparent"};
@@ -1051,7 +1112,7 @@
           <span style="width:18px;height:18px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;box-shadow:0 0 6px ${pColor.glow}">
             ${mascotSvg || getProviderInfo(p.id, p.id).icon}
           </span>
-          <span>${p.name || `Seat ${letter}`}</span>
+          <span>${escHtml(p.name || `Seat ${letter}`)}</span>
         </button>
       `;
     }).join("");
@@ -1360,11 +1421,20 @@
         live && fs.existsSync(live) ? live : null
       );
       if (!src) return false;
+      // Account-scope binding: ensure the descriptor matches the active profile's expected scope
+      const currentScope = box.accountScopeFromSecrets(seat4Root());
+      try {
+        const descData = JSON.parse(fs.readFileSync(src, "utf8"));
+        if (descData.accountScope && currentScope && descData.accountScope !== currentScope) {
+          try { fs.rmSync(dst, { force: true }); } catch (_) {}
+          return false;
+        }
+      } catch (_) {}
       if (fs.existsSync(dst) && fs.statSync(dst).mtimeMs >= fs.statSync(src).mtimeMs) return false;
       fs.copyFileSync(src, dst);
       return true;
     } catch (e) {
-      try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[seed-desc] " + e + "\n"); } catch (_) {}
+      try { fs.appendFileSync(path.join(ROOT, "runtime", "renderer.log"), "[seed-desc] " + e + "\n"); } catch (_) {}
       return false;
     }
   }
@@ -1404,7 +1474,7 @@
           out.tokDecrypt = "ok";
           out.tokLen = plain.length;
           out.tokJwt = (plain.match(/\./g) || []).length >= 2;
-          out.tokPrefix = plain.slice(0, 24);
+          out.hasToken = true;
         } catch (e) {
           out.tokDecrypt = String(e && e.message || e);
         }
@@ -2214,14 +2284,26 @@
       let agents = [];
       if (active.kind === "local") {
         try {
-          const raw = execFileSync("curl", [
-            "-sS", "-X", "POST", "http://127.0.0.1:1337/api/listAgents",
-            "-H", "content-type: application/json",
-            "-H", "authorization: Bearer fake-gateway-token",
-            "-d", "{}",
-          ], { encoding: "utf8", timeout: 4000 });
-          const j = JSON.parse(raw);
-          agents = Array.isArray(j) ? j : [];
+          const raw = await new Promise((res) => {
+            const req = http.request({
+              hostname: "127.0.0.1",
+              port: 1337,
+              path: "/api/listAgents",
+              method: "POST",
+              headers: { "content-type": "application/json", authorization: AUTH },
+              timeout: 4000,
+            }, (r) => {
+              const c = [];
+              r.on("data", (d) => c.push(d));
+              r.on("end", () => {
+                try { res(JSON.parse(Buffer.concat(c).toString("utf8"))); } catch { res([]); }
+              });
+            });
+            req.on("error", () => res([]));
+            req.write("{}");
+            req.end();
+          });
+          agents = Array.isArray(raw) ? raw : [];
         } catch {}
       }
       const focus = agents.find((a) => a && a.isRunning) || agents[0] || null;
@@ -2244,19 +2326,30 @@
         } catch {}
       }
       const { act } = require(path.join(ROOT, "failover-act.js"));
-      const sendPrompt = (id, text) => {
+      const sendPrompt = (id, text) => new Promise((resolve) => {
         try {
-          execFileSync("curl", [
-            "-sS", "-X", "POST", "http://127.0.0.1:1337/api/sendPrompt",
-            "-H", "content-type: application/json",
-            "-H", "authorization: Bearer fake-gateway-token",
-            "-d", JSON.stringify({ agentId: id, prompt: String(text || ""), awaitTurn: false }),
-          ], { encoding: "utf8", timeout: 8000 });
-          return true;
-        } catch (e) {
-          return false;
+          const payload = JSON.stringify({ agentId: id, prompt: String(text || ""), awaitTurn: false });
+          const req = http.request({
+            hostname: "127.0.0.1",
+            port: 1337,
+            path: "/api/sendPrompt",
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: AUTH,
+              "content-length": Buffer.byteLength(payload),
+            },
+            timeout: 8000,
+          }, (res) => {
+            resolve(res.statusCode >= 200 && res.statusCode < 300);
+          });
+          req.on("error", () => resolve(false));
+          req.write(payload);
+          req.end();
+        } catch {
+          resolve(false);
         }
-      };
+      });
       const r = await act(decision, {
         relaunch: decision.action === "cursor" || decision.action === "local-chief" || decision.action === "local-clone",
         lastUser,
@@ -2907,17 +3000,17 @@
 
     const seatFace = (p, snap, size) => {
       const px = size || 28;
-      const letter = seatAbbrev(p.id);
+      const letter = escHtml(seatAbbrev(p.id));
       const mascot = getProfileMascotSvg(p, p.id);
-      const photo = snap.photo;
+      const photo = sanitizeImageUrl(snap.photo);
       const box = `width:${px}px;height:${px}px;border-radius:50%;overflow:hidden;flex:0 0 ${px}px;display:flex;align-items:center;justify-content:center`;
-      if (photo && (String(photo).indexOf("data:image") === 0 || /^https:\/\//i.test(photo))) {
-        return `<span class="gd-seat-face" style="${box}"><img src="${photo}" alt="" style="width:100%;height:100%;object-fit:cover"></span>`;
+      if (photo) {
+        return `<span class="gd-seat-face" style="${box}"><img src="${escAttr(photo)}" alt="" style="width:100%;height:100%;object-fit:cover"></span>`;
       }
       if (mascot) {
         return `<span class="gd-seat-face" style="${box}">${mascot}</span>`;
       }
-      return `<span class="gd-seat-face" style="${box};background:${p.color || "#52525b"};color:#fff;font:700 ${Math.max(10, px * 0.42)}px/${px}px -apple-system,sans-serif">${letter}</span>`;
+      return `<span class="gd-seat-face" style="${box};background:${escAttr(p.color || "#52525b")};color:#fff;font:700 ${Math.max(10, px * 0.42)}px/${px}px -apple-system,sans-serif">${letter}</span>`;
     };
 
     const quotaBar = (pid, kind) => {
@@ -2929,9 +3022,9 @@
       const col = !known ? "var(--gd-text-dim)" : w >= 90 ? "#fca5a5" : w >= 70 ? "#fbbf24" : "#34d399";
       const label = known ? Math.round(w) + "%" : "—";
       const tip = seatHoverText(pid, q);
-      return `<div class="gd-quota" data-quota-id="${pid}" title="${escAttr(tip)}" data-tip="${escAttr(tip)}">
+      return `<div class="gd-quota" data-quota-id="${escAttr(pid)}" title="${escAttr(tip)}" data-tip="${escAttr(tip)}">
         <span class="gd-quota-track"><span class="gd-quota-fill" style="width:${w}%;background:${col}"></span></span>
-        <span class="gd-quota-n" style="color:${col}">${label}</span>
+        <span class="gd-quota-n" style="color:${col}">${escHtml(label)}</span>
       </div>`;
     };
 
@@ -2947,14 +3040,14 @@
       const stopTip = seatHoverText(p.id, q);
       const stopped = botsPaused(p.id);
       return `
-        <div class="whimsical-model-item grok-swap-item${isCur ? " is-active-model" : ""}${stopped ? " is-stopped" : ""}" data-id="${p.id}" style="--glow-color:${pColor.glow}">
+        <div class="whimsical-model-item grok-swap-item${isCur ? " is-active-model" : ""}${stopped ? " is-stopped" : ""}" data-id="${escAttr(p.id)}" style="--glow-color:${escAttr(pColor.glow)}">
           ${seatFace(p, snap, 20)}
           <span style="min-width:0;flex:1">
-            <span style="display:block;font-size:11px;font-weight:700;color:#ffffff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${letter} · ${p.name || p.id}</span>
-            <span style="display:block;font-size:9.5px;color:rgba(255,255,255,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub}</span>
+            <span style="display:block;font-size:11px;font-weight:700;color:#ffffff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(letter)} · ${escHtml(p.name || p.id)}</span>
+            <span style="display:block;font-size:9.5px;color:rgba(255,255,255,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(sub)}</span>
             ${quotaBar(p.id, p.kind)}
           </span>
-          ${switchBtn(stopped, "is-stop", `data-seat-stop="${p.id}" title="${escAttr(stopTip)}" data-tip="${escAttr(stopTip)}"`)}
+          ${switchBtn(stopped, "is-stop", `data-seat-stop="${escAttr(p.id)}" title="${escAttr(stopTip)}" data-tip="${escAttr(stopTip)}"`)}
         </div>
       `;
     }).join("");
@@ -2963,8 +3056,8 @@
       <div class="gd-seat-scroll">
         <div class="active-provider-hero-pill">
           <span style="width:7px;height:7px;border-radius:50%;${statusDot};flex:0 0 7px"></span>
-          <span style="font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${profile ? profile.name : fmt.title}</span>
-          <span style="font-size:10px;opacity:.55;margin-left:auto;white-space:nowrap">${statusText}</span>
+          <span style="font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(profile ? profile.name : fmt.title)}</span>
+          <span style="font-size:10px;opacity:.55;margin-left:auto;white-space:nowrap">${escHtml(statusText)}</span>
           <button type="button" id="grok-idcard-toggle" class="gd-idtoggle${idCollapsed ? " is-collapsed" : ""}" title="Account details" aria-expanded="${idCollapsed ? "false" : "true"}">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
@@ -2976,11 +3069,11 @@
         <div class="gd-idcard${idCollapsed ? " is-collapsed" : ""}" id="grok-idcard">
           <div class="gd-idrow">
             <span class="gd-idk">Account</span>
-            <span class="gd-idv ${fmt.email || fmt.hover ? "" : "is-dim"}" title="${fmt.email || fmt.hover || fmt.full || ""}">${fmt.email || fmt.hover || "No account bound"}</span>
+            <span class="gd-idv ${fmt.email || fmt.hover ? "" : "is-dim"}" title="${escAttr(fmt.email || fmt.hover || fmt.full || "")}">${escHtml(fmt.email || fmt.hover || "No account bound")}</span>
           </div>
           <div class="gd-idrow">
             <span class="gd-idk">Seat</span>
-            <span class="gd-idseat">${id}</span>
+            <span class="gd-idseat">${escHtml(id)}</span>
           </div>
         </div>
 
@@ -3010,6 +3103,11 @@
             ${isLocalSeat(id) || (profile && profile.kind === "local") ? "" : `<button type="button" id="grok-menu-clean-login" class="gd-iconbtn" title="Open Sign-In">${ICONS.browser}</button>`}
             <button type="button" id="grok-menu-pick-icon" class="gd-iconbtn" title="Change icon">${ICONS.palette}</button>
           </div>
+          <button type="button" id="grok-menu-setup-wizard" class="whimsical-model-item" title="Open the first-time setup wizard to configure seats & AI engine">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="var(--gd-aqua, #00f0ff)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            <span style="font-size:11px;font-weight:700;color:var(--gd-aqua, #00f0ff)">✨ Setup Wizard</span>
+            <span style="font-size:9.5px;opacity:.55;margin-left:auto">Re-run</span>
+          </button>
           <button type="button" id="grok-menu-setup-provider" class="whimsical-model-item" title="Configure OpenBurnBar, local models & API keys">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
             <span style="font-size:11px;font-weight:650">OpenBurnBar & Models</span>
@@ -3104,6 +3202,16 @@
         } catch (err) {
           toast("Update failed: " + err.message);
         }
+      });
+    }
+
+    const wizardBtn = menu.querySelector("#grok-menu-setup-wizard");
+    if (wizardBtn) {
+      wizardBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSeatActionMenu();
+        startOnboarding(true);
       });
     }
 
@@ -3242,31 +3350,117 @@
     const st = document.createElement("style");
     st.id = "gd-acc-chip-css";
     st.textContent = `
-      #grok-d-login-chip { position: relative; }
-      #grok-d-login-chip .gd-acc-photo img { width:100%;height:100%;object-fit:cover;display:block; }
-      #grok-d-login-chip .gd-acc-tip {
-        display:none;position:absolute;left:0;bottom:calc(100% + 8px);z-index:1;
-        padding:7px 11px;border-radius:10px;background:var(--gd-card-bg);
-        border:1px solid var(--gd-border);color:var(--gd-text);white-space:nowrap;
-        font:600 11px/1.3 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;
-        box-shadow:var(--gd-shadow);backdrop-filter:blur(16px);
+      #grok-d-login-chip {
+        position: fixed;
+        left: 18px;
+        bottom: 18px;
+        z-index: 999990;
+        cursor: pointer;
+        text-align: left;
+        padding: 5px 12px 5px 7px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(24, 24, 28, 0.88);
+        color: #f4f4f5;
+        min-width: 175px;
+        max-width: 300px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        font: 600 11px/1.25 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+        user-select: none;
       }
-      #grok-d-login-chip:hover .gd-acc-tip, #grok-d-login-chip:focus .gd-acc-tip { display:block; }
+      #grok-d-login-chip:hover {
+        transform: translateY(-1.5px);
+        border-color: rgba(255, 255, 255, 0.24);
+        background: rgba(32, 32, 38, 0.94);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+      }
+      #grok-d-login-chip .gd-acc-photo {
+        position: relative;
+        overflow: visible !important;
+      }
+      #grok-d-login-chip .gd-acc-photo img {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        object-fit: cover;
+        display: block;
+      }
+      #grok-d-login-chip .gd-status-pip {
+        position: absolute;
+        bottom: -2px;
+        right: -2px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #10b981;
+        border: 2px solid #18181c;
+        box-shadow: 0 0 6px rgba(16, 185, 129, 0.8);
+        z-index: 2;
+        transition: background 0.2s ease;
+      }
+      #grok-d-login-chip .gd-status-pip.is-paused {
+        background: #f59e0b;
+        box-shadow: 0 0 6px rgba(245, 158, 11, 0.8);
+      }
+      #grok-d-login-chip .gd-status-pip.is-off {
+        background: #71717a;
+        box-shadow: none;
+      }
+      #grok-d-login-chip .gd-acc-tip {
+        display: none;
+        position: absolute;
+        left: 0;
+        bottom: calc(100% + 8px);
+        z-index: 1;
+        padding: 6px 10px;
+        border-radius: 10px;
+        background: #18181c;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: #f4f4f5;
+        white-space: nowrap;
+        font: 500 11px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(16px);
+      }
+      #grok-d-login-chip:hover .gd-acc-tip, #grok-d-login-chip:focus .gd-acc-tip { display: block; }
       #grok-d-login-chip .gd-stop-btn {
-        flex:0 0 30px;width:30px;height:30px;border-radius:10px;border:1px solid rgba(252,165,165,0.35);
-        background:rgba(127,29,29,0.45);color:#fecaca;display:inline-flex;align-items:center;justify-content:center;
-        cursor:pointer;padding:0;margin:0;
+        flex: 0 0 26px;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.06);
+        color: #fca5a5;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 0;
+        margin: 0;
+        transition: all 0.15s ease;
+      }
+      #grok-d-login-chip .gd-stop-btn:hover {
+        background: rgba(255, 255, 255, 0.12);
+        color: #ffffff;
       }
       #grok-d-login-chip .gd-stop-btn.is-paused {
-        background:rgba(16,185,129,0.18);border-color:rgba(52,211,153,0.4);color:#6ee7b7;
+        background: rgba(16, 185, 129, 0.15);
+        border-color: rgba(16, 185, 129, 0.3);
+        color: #10b981;
       }
-      #grok-d-login-chip .gd-stop-btn:hover { filter:brightness(1.12); }
     `;
     document.head.appendChild(st);
   }
 
   function setChipPhoto(photo, dataUrl, letter) {
     if (!photo) return;
+    let pip = photo.querySelector(".gd-status-pip");
     const ok = typeof dataUrl === "string" && dataUrl.indexOf("data:image") === 0;
     let img = photo.querySelector("img");
     if (ok) {
@@ -3277,12 +3471,26 @@
         photo.appendChild(img);
       }
       if (img.getAttribute("src") !== dataUrl) img.setAttribute("src", dataUrl);
-      Array.from(photo.childNodes).forEach((n) => { if (n.nodeType === 3) n.remove(); });
-      return;
+      Array.from(photo.childNodes).forEach((n) => {
+        if (n.nodeType === 3) n.remove();
+        else if (n !== img && n !== pip) n.remove();
+      });
+    } else {
+      if (img) img.remove();
+      let textNode = Array.from(photo.childNodes).find((n) => n.nodeType === 3);
+      if (textNode) {
+        textNode.textContent = letter || "?";
+      } else {
+        photo.insertBefore(document.createTextNode(letter || "?"), photo.firstChild);
+      }
+      photo.style.backgroundImage = "";
     }
-    if (img) img.remove();
-    photo.textContent = letter || "?";
-    photo.style.backgroundImage = "";
+    if (!pip) {
+      pip = document.createElement("span");
+      pip.className = "gd-status-pip";
+      pip.setAttribute("aria-hidden", "true");
+      photo.appendChild(pip);
+    }
   }
 
   function paintLoginChip() {
@@ -3295,12 +3503,12 @@
     if (!chip) {
       chip = el("div", `
         position:fixed;left:18px;bottom:18px;z-index:999990;cursor:pointer;text-align:left;
-        padding:7px 13px 7px 9px;border-radius:16px;border:1px solid var(--gd-border);
-        background:var(--gd-card-bg);color:var(--gd-text);min-width:170px;max-width:290px;
-        box-shadow:var(--gd-shadow);backdrop-filter:blur(20px) saturate(180%);
-        -webkit-backdrop-filter:blur(20px) saturate(180%);
-        font:700 11px/1.25 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;
-        display:flex;align-items:center;gap:9px;transition:transform 0.15s, border-color 0.15s;
+        padding:6px 12px 6px 8px;border-radius:999px;border:1px solid var(--gd-border);
+        background:var(--gd-card-bg);color:var(--gd-text);min-width:175px;max-width:300px;
+        box-shadow:var(--gd-shadow);backdrop-filter:blur(24px) saturate(190%);
+        -webkit-backdrop-filter:blur(24px) saturate(190%);
+        font:650 11px/1.25 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;
+        display:flex;align-items:center;gap:9px;transition:transform 0.18s cubic-bezier(0.16,1,0.3,1), border-color 0.18s ease;
       `);
       chip.id = "grok-d-login-chip";
       chip.setAttribute("role", "button");
@@ -3312,11 +3520,14 @@
     const stopOk = chip.querySelector("#gd-chip-stop");
     if (!chip.querySelector("span.gd-acc-photo") || !stopOk || stopOk.tagName !== "BUTTON") {
       chip.innerHTML = `
-        <span class='gd-acc-photo' aria-hidden='true' style='width:32px;height:32px;border-radius:50%;flex:0 0 32px;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;background:var(--gd-btn-sec-bg);border:1px solid var(--gd-border);color:var(--gd-text);font:700 14px/32px -apple-system,BlinkMacSystemFont,sans-serif'>D</span>
+        <span class='gd-acc-photo' aria-hidden='true' style='width:32px;height:32px;border-radius:50%;flex:0 0 32px;overflow:visible;display:inline-flex;align-items:center;justify-content:center;background:var(--gd-btn-sec-bg);border:1.5px solid var(--gd-border);color:var(--gd-text);font:700 13px/32px -apple-system,BlinkMacSystemFont,sans-serif'>
+          D
+          <span class='gd-status-pip' aria-hidden='true'></span>
+        </span>
         <span style='min-width:0;flex:1'>
-          <div class='gd-acc-title' style='color:var(--gd-text);font-weight:700;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'></div>
+          <div class='gd-acc-title' style='color:var(--gd-text);font-weight:750;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'></div>
           <div class='gd-acc-detail' style='color:var(--gd-text-muted);font-weight:500;font-size:10px;margin-top:1.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'></div>
-          <div class='gd-acc-hint' style='color:var(--gd-text-dim);font-weight:600;margin-top:2px;font-size:9px'>Click to swap or reset</div>
+          <div class='gd-acc-hint' style='color:var(--gd-text-dim);font-weight:600;margin-top:2px;font-size:9px'>Click to swap or configure</div>
         </span>
         <button type="button" class="gd-stop-btn" id="gd-chip-stop" title="Stop this seat">${ICONS.stop}</button>
         <button type="button" id="grok-d-chip-toggle" title="Collapse to the avatar" aria-label="Collapse account chip">
@@ -3376,6 +3587,7 @@
       const detail = chip.querySelector(".gd-acc-detail");
       const photo = chip.querySelector(".gd-acc-photo");
       const tip = chip.querySelector(".gd-acc-tip");
+      const pip = chip.querySelector(".gd-status-pip");
       const email = (fmt.email || (st && st.email) || "").trim();
       const hover = email || fmt.hover || "No email on this login";
 
@@ -3384,6 +3596,11 @@
         const base = email || fmt.detail || "";
         detail.textContent = botsPaused(id) ? (base ? "STOPPED · " + base : "STOPPED") : base;
         detail.style.color = botsPaused(id) ? "var(--gd-red-text)" : "";
+      }
+      if (pip) {
+        const pausedNow = botsPaused(id);
+        const signedNow = !!(fmt.signedIn || fmt.email || (st && (st.kind === "logged-in" || st.email)) || isLocalSeat(id));
+        pip.className = "gd-status-pip" + (pausedNow ? " is-paused" : (signedNow ? "" : " is-off"));
       }
       const chipTip = seatHoverText(id, (() => {
         try { return require(path.join(ROOT, "seat-quota.js")).cachedQuota(id); }
@@ -3515,14 +3732,8 @@
       if (j && j.activeAgentId) return j.activeAgentId;
     } catch {}
     try {
-      const raw = execFileSync("curl", [
-        "-sS", "-X", "POST", "http://127.0.0.1:1337/api/listAgents",
-        "-H", "content-type: application/json",
-        "-H", "authorization: Bearer fake-gateway-token",
-        "-d", "{}",
-      ], { encoding: "utf8", timeout: 8000 });
-      const agents = JSON.parse(raw);
-      const list = Array.isArray(agents) ? agents : (agents && agents.agents) || [];
+      const shim = require(path.join(ROOT, "gateway-shim.js"));
+      const list = shim.getLocalAgents();
       if (list[0] && list[0].id) return list[0].id;
     } catch {}
     return null;
@@ -3547,14 +3758,7 @@
   }
 
   function queuedNotice() {
-    const byClass = document.querySelector(".sand-queued-send-notice");
-    if (byClass) return byClass;
-    const nodes = document.querySelectorAll("span,div,button");
-    for (const n of nodes) {
-      const t = (n.textContent || "").trim();
-      if (/Will send when reconnected|Waiting to send/.test(t) && t.length < 200) return n.closest("div") || n;
-    }
-    return null;
+    return document.querySelector(".sand-queued-send-notice, [data-testid='sand-queued-send-notice']");
   }
 
   function queuedText(notice) {
@@ -3698,6 +3902,17 @@
     if (!cmd || !cmd.id || !cmd.op) return;
     const out = { id: cmd.id, op: cmd.op, ok: false, ts: Date.now() };
     try {
+      const tok = String(cmd.capability || cmd.authToken || cmd.token || "").trim();
+      const g = secGuardMod();
+      const authed = g && (
+        g.verifyGatewayAuth(tok) ||
+        g.verifySessionJwt(tok, "ui-bus") ||
+        g.verifySessionJwt(tok, "local-mcp") ||
+        g.verifySessionJwt(tok, "grokbot-proxy")
+      );
+      if (cmd.op !== "status" && !authed) {
+        throw new Error("Unauthorized UI command: invalid or missing capability token");
+      }
       if (cmd.op === "status") {
         const t = document.body ? document.body.innerText : "";
         const cover = document.querySelector(".sand-access-cover");
@@ -3708,7 +3923,7 @@
         try { sky = require(path.join(ROOT, "space-kernel.js")).onSky(); } catch {}
         out.ok = true;
         out.mode = mode();
-        out.identity = await identity();
+        out.identity = authed ? await identity() : null;
         out.model = currentModelId();
         out.composer = !!chat.composer;
         out.agent = !!chat.agent;
@@ -3799,13 +4014,24 @@
     try { fs.writeFileSync(RESULT, JSON.stringify(out)); } catch {}
   }
 
-  function pollCommand() {
+  let _cmdInFlight = false;
+  async function pollCommand() {
+    if (_cmdInFlight) return;
     try {
       if (!fs.existsSync(COMMAND)) return;
-      const cmd = JSON.parse(fs.readFileSync(COMMAND, "utf8"));
-      fs.unlinkSync(COMMAND);
-      handleCommand(cmd);
-    } catch {}
+      const proc = path.join(path.dirname(COMMAND), `.proc-cmd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+      fs.renameSync(COMMAND, proc);
+      const cmd = JSON.parse(fs.readFileSync(proc, "utf8"));
+      fs.unlinkSync(proc);
+      _cmdInFlight = true;
+      try {
+        await handleCommand(cmd);
+      } finally {
+        _cmdInFlight = false;
+      }
+    } catch {
+      _cmdInFlight = false;
+    }
   }
 
   function inject() {
@@ -4042,20 +4268,33 @@
       const jobFile = path.join(RUNTIME, "continue-job.json");
       if (fs.existsSync(jobFile) && mode() === "local") {
         const job = JSON.parse(fs.readFileSync(jobFile, "utf8"));
-        fs.unlinkSync(jobFile);
         const text = String((job && job.text) || "");
         const id = job && job.agentId;
         if (text && id) {
           setTimeout(() => {
             try {
-              execFileSync("curl", [
-                "-sS", "-X", "POST", "http://127.0.0.1:1337/api/sendPrompt",
-                "-H", "content-type: application/json",
-                "-H", "authorization: Bearer fake-gateway-token",
-                "-d", JSON.stringify({ agentId: id, prompt: text, awaitTurn: false }),
-              ], { encoding: "utf8", timeout: 8000 });
+              const payload = JSON.stringify({ agentId: id, prompt: text, awaitTurn: false });
+              const req = http.request({
+                hostname: "127.0.0.1",
+                port: 1337,
+                path: "/api/sendPrompt",
+                method: "POST",
+                headers: {
+                  "content-type": "application/json",
+                  authorization: AUTH,
+                  "content-length": Buffer.byteLength(payload),
+                },
+                timeout: 8000,
+              }, (res) => {
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                  try { fs.unlinkSync(jobFile); } catch (_) {}
+                }
+              });
+              req.on("error", () => {});
+              req.write(payload);
+              req.end();
             } catch (e) {
-              try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[continue-job] " + e + "\n"); } catch (_) {}
+              try { fs.appendFileSync(path.join(ROOT, "runtime", "renderer.log"), "[continue-job] " + e + "\n"); } catch (_) {}
             }
           }, 2500);
         }

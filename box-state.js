@@ -5,6 +5,8 @@
 
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
+const secGuard = require("./security-guard");
 
 const REL = [
   "sand-secrets.json",
@@ -16,9 +18,7 @@ const REL = [
 
 function copyFile(src, dst) {
   if (!src || !fs.existsSync(src)) return false;
-  fs.mkdirSync(path.dirname(dst), { recursive: true });
-  fs.copyFileSync(src, dst);
-  return true;
+  return secGuard.copyFile0600(src, dst);
 }
 
 function readJson(p) {
@@ -28,10 +28,13 @@ function readJson(p) {
 
 function isRemoteConnection(fileOrObj) {
   const j = typeof fileOrObj === "string" ? readJson(fileOrObj) : fileOrObj;
-  if (!j || typeof j.baseUrl !== "string") return false;
+  if (!j || typeof j !== "object" || Array.isArray(j)) return false;
+  if (typeof j.baseUrl !== "string") return false;
   const u = j.baseUrl;
   if (!u || u.includes("127.0.0.1") || u.includes("localhost")) return false;
-  return /^https:\/\//i.test(u);
+  if (!/^https:\/\//i.test(u) || !secGuard.isApprovedRemoteComputerDescriptor(u)) return false;
+  if (j.token !== undefined && typeof j.token !== "string") return false;
+  return true;
 }
 
 function connectionPath(root) {
@@ -54,10 +57,18 @@ function clearCursorHost(seat4) {
   for (const rel of files) {
     try { fs.rmSync(path.join(seat4, rel), { force: true }); } catch {}
   }
+  resetForeignSettings(seat4, null);
 }
 
 function isLoopbackUrl(url) {
-  return typeof url === "string" && /127\.0\.0\.1|localhost/.test(url);
+  if (!url || typeof url !== "string") return false;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
+  } catch {
+    return false;
+  }
 }
 
 function clearLoopbackFile(file) {
@@ -75,7 +86,10 @@ function clearLocalLeftovers(seat4) {
     n += 1;
     try { fs.rmSync(path.join(seat4, "daemon-data", "local-exec-daemon-credential.json"), { force: true }); } catch {}
   }
-  if (clearLoopbackFile(connectionPath(seat4))) n += 1;
+  if (clearLoopbackFile(connectionPath(seat4))) {
+    n += 1;
+    try { fs.rmSync(path.join(seat4, "sand-data", "local-exec-daemon-credential.json"), { force: true }); } catch {}
+  }
   return n > 0;
 }
 
@@ -86,11 +100,11 @@ function clearLocalDaemonLeftover(seat4) {
 function writeLocalHost(seat4) {
   const payload = JSON.stringify({
     baseUrl: "http://127.0.0.1:1337",
-    token: "fake-gateway-token",
-  });
+    token: secGuard.getGatewayToken(),
+  }, null, 2) + "\n";
   for (const p of [connectionPath(seat4), daemonConnectionPath(seat4)]) {
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, payload);
+    secGuard.ensureDir0700(path.dirname(p));
+    secGuard.writeFile0600(p, payload);
   }
 }
 
@@ -177,6 +191,7 @@ function installConnection(fromFile, seat4) {
     path.join(fromRoot, "sand-data", "settings.json"),
     path.join(seat4, "sand-data", "settings.json")
   );
+  resetForeignSettings(seat4, accountScopeFromSecrets(seat4));
   // A leftover local :1337 in daemon-data makes official try this-Mac
   // local-exec, which then dies with "desktop ownership lost".
   try { fs.rmSync(daemonConnectionPath(seat4), { force: true }); } catch {}
@@ -184,14 +199,64 @@ function installConnection(fromFile, seat4) {
   return true;
 }
 
-function snapshotHost(seat4, destRoot) {
-  const copied = [];
-  for (const rel of REL) {
-    if (copyFile(path.join(seat4, rel), path.join(destRoot, rel === "sand-secrets.json" || rel === "gateway-descriptor.json" ? path.join("secrets", path.basename(rel)) : rel))) {
-      copied.push(rel);
+// destRoot has to belong to the profile that is active right now, or a switch
+// landing mid-snapshot writes one profile's secrets into another's directory.
+// A tmp destRoot is an isolated test and always passes.
+function destMatchesActiveProfile(root, destRoot, isTmp) {
+  if (isTmp) return true;
+  try {
+    const envPath = path.join(root, "active-env.json");
+    if (!fs.existsSync(envPath)) return true;
+    const env = JSON.parse(fs.readFileSync(envPath, "utf8"));
+    if (!env || !env.profileId) return true;
+    return path.resolve(destRoot) === path.resolve(path.join(root, "profile-data", env.profileId));
+  } catch { return true; }
+}
+
+function snapshotHost(seat4, destRoot, opts) {
+  const root = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
+  const allowSwitchLock = opts && opts.allowSwitchLock === true;
+  const isTmp = path.resolve(destRoot).startsWith(path.resolve(os.tmpdir()));
+
+  const lockPath = path.join(root, ".snapshot.lock");
+  const fd = secGuard.acquireFileLock(lockPath, { waitMs: 4000, staleMs: 15000 });
+  if (fd === null) return [];
+  try {
+    if (!allowSwitchLock) {
+      try {
+        const swLock = path.join(root, ".switch-profile.lock");
+        if (fs.existsSync(swLock)) {
+          const stat = fs.statSync(swLock);
+          if (Date.now() - stat.mtimeMs < 10000) {
+            return [];
+          }
+        }
+      } catch {}
+      if (!destMatchesActiveProfile(root, destRoot, isTmp)) return [];
     }
+
+    const copied = [];
+    const secDir = path.join(destRoot, "secrets");
+    secGuard.ensureDir0700(secDir);
+
+    // Sync secrets and credentials
+    for (const rel of REL) {
+      const isSecret = rel === "sand-secrets.json" || rel === "gateway-descriptor.json";
+      const src = path.join(seat4, rel);
+      const dest = isSecret ? path.join(secDir, path.basename(rel)) : path.join(destRoot, rel);
+      if (fs.existsSync(src)) {
+        if (copyFile(src, dest)) {
+          copied.push(rel);
+        }
+      } else {
+        // Clean up stale snapshot files when deleted on host logout
+        try { fs.rmSync(dest, { force: true }); } catch {}
+      }
+    }
+    return copied;
+  } finally {
+    secGuard.releaseFileLock(lockPath, fd);
   }
-  return copied;
 }
 
 function secretsPath(root) {
@@ -225,28 +290,35 @@ function resetForeignSettings(seat4, accountScope) {
   const p = path.join(seat4, "sand-data", "settings.json");
   const j = readJson(p);
   if (!j) return false;
-  const keys = [
-    "mcpCustomInstructionsAccountScope",
-    "hasSeenOnboardingAccountScope",
-  ];
   let changed = false;
-  for (const k of keys) {
-    if (!j[k]) continue;
-    if (!accountScope || j[k] !== accountScope) {
-      delete j[k];
+  if (j["mcpCustomInstructions"] !== undefined || j["mcpCustomInstructionsAccountScope"] !== undefined) {
+    if (!accountScope || !j["mcpCustomInstructionsAccountScope"] || j["mcpCustomInstructionsAccountScope"] !== accountScope) {
+      delete j["mcpCustomInstructions"];
+      delete j["mcpCustomInstructionsAccountScope"];
       changed = true;
     }
   }
-  if (!changed) return false;
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
-  return true;
+  if (j["hasSeenOnboarding"] !== undefined || j["hasSeenOnboardingAccountScope"] !== undefined) {
+    if (!accountScope || !j["hasSeenOnboardingAccountScope"] || j["hasSeenOnboardingAccountScope"] !== accountScope) {
+      delete j["hasSeenOnboarding"];
+      delete j["hasSeenOnboardingAccountScope"];
+      changed = true;
+    }
+  }
+  if (changed) {
+    secGuard.writeFile0600(p, JSON.stringify(j, null, 2) + "\n");
+    return true;
+  }
+  return false;
 }
 
-function decryptDescriptor(file, safeStorage) {
+function decryptDescriptor(file, safeStorage, expectedScope) {
   if (!safeStorage || !safeStorage.isEncryptionAvailable()) return null;
   const gd = readJson(file);
   if (!gd || typeof gd.encrypted !== "string") return null;
+  if (!expectedScope || !gd.accountScope || gd.accountScope !== expectedScope) {
+    return null;
+  }
   try {
     const conn = JSON.parse(safeStorage.decryptString(Buffer.from(gd.encrypted, "base64")));
     return isRemoteConnection(conn) ? conn : null;
@@ -255,37 +327,80 @@ function decryptDescriptor(file, safeStorage) {
   }
 }
 
-// Electron-only: turn a safeStorage gateway-descriptor into the plaintext VM URL.
+const _remoteProbeCache = new Map();
+
 function probeRemoteUrlSync(url, timeoutMs) {
-  const ms = timeoutMs == null ? 3500 : timeoutMs;
+  const ms = timeoutMs == null ? 1500 : Math.min(timeoutMs, 2000);
   if (!url || typeof url !== "string") return false;
-  if (!/^https?:\/\//i.test(url)) return false;
-  if (/127\.0\.0\.1|localhost/.test(url)) return true;
-  // curl, not `node -e`. The renderer cannot spawn a nested ContextifyScript.
+  if (url.includes("\\") || url.includes("@")) return false;
+  let parsed = null;
   try {
-    const out = require("child_process").execFileSync("curl", [
-      "-sS", "-o", "/dev/null", "-w", "%{http_code}",
-      "--max-time", String(Math.max(1, Math.ceil(ms / 1000))),
-      "-k", String(url).replace(/\/$/, "") + "/health",
-    ], { encoding: "utf8", timeout: ms + 800, stdio: ["ignore", "pipe", "ignore"] });
-    const code = Number(String(out).trim());
-    return Number.isFinite(code) && code > 0 && code !== 404 && code < 500;
+    parsed = new URL(url);
   } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) return false;
+  const host = parsed.hostname.toLowerCase();
+  if (host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]") return true;
+  if (parsed.protocol !== "https:") return false;
+  if (!secGuard.isApprovedRemoteComputerDescriptor(parsed.origin)) return false;
+
+  const canonical = parsed.origin;
+  const now = Date.now();
+  const cached = _remoteProbeCache.get(canonical);
+  if (cached && now - cached.t < 15000) return cached.healthy;
+
+  let pinnedIp = null;
+  try {
+    const ipOut = require("child_process").execFileSync("python3", [
+      "-c",
+      "import socket, sys\nprint(socket.gethostbyname(sys.argv[1]))",
+      host,
+    ], { encoding: "utf8", timeout: 1500, stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (ipOut && !secGuard.isPrivateOrLoopbackIp(ipOut)) {
+      pinnedIp = ipOut;
+    }
+  } catch (_) {}
+
+  if (!pinnedIp) {
+    _remoteProbeCache.set(canonical, { healthy: false, t: now });
+    return false;
+  }
+
+  try {
+    const maxTimeSec = Math.max(1, Math.ceil(ms / 1000));
+    const out = require("child_process").execFileSync("curl", [
+      "--proto", "=https",
+      "--resolve", `${host}:443:${pinnedIp}`,
+      "-sS", "-o", "/dev/null", "-w", "%{http_code}",
+      "--max-time", String(maxTimeSec),
+      canonical + "/health",
+    ], { encoding: "utf8", timeout: ms + 500, stdio: ["ignore", "pipe", "ignore"] });
+    const code = Number(String(out).trim());
+    const healthy = code === 200 || code === 204;
+    _remoteProbeCache.set(canonical, { healthy, t: now });
+    return healthy;
+  } catch {
+    _remoteProbeCache.set(canonical, { healthy: false, t: now });
     return false;
   }
 }
 
 function installFromDescriptor(seat4, safeStorage, extraFiles) {
+  const currentScope = accountScopeFromSecrets(seat4);
+  if (!currentScope) return null;
   const files = [
     path.join(seat4, "gateway-descriptor.json"),
     ...(Array.isArray(extraFiles) ? extraFiles : []),
   ];
   for (const file of files) {
-    const conn = decryptDescriptor(file, safeStorage);
+    const conn = decryptDescriptor(file, safeStorage, currentScope);
     if (!conn || !isRemoteConnection(conn)) continue;
+    const recheckedScope = accountScopeFromSecrets(seat4);
+    if (recheckedScope !== currentScope) continue;
     const dest = connectionPath(seat4);
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, JSON.stringify(conn));
+    secGuard.writeFile0600(dest, JSON.stringify(conn, null, 2));
     return conn.baseUrl;
   }
   return null;

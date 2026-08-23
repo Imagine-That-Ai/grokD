@@ -75,7 +75,11 @@ if [ "$MODE" = "local" ]; then
     startup_fail "Node.js is required for This Mac mode."
   fi
   export SAND_HOST_GATEWAY_URL="${SAND_HOST_GATEWAY_URL:-http://127.0.0.1:1337}"
-  export SAND_HOST_GATEWAY_TOKEN="${SAND_HOST_GATEWAY_TOKEN:-fake-gateway-token}"
+  GW_TOK=""
+  if [ -n "$NODE_BIN" ] && [ -f "$HOME_DST/security-guard.js" ]; then
+    GW_TOK=$("$NODE_BIN" -e "try{console.log(require('$HOME_DST/security-guard').getGatewayToken())}catch(e){}" 2>/dev/null || true)
+  fi
+  export SAND_HOST_GATEWAY_TOKEN="${GW_TOK:-$(head -c 32 /dev/urandom | xxd -p 2>/dev/null || od -An -tx1 -N32 /dev/urandom | tr -d ' \n')}"
   export SAND_BACKEND_URL="${SAND_BACKEND_URL:-http://127.0.0.1:8787}"
   if [ ! -f "$HOME_DST/ensure-local-box.sh" ]; then
     startup_fail "The local-box startup script is missing."

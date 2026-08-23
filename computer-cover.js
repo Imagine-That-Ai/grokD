@@ -3,20 +3,60 @@
 "use strict";
 
 const SELECTOR = ".sand-computer-couldnt-reach-dialog, .sand-computer-lifecycle-dialog";
+const CANDIDATE_SELECTOR = ".sand-computer-couldnt-reach-dialog, .sand-computer-lifecycle-dialog, [data-ui-dialog-root]";
+
+function isComputerDialog(element) {
+  if (!element) return false;
+  try {
+    if (element.matches && (element.matches(".sand-computer-couldnt-reach-dialog") || element.matches(".sand-computer-lifecycle-dialog"))) {
+      return true;
+    }
+  } catch {}
+  let t = String(element.textContent || "");
+  if (!t && typeof element.querySelectorAll === "function") {
+    try {
+      t = Array.from(element.querySelectorAll("button, h1, h2, h3, p, span, div"))
+        .map((node) => String(node && node.textContent || ""))
+        .join(" ");
+    } catch {}
+  }
+  return /Recover Grok Bot|Couldn.?t Reach|Reconnecting this seat|Grok Bot.?s Computer/i.test(t);
+}
+
+function findDialog(doc) {
+  if (!doc) return null;
+  // Keep compatibility with lightweight DOM adapters and older Electron
+  // surfaces that only implement querySelector for the legacy selectors.
+  if (typeof doc.querySelector === "function") {
+    for (const selector of SELECTOR.split(", ")) {
+      try {
+        const candidate = doc.querySelector(selector);
+        if (isComputerDialog(candidate)) return candidate;
+      } catch {}
+    }
+  }
+  if (typeof doc.querySelectorAll === "function") {
+    try {
+      const list = Array.from(doc.querySelectorAll(CANDIDATE_SELECTOR));
+      const match = list.find(isComputerDialog);
+      if (match) return match;
+    } catch {}
+  }
+  return null;
+}
 
 function buttons(doc) {
   if (!doc || typeof doc.querySelectorAll !== "function") return [];
-  try { return Array.from(doc.querySelectorAll("button")); }
+  const container = findDialog(doc);
+  if (!container) return [];
+  try { return Array.from(container.querySelectorAll("button")); }
   catch { return []; }
 }
 
 function overlayShowing(doc) {
   if (!doc) return false;
-  if (typeof doc.querySelector === "function") {
-    try {
-      if (doc.querySelector(".sand-computer-couldnt-reach-dialog")) return true;
-    } catch {}
-  }
+  const container = findDialog(doc);
+  if (container) return true;
   return buttons(doc).some((b) => /Recover Grok Bot/i.test(String(b.textContent || "")));
 }
 
@@ -41,25 +81,20 @@ function lostCopy(opts) {
 }
 
 function restyleLostDialog(doc, opts) {
-  if (!doc || typeof doc.querySelector !== "function") return false;
+  if (!doc || typeof doc.querySelectorAll !== "function") return false;
   const isLocal = !!(opts && opts.local);
-  const dialogs = doc.querySelectorAll(
-    SELECTOR + ", [data-ui-dialog-root]"
-  );
+  const dialogs = Array.from(doc.querySelectorAll(CANDIDATE_SELECTOR)).filter(isComputerDialog);
   let n = 0;
   dialogs.forEach((d) => {
-    const t = String(d.textContent || "");
-    if (/Recover Grok Bot|Couldn.?t Reach|Reconnecting this seat/i.test(t)) {
-      if (isLocal) {
-        const backdrop = (d.closest && d.closest("[data-ui-dialog-backdrop]")) || d.parentElement;
-        if (backdrop && backdrop !== doc.body && backdrop.contains(d)) backdrop.remove();
-        d.remove();
-        n += 1;
-      }
+    if (isLocal) {
+      const backdrop = (d.closest && d.closest("[data-ui-dialog-backdrop]")) || d.parentElement;
+      if (backdrop && backdrop !== doc.body && backdrop.contains(d)) backdrop.remove();
+      d.remove();
+      n += 1;
     }
   });
   if (isLocal) return n > 0;
-  const dialog = doc.querySelector(SELECTOR) || (overlayShowing(doc) ? doc.body : null);
+  const dialog = findDialog(doc);
   if (!dialog || typeof dialog.querySelectorAll !== "function") return false;
   const copy = lostCopy(opts);
   dialog.querySelectorAll("p, h2, h3, span, div").forEach((el) => {

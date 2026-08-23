@@ -6,9 +6,10 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { execFileSync } = require("child_process");
+const secGuard = require("./security-guard");
 
-const ENV = path.join(os.homedir(), ".grok", "grokbot-d", "active-env.json");
+const ROOT = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
+const ENV = path.join(ROOT, "active-env.json");
 
 function mode() {
   try { return JSON.parse(fs.readFileSync(ENV, "utf8")).mode || "local"; }
@@ -67,19 +68,98 @@ function isCreateTarget(el, doc) {
   return null;
 }
 
-function createViaBox(name) {
-  const body = JSON.stringify({
-    name: name || "New Bot",
-    description: "",
-    origin: "user",
+function createViaBoxAsync(name) {
+  return new Promise((resolve, reject) => {
+    const http = require("http");
+    const payload = JSON.stringify({
+      name: name || "New Bot",
+      description: "",
+      origin: "user",
+    });
+    // Mint narrowly-scoped session token for bot creation only
+    const token = secGuard.mintSessionJwt({ audience: "bot-create", expiresInSeconds: 15 });
+    const req = http.request({
+      hostname: "127.0.0.1",
+      port: 1337,
+      path: "/api/createAgent",
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${token}`,
+        "content-length": Buffer.byteLength(payload),
+      },
+      timeout: 4000,
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`Server error ${res.statusCode}: ${text.slice(0, 100)}`));
+        }
+        try {
+          const json = JSON.parse(text);
+          if (!json || (!json.agent && !json.id)) {
+            return reject(new Error("Invalid server response"));
+          }
+          resolve(json);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("Request timeout")); });
+    req.write(payload);
+    req.end();
   });
-  const raw = execFileSync("curl", [
-    "-sS", "-X", "POST", "http://127.0.0.1:1337/api/createAgent",
-    "-H", "content-type: application/json",
-    "-H", "authorization: Bearer fake-gateway-token",
-    "-d", body,
-  ], { encoding: "utf8", timeout: 12000 });
-  return JSON.parse(raw);
+}
+
+function createViaBox(name) {
+  // Sync fallback helper for CLI tests
+  const syncExec = require("child_process").execFileSync;
+  const data = JSON.stringify({ name: name || "New Bot", description: "", origin: "user" });
+  const token = secGuard.mintSessionJwt({ audience: "bot-create", expiresInSeconds: 15 });
+  const script = `
+    const http = require("http");
+    const chunks = [];
+    process.stdin.on("data", (c) => chunks.push(c));
+    process.stdin.on("end", () => {
+      const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      const req = http.request({
+        hostname: "127.0.0.1",
+        port: 1337,
+        path: "/api/createAgent",
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "authorization": "Bearer " + input.token,
+          "content-length": Buffer.byteLength(input.data),
+        },
+        timeout: 3500,
+      }, (res) => {
+        let b = "";
+        res.on("data", (c) => b += c);
+        res.on("end", () => {
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            console.error("HTTP " + res.statusCode);
+            process.exit(1);
+          }
+          console.log(b);
+        });
+      });
+      req.on("error", (e) => { console.error(e.message); process.exit(1); });
+      req.write(input.data);
+      req.end();
+    });
+  `;
+  const raw = syncExec("node", ["-e", script], {
+    input: JSON.stringify({ token, data }),
+    cwd: __dirname,
+    encoding: "utf8",
+    timeout: 4000,
+  });
+  return JSON.parse(raw.trim());
 }
 
 function reconnect() {
@@ -100,20 +180,26 @@ function toast(msg) {
   try { if (typeof window !== "undefined" && window.__gdToast) window.__gdToast(msg); } catch (e) {}
 }
 
-function createNamed(name) {
-  const r = createViaBox(name);
-  const nm = (r && r.agent && r.agent.name) || name;
-  toast("Created " + nm);
-  reconnect();
-  return r;
+async function createNamed(name) {
+  try {
+    const r = await createViaBoxAsync(name);
+    const nm = (r && r.agent && r.agent.name) || name;
+    toast("Created " + nm);
+    reconnect();
+    return r;
+  } catch (err) {
+    toast("Create bot failed: " + (err.message || err));
+    throw err;
+  }
 }
 
 function start() {
   if (typeof document === "undefined") return;
   if (document.documentElement._gdCreateBotHook) return;
   document.documentElement._gdCreateBotHook = true;
-  document.addEventListener("click", (e) => {
+  document.addEventListener("click", async (e) => {
     try {
+      if (e && e.isTrusted === false) return;
       if (mode() !== "local") return;
       const hit = isCreateTarget(e.target, document);
       if (!hit) return;
@@ -122,39 +208,42 @@ function start() {
       e.stopImmediatePropagation();
       if (hit.el._gdCreating) return;
       hit.el._gdCreating = true;
-      try { createNamed(hit.name); }
-      catch (err) { toast("Create bot failed: " + (err.message || err)); }
+      try { await createNamed(hit.name); }
+      catch { /* createNamed already toasted */ }
       finally { hit.el._gdCreating = false; }
     } catch (err) {
-      try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[create-bot] " + err + "\n"); } catch (e) {}
+      try { fs.appendFileSync(path.join(ROOT, "runtime", "renderer.log"), "[create-bot] " + err + "\n"); } catch (e) {}
     }
   }, true);
-  document.addEventListener("keydown", (e) => {
+  document.addEventListener("keydown", async (e) => {
     try {
+      if (e && e.isTrusted === false) return;
       if (mode() !== "local") return;
       if (e.key !== "Enter" && e.key !== "Tab") return;
+      const ae = document.activeElement;
+      const isSearchInput = ae && (ae.matches && ae.matches("input[placeholder*='Search or create'], input[aria-label*='Search or create']"));
+      if (!isSearchInput) return;
+
       const name = typedName(document);
       if (!name) return;
       const chip = [...document.querySelectorAll("button, [role='option']")]
         .find((el) => quotedCreateName(labelOf(el)));
       if (!chip) return;
-      const ae = document.activeElement;
-      const inComposer = !!(ae && (ae.matches && (ae.matches("input") || ae.matches("[contenteditable='true']"))));
-      if (!inComposer && e.key === "Tab") return;
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
       if (chip._gdCreating) return;
       chip._gdCreating = true;
-      try { createNamed(name); }
-      catch (err) { toast("Create bot failed: " + (err.message || err)); }
+      try { await createNamed(name); }
+      catch { /* createNamed already toasted */ }
       finally { chip._gdCreating = false; }
     } catch (err) {
-      try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[create-bot-key] " + err + "\n"); } catch (e) {}
+      try { fs.appendFileSync(path.join(ROOT, "runtime", "renderer.log"), "[create-bot-key] " + err + "\n"); } catch (e) {}
     }
   }, true);
 }
 
 module.exports = {
   start, createViaBox, isCreateTarget, quotedCreateName, typedName, labelOf, mode,
+  createNamed, reconnect,
 };

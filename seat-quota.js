@@ -18,11 +18,24 @@ function readJson(p, fallback) {
   catch { return fallback; }
 }
 
+const secGuard = require("./security-guard");
+
 function writeCache(map) {
+  const dir = path.dirname(CACHE);
+  secGuard.ensureDir0700(dir);
+  const lockFile = path.join(dir, ".seat-quota.lock");
+  const fd = secGuard.acquireFileLock(lockFile, { waitMs: 3000, staleMs: 15000 });
+  if (fd === null) {
+    return false;
+  }
   try {
-    fs.mkdirSync(path.dirname(CACHE), { recursive: true });
-    fs.writeFileSync(CACHE, JSON.stringify({ ts: Date.now(), seats: map }));
-  } catch {}
+    secGuard.writeJsonAtomic0600(CACHE, { ts: Date.now(), seats: map || {} });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    secGuard.releaseFileLock(lockFile, fd);
+  }
 }
 
 const EXHAUSTED_AT = 98;
@@ -45,13 +58,24 @@ function stampExhausted(prev, next, threshold, now) {
 }
 
 function remember(id, incoming, threshold, now) {
-  const seats = readCache();
-  const prev = seats[id];
-  const merged = Object.assign({}, incoming || {});
-  if (merged.nextResetMs == null && prev && prev.nextResetMs) merged.nextResetMs = prev.nextResetMs;
-  seats[id] = stampExhausted(prev, merged, threshold, now);
-  writeCache(seats);
-  return seats[id];
+  const dir = path.dirname(CACHE);
+  secGuard.ensureDir0700(dir);
+  const lockFile = path.join(dir, ".seat-quota.lock");
+  const fd = secGuard.acquireFileLock(lockFile, { waitMs: 4000, staleMs: 15000 });
+  if (fd === null) {
+    throw new Error("Failed to acquire seat-quota lock");
+  }
+  try {
+    const seats = readCache();
+    const prev = seats[id];
+    const merged = Object.assign({}, incoming || {});
+    if (merged.nextResetMs == null && prev && prev.nextResetMs) merged.nextResetMs = prev.nextResetMs;
+    seats[id] = stampExhausted(prev, merged, threshold, now);
+    secGuard.writeJsonAtomic0600(CACHE, { ts: Date.now(), seats: seats || {} });
+    return seats[id];
+  } finally {
+    secGuard.releaseFileLock(lockFile, fd);
+  }
 }
 
 function formatWall(ms) {
@@ -101,14 +125,70 @@ function activeProfileId() {
 }
 
 function profiles() {
-  const s = readJson(STORE, {});
-  return Array.isArray(s.profiles) ? s.profiles : [];
+  try {
+    const store = require("./profile-store");
+    const list = store.list();
+    return list.filter((p) => p && p.id && !store.RETIRED_IDS.includes(p.id));
+  } catch {
+    const s = readJson(STORE, {});
+    return Array.isArray(s.profiles) ? s.profiles.filter((p) => p && p.id && p.id !== "cursor-b" && p.id !== "cursor-c") : [];
+  }
+}
+
+function isSafeProfileDirectory(dirPath) {
+  if (!dirPath || typeof dirPath !== "string") return false;
+  const abs = path.resolve(dirPath);
+  if (!fs.existsSync(abs)) return false;
+  const rootAnchor = path.parse(abs).root;
+  let cur = rootAnchor;
+  const parts = path.relative(rootAnchor, abs).split(path.sep);
+  for (const part of parts) {
+    if (!part) continue;
+    cur = path.join(cur, part);
+    if (!fs.existsSync(cur)) return false;
+    const st = fs.lstatSync(cur);
+    if (st.isSymbolicLink()) return false;
+  }
+  const stFinal = fs.lstatSync(abs);
+  if (!stFinal.isDirectory()) return false;
+  return true;
+}
+
+function readSecretsFileSafely(filePath, parentDir) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  const st = fs.lstatSync(filePath);
+  if (st.isSymbolicLink() || !st.isFile()) return null;
+  const realFile = fs.realpathSync(filePath);
+  const realParent = fs.realpathSync(parentDir);
+  if (path.dirname(realFile) !== realParent) return null;
+  return readJson(filePath, null);
 }
 
 function userDataFor(profile) {
-  if (!profile) return null;
-  if (profile.id === activeProfileId()) return SEAT4;
-  return profile.sourceUserData || profile.identitySource || null;
+  if (!profile || !profile.id || typeof profile.id !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(profile.id)) return null;
+  if (profile.id === "cursor-b" || profile.id === "cursor-c") return null;
+  if (profile.id === activeProfileId()) {
+    if (isSafeProfileDirectory(SEAT4)) return SEAT4;
+    return null;
+  }
+  const cand = profile.identitySource || profile.sourceUserData || null;
+  if (!cand || typeof cand !== "string") return null;
+  if (cand.includes("..")) return null;
+  const norm = path.resolve(cand);
+  const allowedRoots = [
+    path.join(ROOT, "profile-data"),
+    path.join(ROOT, "box-data"),
+    path.join(os.homedir(), "Library", "Application Support", "Cursor"),
+    path.join(os.homedir(), ".cursor"),
+  ];
+  const realRoots = allowedRoots.map((r) => {
+    try { return fs.existsSync(r) ? fs.realpathSync(r) : path.resolve(r); } catch { return path.resolve(r); }
+  });
+  if (!isSafeProfileDirectory(norm)) return null;
+  const realNorm = fs.realpathSync(norm);
+  const isContained = realRoots.some((r) => realNorm === r || realNorm.startsWith(r + path.sep));
+  if (!isContained) return null;
+  return norm;
 }
 
 function decryptScopedToken(safeStorage, scoped) {
@@ -129,15 +209,18 @@ function decryptScopedToken(safeStorage, scoped) {
 }
 
 function tokenForProfile(profile, safeStorage) {
-  const root = userDataFor(profile);
-  if (!root) {
-    log(profile.id + " no-root");
-    return null;
-  }
-  const secPath = path.join(root, "sand-secrets.json");
-  const secrets = readJson(secPath, null);
+  if (!profile || !profile.id || typeof profile.id !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(profile.id)) return null;
+  let root = userDataFor(profile);
+  let secrets = root ? readSecretsFileSafely(path.join(root, "sand-secrets.json"), root) : null;
   if (!secrets) {
-    log(profile.id + " no-secrets " + secPath);
+    const profDir = path.join(ROOT, "profile-data", profile.id, "secrets");
+    if (isSafeProfileDirectory(profDir)) {
+      const saved = path.join(profDir, "sand-secrets.json");
+      secrets = readSecretsFileSafely(saved, profDir);
+    }
+  }
+  if (!secrets) {
+    log(profile.id + " no-secrets " + (root || "none"));
     return null;
   }
   const raw = secrets["cursor-access-token"] || secrets.accessToken || "";
@@ -153,7 +236,7 @@ function tokenForProfile(profile, safeStorage) {
 }
 
 function log(msg) {
-  try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[quota] " + msg + "\n"); } catch {}
+  secGuard.auditLog("quota", msg, "quota.log");
 }
 
 function postJson(url, token) {
@@ -241,10 +324,15 @@ function cachedQuota(id) {
 
 async function refreshProfile(profile, safeStorage) {
   if (!profile || profile.kind !== "cursor") return null;
+  const initialActive = activeProfileId();
   const tok = tokenForProfile(profile, safeStorage);
   log(profile.id + " token=" + (tok ? ("yes:" + tok.length) : "no"));
   const q = await fetchQuota(tok);
   if (!q) return cachedQuota(profile.id);
+  if (profile.id === initialActive && activeProfileId() !== initialActive) {
+    log(profile.id + " profile changed during quota fetch; skipped cache write");
+    return q;
+  }
   return remember(profile.id, q);
 }
 
@@ -272,4 +360,6 @@ module.exports = {
   refreshAll,
   refreshProfile,
   profiles,
+  userDataFor,
+  tokenForProfile,
 };

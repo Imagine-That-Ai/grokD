@@ -6,7 +6,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const ROOT = path.join(os.homedir(), ".grok", "grokbot-d");
+const ROOT = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
 const ASSETS = path.join(ROOT, "assets");
 const MENU_ID = "gd-cursor-model-menu";
 
@@ -15,12 +15,12 @@ function activeId() {
     const env = JSON.parse(fs.readFileSync(path.join(ROOT, "active-env.json"), "utf8"));
     if (env && env.profileId) return env.profileId;
   } catch (err) {
-    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[cursor-bubble] active-env read err: " + (err.message || err) + "\n"); } catch (_) {}
+    try { fs.appendFileSync(path.join(ROOT, "runtime", "renderer.log"), "[cursor-bubble] active-env read err: " + (err.message || err) + "\n"); } catch (_) {}
   }
   try {
     return JSON.parse(fs.readFileSync(path.join(ROOT, "profiles.json"), "utf8")).activeId || "";
   } catch (err) {
-    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[cursor-bubble] profiles.json read err: " + (err.message || err) + "\n"); } catch (_) {}
+    try { fs.appendFileSync(path.join(ROOT, "runtime", "renderer.log"), "[cursor-bubble] profiles.json read err: " + (err.message || err) + "\n"); } catch (_) {}
     return "";
   }
 }
@@ -33,7 +33,7 @@ function isCursorSeat() {
       .find((x) => x.id === id);
     return !!(p && p.kind === "cursor");
   } catch (err) {
-    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[cursor-bubble] isCursorSeat err: " + (err.message || err) + "\n"); } catch (_) {}
+    try { fs.appendFileSync(path.join(ROOT, "runtime", "renderer.log"), "[cursor-bubble] isCursorSeat err: " + (err.message || err) + "\n"); } catch (_) {}
     return false;
   }
 }
@@ -53,7 +53,7 @@ function currentModel() {
   try {
     return require(path.join(ROOT, "model-lib.js")).resolveConfig().model || "grok-4.6";
   } catch (err) {
-    try { fs.appendFileSync("/tmp/grokbot-renderer.log", "[cursor-bubble] currentModel resolve err: " + (err.message || err) + "\n"); } catch (_) {}
+    try { fs.appendFileSync(path.join(ROOT, "runtime", "renderer.log"), "[cursor-bubble] currentModel resolve err: " + (err.message || err) + "\n"); } catch (_) {}
     return "grok-4.6";
   }
 }

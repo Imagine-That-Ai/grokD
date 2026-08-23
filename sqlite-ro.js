@@ -23,12 +23,18 @@ function sqliteRead(db, sql, opts) {
       + "print('\\n'.join('' if r[0] is None else str(r[0]) for r in rows))\n",
       db, sql,
     ], { encoding, timeout, maxBuffer, stdio: ["ignore", "pipe", "pipe"] });
-  } catch {
+  } catch (err1) {
     try {
       return execFileSync("sqlite3", ["file:" + db + "?mode=ro&immutable=1", sql], {
         encoding, timeout, maxBuffer, stdio: ["ignore", "pipe", "pipe"],
       });
-    } catch {
+    } catch (err2) {
+      if (opts && opts.throwOnError) {
+        throw new Error(`sqliteRead failed: ${err2.message || err1.message}`);
+      }
+      if (opts && opts.allowNullOnError) {
+        return null;
+      }
       return "";
     }
   }

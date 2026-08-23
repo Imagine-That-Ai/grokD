@@ -8,7 +8,7 @@ function readVarint(buf, pos) {
     if (p >= buf.length) throw new Error("varint overrun");
     const b = buf[p++];
     result |= BigInt(b & 0x7f) << shift;
-    if ((b & 0x80) === 0) return [Number(result), p];
+    if ((b & 0x80) === 0) return [result, p];
     shift += 7n;
     if (shift > 63n) throw new Error("varint too long");
   }
@@ -23,8 +23,8 @@ function tryParse(buf) {
     let tag;
     try { tag = readVarint(buf, pos); } catch { return null; }
     pos = tag[1];
-    const fieldNo = tag[0] >>> 3;
-    const wireType = tag[0] & 7;
+    const fieldNo = Number(tag[0] >> 3n);
+    const wireType = Number(tag[0] & 7n);
     if (fieldNo === 0) return null;
     if (wireType === 0) {
       let v; try { v = readVarint(buf, pos); } catch { return null; }
@@ -36,7 +36,7 @@ function tryParse(buf) {
     } else if (wireType === 2) {
       let l; try { l = readVarint(buf, pos); } catch { return null; }
       pos = l[1];
-      const len = l[0];
+      const len = Number(l[0]);
       if (pos + len > buf.length) return null;
       fields.push({ fieldNo, wireType, value: buf.subarray(pos, pos + len) });
       pos += len;
@@ -62,9 +62,16 @@ function encodeVarint(v) {
 function encode(fields) {
   const parts = [];
   for (const f of fields) {
-    parts.push(encodeVarint((f.fieldNo << 3) | f.wireType));
-    if (f.wireType === 0) parts.push(encodeVarint(f.value));
-    else parts.push(f.value);
+    parts.push(encodeVarint((BigInt(f.fieldNo) << 3n) | BigInt(f.wireType)));
+    if (f.wireType === 0) {
+      parts.push(encodeVarint(f.value));
+    } else if (f.wireType === 2) {
+      const val = Buffer.isBuffer(f.value) ? f.value : Buffer.from(f.value);
+      parts.push(encodeVarint(val.length));
+      parts.push(val);
+    } else {
+      parts.push(f.value);
+    }
   }
   return Buffer.concat(parts);
 }

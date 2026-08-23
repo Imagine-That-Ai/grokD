@@ -7,8 +7,8 @@ jobs:
   door:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-node@60edb5dd545a775178f525247059d64022d9170e # v4.0.2
         with:
           node-version: "20"
       - name: unit door

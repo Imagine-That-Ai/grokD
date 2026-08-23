@@ -4,12 +4,26 @@
 
 const http = require("http");
 const https = require("https");
+const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const { tryParse, encode, rewriteProto } = require("./protoutil");
 const localMcp = require("./local-mcp");
 const bridgeLib = require("./bridge-lib");
-const { resolveTeammate, parseHandoffs, parseFileOps, allowedHackPath, safeRunCmd } = bridgeLib;
+const secGuard = require("./security-guard");
+const { resolveTeammate, parseHandoffs } = bridgeLib;
+
+function activeProfileId() {
+  try {
+    const acc = require("./account-identity");
+    if (typeof acc.activeProfileId === "function") return acc.activeProfileId();
+  } catch {}
+  try {
+    const store = require("./profile-store");
+    if (typeof store.getActive === "function") return store.getActive().id;
+  } catch {}
+  return "local-d";
+}
 
 const MODEL_CONFIG_PATH = "/tmp/grokbot-hack/model-config.json";
 
@@ -55,6 +69,15 @@ function sandAutomationId(agentId, localId) { // port of host Db(): sha256 -> uu
   return `${n.slice(0, 8)}-${n.slice(8, 12)}-5${n.slice(13, 16)}-${r}${n.slice(17, 20)}-${n.slice(20, 32)}`;
 }
 const AUTOMATION_RUNS_PATH = "/tmp/grokbot-hack/automation-runs.json";
+const AUTOMATIONS_STORE_PATH = "/tmp/grokbot-hack/box-data/automations-store.json";
+
+function loadAutomationsStore() {
+  try { return JSON.parse(fs.readFileSync(AUTOMATIONS_STORE_PATH, "utf8")); } catch { return {}; }
+}
+
+function saveAutomationsStore(store) {
+  try { secGuard.writeFile0600(AUTOMATIONS_STORE_PATH, JSON.stringify(store, null, 1)); } catch (_) {}
+}
 function handleAutomationPoll(bodyBuf) {
   const out = { events: [], nextPollAfterMs: 15000 };
   try {
@@ -92,7 +115,7 @@ function handleAutomationPoll(bodyBuf) {
           out.events.push({ id: runId, sandAgentId: agentId, automationId: sandAutomationId(agentId, localId), timestampMs: now });
           runs[runId] = { agentId, localId, firedAt: now };
           cfg.lastRunAt = now;
-          try { fs.writeFileSync(p, JSON.stringify(cfg, null, 2)); } catch {}
+          try { secGuard.writeFile0600(p, JSON.stringify(cfg, null, 2)); } catch {}
           console.log(`[automation] firing '${cfg.name}' agent=${agentId.slice(0, 8)} cron=${cron} run=${runId.slice(0, 8)}`);
           // Host often drops scheduled fires (user_away_paused / hash mismatch).
           // Actually run the prompt so routines produce chat, not just lastRunAt.
@@ -100,7 +123,7 @@ function handleAutomationPoll(bodyBuf) {
           if (prompt) {
             fetch("http://127.0.0.1:1337/api/sendPrompt", {
               method: "POST",
-              headers: { "content-type": "application/json", authorization: "Bearer fake-gateway-token" },
+              headers: { "content-type": "application/json", authorization: `Bearer ${secGuard.getGatewayToken()}` },
               body: JSON.stringify({ agentId, prompt: `[Routine: ${cfg.name}] ${prompt}`, awaitTurn: false }),
             }).then((r) => console.log(`[automation] sendPrompt '${cfg.name}' -> ${r.status}`))
               .catch((e) => console.log(`[automation] sendPrompt failed: ${e.message}`));
@@ -108,7 +131,7 @@ function handleAutomationPoll(bodyBuf) {
         }
       }
     }
-    try { fs.writeFileSync(AUTOMATION_RUNS_PATH, JSON.stringify(runs)); } catch {}
+    try { secGuard.writeFile0600(AUTOMATION_RUNS_PATH, JSON.stringify(runs)); } catch {}
   } catch (e) { console.log(`[automation] poll error: ${e.message}`); }
   return JSON.stringify(out);
 }
@@ -128,6 +151,13 @@ const TARGET_DEFAULT_URLS = {
   modal: "https://api.modal.run/v1/chat/completions"
 };
 
+// A configured apiKey only counts as a credential when it is non-blank and is
+// not one of the loopback/gateway markers.
+function explicitApiKey(cfg) {
+  const key = cfg && typeof cfg.apiKey === "string" ? cfg.apiKey.trim() : "";
+  return key && !secGuard.isGatewayOrLoopbackMarker(key) ? key : null;
+}
+
 function getModelConfig() {
   try {
     const lib = require(require("os").homedir() + "/.grok/grokbot-d/model-lib.js");
@@ -138,11 +168,16 @@ function getModelConfig() {
       const cfg = JSON.parse(fs.readFileSync(MODEL_CONFIG_PATH, "utf8"));
       const target = cfg.proxyTarget === "vibeproxy" ? "cliproxy" : (cfg.proxyTarget || "openburnbar");
       const defaultUrl = TARGET_DEFAULT_URLS[target] || TARGET_DEFAULT_URLS.openburnbar;
-      const defaultKey = (target === "openburnbar" || target === "cliproxy" || target === "vibeproxy") ? "local-cliproxy" : (process.env[`${target.toUpperCase()}_API_KEY`] || "local-cliproxy");
+      const defaultKey = (target === "openburnbar" || target === "cliproxy" || target === "vibeproxy") ? "" : (process.env[`${target.toUpperCase()}_API_KEY`] || "");
+
+      let safeProxyUrl = defaultUrl;
+      if (cfg.proxyUrl && secGuard.isApprovedProviderUrl(cfg.proxyUrl)) {
+        safeProxyUrl = cfg.proxyUrl;
+      }
 
       return {
-        proxyUrl: cfg.proxyUrl || defaultUrl,
-        apiKey: cfg.apiKey || defaultKey,
+        proxyUrl: safeProxyUrl,
+        apiKey: explicitApiKey(cfg) || defaultKey,
         model: cfg.model || "grok-4.6",
         proxyTarget: target,
         cursorAccount: cfg.cursorAccount || "Primary Cursor Account",
@@ -152,12 +187,31 @@ function getModelConfig() {
   } catch (e) {}
   return {
     proxyUrl: TARGET_DEFAULT_URLS.openburnbar,
-    apiKey: "local-cliproxy",
+    apiKey: "",
     model: "grok-4.6",
     proxyTarget: "openburnbar",
     cursorAccount: "Primary Cursor Account",
     payingProfileId: null,
   };
+}
+
+function makeModelAuthHeaders(cfg) {
+  const h = { "content-type": "application/json" };
+  const envKey = process.env.CLIPROXY_API_KEY ? process.env.CLIPROXY_API_KEY.trim() : "";
+  const safeEnvKey = envKey && !secGuard.isGatewayOrLoopbackMarker(envKey) ? envKey : null;
+  const explicitKey = safeEnvKey || explicitApiKey(cfg);
+  if (explicitKey) {
+    h["authorization"] = `Bearer ${explicitKey}`;
+  } else {
+    const url = (cfg && cfg.proxyUrl) || "";
+    if (url.includes("127.0.0.1") || url.includes("localhost") || url.includes("[::1]")) {
+      try {
+        const dynamicToken = secGuard.mintSessionJwt({ audience: "grokbot-proxy", expiresInSeconds: 120 });
+        if (dynamicToken) h["authorization"] = `Bearer ${dynamicToken}`;
+      } catch {}
+    }
+  }
+  return Object.assign(h, payingHeaders(cfg));
 }
 
 function payingHeaders(cfg) {
@@ -186,11 +240,6 @@ function encodeVarint(value) {
     out.push(b);
   } while (n > 0n);
   return Buffer.from(out);
-}
-
-function pbString(fieldNo, s) {
-  const body = Buffer.from(s, "utf8");
-  return Buffer.concat([encodeVarint((fieldNo << 3) | 2), encodeVarint(body.length), body]);
 }
 
 // extract conversation from StreamUnifiedChatRequest (field1=repeated ConversationMessage{text=1,type=2(USER=2/AI=1)})
@@ -279,7 +328,8 @@ function extractTools(reqBuf) {
 
 function setThinking(state) {
   try {
-    fs.writeFileSync("/tmp/grokbot-hack/is-thinking.json", JSON.stringify({ thinking: state, ts: Date.now() }));
+    secGuard.ensureDir0700("/tmp/grokbot-hack");
+    secGuard.writeFile0600("/tmp/grokbot-hack/is-thinking.json", JSON.stringify({ thinking: state, ts: Date.now() }));
   } catch {}
 }
 
@@ -298,7 +348,7 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
   // New model-selector code removed the old globals; derive per-request config
   // so this bridge path honors model-config.json (gpt-5.6-luna via cliproxy).
   const _cfg = getModelConfig();
-  const CLIPROXY = _cfg.proxyUrl, CLIPROXY_KEY = _cfg.apiKey, BRIDGE_MODEL = _cfg.model;
+  const CLIPROXY = _cfg.proxyUrl, BRIDGE_MODEL = _cfg.model;
   const fields = tryParse(reqBuf);
   if (!fields) return res.end();
   const messages = [];
@@ -356,12 +406,13 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
   const ANSWERED = globalThis.__grokdAnsweredTurns || (globalThis.__grokdAnsweredTurns = new Map());
   {
     const rebuilt = [];
+    const profId = activeProfileId() || "default";
     for (let i = 0; i < messages.length; i++) {
       rebuilt.push(messages[i]);
       const m = messages[i];
       if (m.role === "user") {
-        const key = m.content.slice(0, 120);
-        const ans = ANSWERED.get(key);
+        const hash = crypto.createHash("sha256").update(profId + ":" + String(m.content || "")).digest("hex");
+        const ans = ANSWERED.get(hash);
         const next = messages[i + 1];
         if (ans && (!next || next.role !== "assistant")) rebuilt.push({ role: "assistant", content: ans });
       }
@@ -371,7 +422,8 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
   console.log(`[${id}] BRIDGE-infer ${messages.length} msgs, ${tools.length} tools, model=${BRIDGE_MODEL}`);
   if (messages.length) {
     const last = messages[messages.length - 1];
-    console.log(`[${id}]   last(${last.role}): ${last.content.slice(0, 120).replace(/\n/g, " ")}`);
+    const redactedLast = secGuard.redactSensitiveText(String(last.content || "").slice(0, 120)).replace(/\n/g, " ");
+    console.log(`[${id}]   last(${last.role}): ${redactedLast}`);
   }
   function getActivePersonaPrompt() {
     try {
@@ -407,7 +459,7 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
   }
 
   const personaVoice = getActivePersonaPrompt();
-  const ENV_HINT = `Environment: LOCAL rig on this Mac. Shell/ExternalShell run live on this machine (projects under the home folder). Read/WebSearch/WebFetch work. GetMcpTools/CallMcpTool run via bridge. Don't claim tools are unavailable — use them. ${personaVoice}`;
+  const ENV_HINT = `Environment: Local workspace rig. Shell/ExternalShell run live on this machine. Read/WebSearch/WebFetch work. GetMcpTools/CallMcpTool run via bridge. Don't claim tools are unavailable — use them. ${personaVoice}`;
   const payload = [
     { role: "system", content: ENV_HINT },
     ...messages.slice(-40),
@@ -422,15 +474,17 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
     return Buffer.concat(out);
   };
   const callCliproxy = async (msgs, toolList, toolChoice, attempt = 0) => {
+    const targetEndpoint = CLIPROXY && secGuard.isApprovedProviderUrl(CLIPROXY) ? CLIPROXY : TARGET_DEFAULT_URLS.openburnbar;
     const body2 = { model: BRIDGE_MODEL, messages: msgs, stream: true };
     if (toolList?.length) body2.tools = toolList;
     if (toolChoice) body2.tool_choice = toolChoice;
     let up2;
     try {
-      up2 = await fetch(CLIPROXY, {
+      up2 = await fetch(targetEndpoint, {
         method: "POST",
-        headers: Object.assign({ "content-type": "application/json", authorization: `Bearer ${CLIPROXY_KEY}` }, payingHeaders(getModelConfig())),
+        headers: makeModelAuthHeaders(getModelConfig()),
         body: JSON.stringify(body2),
+        redirect: "error",
         signal: AbortSignal.timeout(120_000),
       });
     } catch (e) {
@@ -517,15 +571,18 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
   };
   const runReadLocally = async (tc) => {
     const a = parseArgs(tc);
-    const path = resolveReadPath(a.path);
+    const filePath = resolveReadPath(a.path);
+    if (!secGuard.isPathInWorkspace(filePath)) {
+      return `error reading ${filePath}: Permission denied (path outside allowed workspace or access restricted)`;
+    }
     try {
       const fsOk = require("fs");
-      const st = fsOk.statSync(path);
+      const st = fsOk.statSync(filePath);
       if (st.isDirectory()) {
-        const items = fsOk.readdirSync(path).slice(0, 200).join("\n");
-        return `directory listing of ${path}:\n${items}`;
+        const items = fsOk.readdirSync(filePath).slice(0, 200).join("\n");
+        return `directory listing of ${filePath}:\n${items}`;
       }
-      let text = fsOk.readFileSync(path, "utf8");
+      let text = fsOk.readFileSync(filePath, "utf8");
       const lines = text.split("\n");
       if (typeof a.offset === "number" || typeof a.limit === "number") {
         const off = Math.max(0, (a.offset || 1) - 1);
@@ -535,25 +592,25 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
       }
       const bytes = Buffer.byteLength(text);
       if (bytes > 16000) text = text.slice(0, 16000) + `\n…[truncated, file is ${bytes}B — read with offset/limit for more]`;
-      console.log(`[${id}] BRIDGE read local: ${path} -> ${bytes}B`);
+      console.log(`[${id}] BRIDGE read local: ${secGuard.redactSensitiveText(filePath)} -> ${bytes}B`);
       return text.length ? text : "(empty file)";
     } catch (e) {
-      return `error reading ${path}: ${e && e.message || e}`;
+      return `error reading ${filePath}: ${e && e.message || e}`;
     }
   };
   const runFetchLocally = async (tc) => {
     const a = parseArgs(tc);
-    const url = String(a.url);
+    const targetUrl = String(a.url);
     try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(20_000), redirect: "follow" });
-      const ct = r.headers.get("content-type") || "";
-      if (!/text|json|xml|html/i.test(ct)) return `fetched ${url}: ${r.status} ${ct} (binary, not inlined)`;
-      let text = await r.text();
+      const res = await secGuard.safeFetch(targetUrl, { timeoutMs: 20_000, maxBytes: 8 * 1024 * 1024 });
+      const ct = String(res.headers["content-type"] || "");
+      if (!/text|json|xml|html/i.test(ct)) return `fetched ${targetUrl}: ${res.status} ${ct} (binary, not inlined)`;
+      let text = res.body || "";
       if (text.length > 12000) text = text.slice(0, 12000) + "\n…[truncated]";
-      console.log(`[${id}] BRIDGE fetch local: ${url} -> ${r.status}, ${text.length}B`);
-      return `HTTP ${r.status}\n${text}`;
+      console.log(`[${id}] BRIDGE fetch local: ${secGuard.redactUrlParams(targetUrl)} -> ${res.status}, ${text.length}B`);
+      return `HTTP ${res.status}\n${text}`;
     } catch (e) {
-      return `error fetching ${url}: ${e && e.message || e}`;
+      return `error fetching ${targetUrl}: ${e && e.message || e}`;
     }
   };
   const searchDDG = async (term) => {
@@ -581,7 +638,7 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
   const searchBingRSS = async (term) => {
     const r = await fetch(`https://www.bing.com/search?q=${encodeURIComponent(term)}&format=rss`, {
       signal: AbortSignal.timeout(15_000),
-      headers: { "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36" },
+      headers: { "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36", accept: "application/rss+xml, text/xml" },
     });
     if (r.status !== 200) return null;
     const xml = await r.text();
@@ -602,9 +659,9 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
     try {
       // chain: DDG lite -> Bing RSS (DDG throttles bursts with HTTP 202)
       const ddg = await searchDDG(term).catch(() => null);
-      if (ddg) { console.log(`[${id}] BRIDGE search local(ddg): ${JSON.stringify(term).slice(0, 90)} -> ${ddg.length} results`); return fmt("duckduckgo", ddg); }
+      if (ddg) { console.log(`[${id}] BRIDGE search local(ddg): ${JSON.stringify(secGuard.redactSensitiveText(term)).slice(0, 90)} -> ${ddg.length} results`); return fmt("duckduckgo", ddg); }
       const bing = await searchBingRSS(term).catch(() => null);
-      if (bing) { console.log(`[${id}] BRIDGE search local(bing): ${JSON.stringify(term).slice(0, 90)} -> ${bing.length} results`); return fmt("bing", bing); }
+      if (bing) { console.log(`[${id}] BRIDGE search local(bing): ${JSON.stringify(secGuard.redactSensitiveText(term)).slice(0, 90)} -> ${bing.length} results`); return fmt("bing", bing); }
       return `no results for "${term}" — try WebFetch on a specific URL instead.`;
     } catch (e) {
       return `search failed for "${term}": ${e && e.message || e} — try WebFetch on a specific URL instead.`;
@@ -612,13 +669,15 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
   };
   const runMcpLocally = async (tc) => {
     const a = parseArgs(tc);
+    // callTool enforces the deny-by-default gate on mutating tools and reports it
+    // through res.error, so no separate pre-check is needed here.
     try {
       const res = await localMcp.callTool(a.server, a.toolName, (a.arguments && typeof a.arguments === "object") ? a.arguments : {});
       if (res.ok) {
         console.log(`[${id}] BRIDGE mcp local: ${a.server}.${a.toolName} -> ok, ${(res.text || "").length}B`);
         return (res.text || "(empty result)").slice(0, 12000);
       }
-      console.log(`[${id}] BRIDGE mcp local: ${a.server}.${a.toolName} -> error: ${String(res.error).slice(0, 120)}`);
+      console.log(`[${id}] BRIDGE mcp local: ${a.server}.${a.toolName} -> error: ${secGuard.redactSensitiveText(String(res.error)).slice(0, 120)}`);
       return `tool error: ${res.error}`;
     } catch (e) {
       return `tool error calling ${a.server}.${a.toolName}: ${e && e.message || e}`;
@@ -660,15 +719,21 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
   const createRoutine = (tc) => {
     const a = parseArgs(tc);
     const self = activeAgentIdNow();
+    const isCrossAgent = !!a.target_agent && a.target_agent !== self && a.target_agent !== "self";
     const target = a.target_agent ? resolveAgentDir(a.target_agent) : self;
     if (!target) return a.target_agent ? `error: unknown agent '${a.target_agent}'.` : "error: could not resolve current agent.";
-    const cron = String(a.cron).trim();
+    if (isCrossAgent && process.env.GROK_ALLOW_CROSS_AGENT_ROUTINES !== "1") {
+      return `error: creating routines targeting another agent ('${a.target_agent}') requires explicit cross-agent authorization.`;
+    }
+    const cron = String(a.cron || "").trim();
     const nxt = nextCronAfter(cron, Date.now());
     if (nxt == null) return `error: invalid cron '${cron}' — use 5 fields, e.g. '* * * * *'.`;
+    const prompt = String(a.prompt || "").slice(0, 2000);
+    if (!prompt.trim()) return `error: routine prompt cannot be empty.`;
     const dir = `${AGENTS_DIR}/${target}/automations/${crypto.randomUUID()}`;
-    fs.mkdirSync(dir, { recursive: true });
-    const cfg = { name: String(a.name).slice(0, 80), prompt: String(a.prompt).slice(0, 2000), schedule: cron, enabled: true, provenance: "user", createdAt: Date.now() };
-    fs.writeFileSync(`${dir}/automation.json`, JSON.stringify(cfg, null, 2));
+    secGuard.ensureDir0700(dir);
+    const cfg = { name: String(a.name || "Routine").slice(0, 80), prompt, schedule: cron, enabled: true, provenance: "user", createdAt: Date.now() };
+    secGuard.writeFile0600(`${dir}/automation.json`, JSON.stringify(cfg, null, 2));
     console.log(`[${id}] BRIDGE routine created: '${cfg.name}' cron=${cron} agent=${target.slice(0, 8)} next=${new Date(nxt).toISOString()}`);
     return `routine created: '${cfg.name}' on ${target === self ? "yourself" : a.target_agent} — cron '${cron}' (America/Chicago), next fire ${new Date(nxt).toLocaleString("en-US", { timeZone: "America/Chicago" })}. File: ${dir}/automation.json`;
   };
@@ -696,7 +761,7 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
   const hostGateway = async (method, body) => {
     const r = await fetch(`http://127.0.0.1:1337/api/${method}`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: "Bearer fake-gateway-token" },
+      headers: { "content-type": "application/json", authorization: `Bearer ${secGuard.getGatewayToken()}` },
       body: JSON.stringify(body || {}),
       signal: AbortSignal.timeout(20_000),
     });
@@ -794,70 +859,9 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
     }
     return [...(tcs || []), synthSend(extra.trim())];
   };
-  const allowedHackPath = bridgeLib.allowedHackPath;
-  const parseFileOps = bridgeLib.parseFileOps;
-  const safeRunCmd = bridgeLib.safeRunCmd;
-  const fulfillFileOps = async () => {
-    const lastUser = [...payload].reverse().find((m) => m.role === "user");
-    const ops = parseFileOps(lastUser?.content || "");
-    if (!ops.writes.length && !ops.runs.length) return { notes: [] };
-    const notes = [];
-    const fsOk = require("fs");
-    const pathOk = require("path");
-    for (const w of ops.writes) {
-      try {
-        fsOk.mkdirSync(pathOk.dirname(w.path), { recursive: true });
-        const body = w.content.endsWith("\n") ? w.content : `${w.content}\n`;
-        fsOk.writeFileSync(w.path, body);
-        notes.push(`wrote ${w.path} (${body.length}B)`);
-      } catch (e) {
-        notes.push(`write failed ${w.path}: ${e.message}`);
-      }
-    }
-    let lastOut = "";
-    for (const cmd of ops.runs) {
-      if (!safeRunCmd(cmd)) {
-        notes.push(`skipped unsafe run: ${cmd.slice(0, 80)}`);
-        continue;
-      }
-      try {
-        const out = await runShellLocally({ function: { name: "Shell", arguments: JSON.stringify({ command: cmd }) } });
-        lastOut = out;
-        notes.push(`ran: ${cmd.slice(0, 100)}`);
-      } catch (e) {
-        notes.push(`run failed: ${e.message}`);
-      }
-    }
-    if (ops.stdoutPath && lastOut) {
-      try {
-        const m = String(lastOut).match(/stdout:\n([\s\S]*?)(?:\nstderr:|$)/);
-        const stdout = m ? m[1] : lastOut;
-        fsOk.mkdirSync(pathOk.dirname(ops.stdoutPath), { recursive: true });
-        fsOk.writeFileSync(ops.stdoutPath, stdout.endsWith("\n") ? stdout : `${stdout}\n`);
-        notes.push(`stdout -> ${ops.stdoutPath}`);
-      } catch (e) {
-        notes.push(`stdout write failed: ${e.message}`);
-      }
-    }
-    return { notes };
-  };
-  const withForcedFileOps = async (tcs) => {
-    const { notes } = await fulfillFileOps();
-    if (!notes.length) return tcs;
-    console.log(`[${id}] BRIDGE forced-fileops: ${notes.join(" | ")}`);
-    const extra = ` ${notes.join("; ")}.`;
-    const sends = (tcs || []).filter((tc) => tc.function?.name === "SendMessage");
-    if (sends.length) {
-      try {
-        const a = JSON.parse(sends[0].function.arguments || "{}");
-        a.content = `${a.content || ""}${extra}`.trim();
-        sends[0].function.arguments = JSON.stringify(a);
-      } catch {}
-      return tcs;
-    }
-    return [...(tcs || []), synthSend(extra.trim())];
-  };
-  const withForcedExtras = async (tcs) => withForcedFileOps(await withForcedHandoffs(tcs));
+  // Prompt-derived arbitrary file writes are disabled for security: mutations
+  // must go through explicit structured tools, so handoffs are the only extra.
+  const withForcedExtras = withForcedHandoffs;
   const runShellLocally = async (tc) => {
     let args = {};
     try { args = JSON.parse(tc.function?.arguments || "{}"); } catch {}
@@ -867,32 +871,74 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
     const fsOk = require("fs");
     let cwd = "/tmp/grokbot-hack/box-data/workspace";
     try {
-      if (requested && fsOk.existsSync(requested) && fsOk.statSync(requested).isDirectory()) cwd = requested;
-      fsOk.mkdirSync(cwd, { recursive: true });
+      if (requested && secGuard.isPathInWorkspace(requested) && fsOk.existsSync(requested) && fsOk.statSync(requested).isDirectory()) {
+        cwd = requested;
+      }
+      secGuard.ensureDir0700(cwd);
     } catch {}
+
+    const validation = secGuard.parseAndValidateCommand(cmd, cwd, { readOnly: true, allowMutation: false });
+    if (!validation.ok) {
+      return `exit_code: 1\nstderr:\n[bridge] refused: ${validation.error}`;
+    }
+
     const t0 = Date.now();
     let stdout = "", stderr = "", code = null;
     try {
-      const { execFile } = require("child_process");
-      const shellBin = fsOk.existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/sh";
-      const shellArgs = shellBin.endsWith("zsh") ? ["-lc", cmd] : ["-c", cmd];
-      // Minimal env: no proxy/session secrets leak into agent shells.
+      const { spawn } = require("child_process");
+      // Direct binary execution without shell invocation (shell: false)
+      // Isolated environment: stripped host env to prevent credential/network leakage
       const env = {
         PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
         HOME: cwd, TMPDIR: "/tmp", LANG: "en_US.UTF-8", TERM: "dumb",
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_SYSTEM: "/dev/null",
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_PAGER: "cat",
+        GIT_EDITOR: ":",
+        EDITOR: ":",
+        VISUAL: ":",
+        PAGER: "cat",
       };
       const res = await new Promise((resolve) => {
-        const child = execFile(shellBin, shellArgs, { cwd, timeout: 60_000, maxBuffer: 8 * 1024 * 1024, env }, (err, so, se) => resolve({ err, so, se }));
-        child.on("error", (e) => resolve({ err: e, so: "", se: String(e && e.message || e) }));
+        let timedOut = false;
+        const child = spawn(validation.binary, validation.args, {
+          cwd: validation.cwd,
+          env,
+          shell: false,
+          detached: process.platform !== "win32",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let so = "", se = "";
+        child.stdout.on("data", (d) => { if (so.length < 8 * 1024 * 1024) so += d.toString("utf8"); });
+        child.stderr.on("data", (d) => { if (se.length < 8 * 1024 * 1024) se += d.toString("utf8"); });
+        const timer = setTimeout(() => {
+          timedOut = true;
+          try {
+            if (process.platform !== "win32" && child.pid) {
+              process.kill(-child.pid, "SIGKILL");
+            } else {
+              child.kill("SIGKILL");
+            }
+          } catch (_) {}
+        }, 60_000);
+        child.on("error", (e) => {
+          clearTimeout(timer);
+          resolve({ err: e, so: "", se: String(e && e.message || e) });
+        });
+        child.on("close", (exitCode, signal) => {
+          clearTimeout(timer);
+          if (timedOut) se += "\n[bridge] command timed out after 60s";
+          resolve({ err: (exitCode !== 0 || signal) ? { code: exitCode ?? 1, signal } : null, so, se });
+        });
       });
       stdout = res.so || ""; stderr = res.se || "";
       code = res.err && typeof res.err.code === "number" ? res.err.code : res.err ? 1 : 0;
-      if (res.err && res.err.killed) stderr += "\n[bridge] command timed out after 60s";
     } catch (e) {
       code = 1; stderr = String(e && e.message || e);
     }
     const out = `exit_code: ${code}\nstdout:\n${stdout.slice(0, 12000)}${stderr ? `\nstderr:\n${stderr.slice(0, 4000)}` : ""}`;
-    console.log(`[${id}] BRIDGE shell local (${Date.now() - t0}ms): ${JSON.stringify(cmd).slice(0, 140)} cwd=${cwd} -> exit ${code}, ${stdout.length + stderr.length}B${stderr ? ` err=${stderr.slice(0, 120).replace(/\n/g, " ")}` : ""}`);
+    console.log(`[${id}] BRIDGE exec local (${Date.now() - t0}ms): ${validation.binary} [${validation.args.join(" ")}] cwd=${validation.cwd} -> exit ${code}, ${stdout.length + stderr.length}B`);
     return out;
   };
   const synthSend = (content) => ({ id: "tc-synth-" + Math.random().toString(36).slice(2, 8), function: { name: "SendMessage", arguments: JSON.stringify({ type: "text", content }) } });
@@ -1092,7 +1138,9 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
         .map((t) => { try { return JSON.parse(t.function.arguments || "{}").content || ""; } catch { return ""; } })
         .join("\n").trim();
       if (lu && ans) {
-        ANSWERED.set(lu.content.slice(0, 120), ans.slice(0, 4000));
+        const profId = activeProfileId() || "default";
+        const hash = crypto.createHash("sha256").update(profId + ":" + String(lu.content || "")).digest("hex");
+        ANSWERED.set(hash, ans.slice(0, 4000));
         if (ANSWERED.size > 80) ANSWERED.delete(ANSWERED.keys().next().value);
       }
     } catch {}
@@ -1265,8 +1313,9 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
     }
     const up = await fetch(CLIPROXY, {
       method: "POST",
-      headers: Object.assign({ "content-type": "application/json", authorization: `Bearer ${CLIPROXY_KEY}` }, payingHeaders(getModelConfig())),
+      headers: makeModelAuthHeaders(getModelConfig()),
       body: JSON.stringify(body),
+      redirect: "error",
     });
     if (!up.ok || !up.body) throw new Error(`cliproxy ${up.status}`);
     const reader = up.body.getReader();
@@ -1341,7 +1390,9 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
     }
   }
   const responseBytes = Buffer.concat(responseChunks);
-  fs.writeFileSync(`/tmp/grokbot-bodies/${String(id).padStart(4, "0")}-INFERRES.bin`, responseBytes);
+  if (DUMP_BODIES) {
+    try { secGuard.writeFile0600(bodyDumpPath(id, "INFERRES"), responseBytes); } catch (_) {}
+  }
   let responsePos = 0, responseFrame = 0;
   while (responsePos + 5 <= responseBytes.length) {
     const responseLen = responseBytes.readUInt32BE(responsePos + 1);
@@ -1356,12 +1407,13 @@ async function _bridgeInferenceImpl(reqBuf, res, id) {
 }
 
 async function bridgeToCliproxy(reqBuf, res, id) {
-  const { proxyUrl: CLIPROXY, apiKey: CLIPROXY_KEY, model: BRIDGE_MODEL, proxyTarget } = getModelConfig();
+  const { proxyUrl: CLIPROXY, model: BRIDGE_MODEL } = getModelConfig();
   const convo = extractConversation(reqBuf);
   console.log(`[${id}] BRIDGE ${convo.length} msgs, model=${BRIDGE_MODEL}`);
   if (convo.length) {
     const last = convo[convo.length - 1];
-    console.log(`[${id}]   last(${last.role}): ${last.text.slice(0, 120).replace(/\n/g, " ")}`);
+    const redacted = secGuard.redactSensitiveText(last.text.slice(0, 120)).replace(/\n/g, " ");
+    console.log(`[${id}]   last(${last.role}): ${redacted}`);
   }
   // Keep last 40 messages, cap each at 24k chars
   const messages = [
@@ -1373,10 +1425,13 @@ async function bridgeToCliproxy(reqBuf, res, id) {
     "connect-protocol-version": "1",
   });
   try {
-    const up = await fetch(CLIPROXY, {
+    const targetEndpoint = CLIPROXY && secGuard.isApprovedProviderUrl(CLIPROXY) ? CLIPROXY : TARGET_DEFAULT_URLS.openburnbar;
+    const up = await fetch(targetEndpoint, {
       method: "POST",
-      headers: Object.assign({ "content-type": "application/json", authorization: `Bearer ${CLIPROXY_KEY}` }, payingHeaders(getModelConfig())),
+      headers: makeModelAuthHeaders(getModelConfig()),
       body: JSON.stringify({ model: BRIDGE_MODEL, messages, stream: true }),
+      redirect: "error",
+      signal: AbortSignal.timeout(120_000),
     });
     if (!up.ok || !up.body) throw new Error(`cliproxy ${up.status}: ${await up.text().catch(() => "")}`.slice(0, 300));
     const reader = up.body.getReader();
@@ -1396,14 +1451,14 @@ async function bridgeToCliproxy(reqBuf, res, id) {
           const j = JSON.parse(data);
           const delta = j.choices?.[0]?.delta?.content;
           if (typeof delta === "string" && delta.length > 0) {
-            res.write(connectFrame(pbString(1, delta))); // StreamUnifiedChatResponse.text
+            res.write(connectFrame(pbStr(1, delta))); // StreamUnifiedChatResponse.text
           }
         } catch {}
       }
     }
   } catch (e) {
     console.log(`[${id}] BRIDGE ERROR: ${e.message}`);
-    res.write(connectFrame(pbString(1, `[bridge error] ${e.message}`)));
+    res.write(connectFrame(pbStr(1, `[bridge error] ${e.message}`)));
   }
   res.end();
   console.log(`[${id}] BRIDGE done`);
@@ -1416,19 +1471,21 @@ function pbStr(fieldNo, s) { // length-delimited string field
 
 function syntheticEnsureSandBox() {
   const terminalsFolder = "/tmp/grokbot-hack/box-data/workspace/terminals";
-  try { fs.mkdirSync(terminalsFolder, { recursive: true }); } catch {}
+  try { secGuard.ensureDir0700(terminalsFolder); } catch {}
+  const execJwt = secGuard.mintSessionJwt({ sub: "grokbot-local", audience: "exec-daemon", expiresInSeconds: 3600 });
+  const gatewayJwt = secGuard.mintSessionJwt({ sub: "grokbot-local", audience: "gateway-bridge", expiresInSeconds: 3600 });
   return Buffer.concat([
-    pbStr(1, "local"),                       // cluster
-    pbStr(2, "grokbot-local"),                // tenant_id
-    pbStr(3, "pod-fakelocal-0001"),           // pod_id
-    pbStr(4, "nto-fake-local-token"),         // network_token
-    pbStr(5, "fake-daemon-auth-token"),       // exec_daemon_auth_token
-    pbStr(6, "http://127.0.0.1:1340"),        // exec_daemon_url
-    pbStr(7, "http://127.0.0.1:6080/vnc.html"), // vnc_url
-    pbStr(8, terminalsFolder),                 // terminals_folder
-    pbStr(12, "http://127.0.0.1:6081"),        // fork_vnc_base_url
-    pbStr(10, "http://127.0.0.1:1337"),        // gateway_url
-    pbStr(11, "fake-gateway-token"),           // gateway_token
+    pbStr(1, "local"),                                                       // cluster
+    pbStr(2, "grokbot-local"),                                               // tenant_id (neutral)
+    pbStr(3, "pod-" + crypto.randomUUID().slice(0, 8)),                     // pod_id
+    pbStr(4, secGuard.mintSessionJwt({ sub: "grokbot-local", audience: "network-token" })), // network_token
+    pbStr(5, execJwt),                                                      // exec_daemon_auth_token
+    pbStr(6, "http://127.0.0.1:1340"),                                       // exec_daemon_url
+    pbStr(7, "http://127.0.0.1:6080/vnc.html"),                                 // vnc_url
+    pbStr(8, terminalsFolder),                                                 // terminals_folder
+    pbStr(12, "http://127.0.0.1:6081"),                                        // fork_vnc_base_url
+    pbStr(10, "http://127.0.0.1:1337"),                                        // gateway_url
+    pbStr(11, gatewayJwt),                                                  // gateway_token (scoped JWT)
   ]);
 }
 
@@ -1436,10 +1493,53 @@ const LISTEN_PORT = parseInt(process.argv[2] || "8787", 10);
 const UPSTREAM_HOST = process.env.UPSTREAM_HOST || "api2.cursor.sh";
 const LOG_PATH = process.env.LOG_PATH || "/tmp/grokbot-proxy-calls.jsonl";
 const BODY_DUMP_DIR = "/tmp/grokbot-bodies";
+const DUMP_BODIES = process.env.GROK_DEBUG_DUMP_BODIES === "1";
 
-fs.mkdirSync(BODY_DUMP_DIR, { recursive: true });
-const PERIOD_USAGE_ORIG = fs.existsSync("/tmp/grokbot-bodies/0022-_aiserver.v1.DashboardService_GetCurrentPeriodUsage.res-head.bin")
-  ? fs.readFileSync("/tmp/grokbot-bodies/0022-_aiserver.v1.DashboardService_GetCurrentPeriodUsage.res-head.bin") : null;
+if (DUMP_BODIES) {
+  try { secGuard.ensureDir0700(BODY_DUMP_DIR); } catch (_) {}
+}
+function bodyDumpPath(id, kind) {
+  return path.join(BODY_DUMP_DIR, `${String(id).padStart(4, "0")}-${kind}.bin`);
+}
+const PERIOD_USAGE_FIXTURE = path.join(BODY_DUMP_DIR, "0022-_aiserver.v1.DashboardService_GetCurrentPeriodUsage.res-head.bin");
+const PERIOD_USAGE_ORIG = fs.existsSync(PERIOD_USAGE_FIXTURE) ? fs.readFileSync(PERIOD_USAGE_FIXTURE) : null;
+
+// verifyProxyBridgeAuth re-reads gateway.token and session.key from disk, and
+// several branches below ask the same question about one request. The header
+// cannot change mid-request, so memoize the verdict on the request object.
+function bridgeAuthorized(req) {
+  if (req._gdBridgeAuth === undefined) {
+    req._gdBridgeAuth = secGuard.verifyProxyBridgeAuth(req.headers["authorization"] || "");
+  }
+  return req._gdBridgeAuth;
+}
+
+// Bridge and gateway capabilities are interchangeable for local RPCs.
+function bridgeOrGatewayAuthorized(req) {
+  return bridgeAuthorized(req) || secGuard.verifyGatewayAuth(req.headers["authorization"] || "");
+}
+
+function mintLocalSessionPair() {
+  return {
+    access: secGuard.mintSessionJwt({ sub: "grokbot-local", email: "local@grokbot.internal", audience: "local-mcp", expiresInSeconds: 3600 }),
+    refresh: secGuard.mintSessionJwt({ sub: "grokbot-local", email: "local@grokbot.internal", audience: "grokbot-refresh", expiresInSeconds: 86400 * 30 }),
+  };
+}
+
+// Returns true (and answers 401) when the caller lacks a valid capability.
+function denyUnauthorized(req, res, detail) {
+  if (bridgeOrGatewayAuthorized(req)) return false;
+  res.writeHead(401, { "content-type": "application/json" });
+  res.end(JSON.stringify({ error: detail ? `Unauthorized: ${detail}` : "Unauthorized" }));
+  return true;
+}
+
+function appendSecureLog(entry) {
+  if (!LOG_PATH) return;
+  try {
+    secGuard.appendFile0600(LOG_PATH, JSON.stringify(entry) + "\n");
+  } catch (_) {}
+}
 
 // Map real box ports -> local fake box ports (identity: fake box listens on same ports)
 function rewriteBoxUrl(s) {
@@ -1460,122 +1560,160 @@ let reqCounter = 0;
 const server = http.createServer((req, res) => {
   const id = ++reqCounter;
   const chunks = [];
-  req.on("data", (c) => chunks.push(c));
+  let totalBytes = 0;
+  let oversized = false;
+  req.on("data", (c) => {
+    totalBytes += c.length;
+    if (totalBytes > 10 * 1024 * 1024) {
+      oversized = true;
+      req.destroy();
+      if (!res.headersSent) {
+        res.writeHead(413, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Payload Too Large" }));
+      }
+      return;
+    }
+    chunks.push(c);
+  });
   req.on("end", async () => {
+    if (oversized) return;
     const body = Buffer.concat(chunks);
-    const entry = { id, ts: new Date().toISOString(), method: req.method, url: req.url, contentType: req.headers["content-type"], reqBytes: body.length };
+    const entry = { id, ts: new Date().toISOString(), method: req.method, url: secGuard.redactUrlParams(req.url), contentType: req.headers["content-type"], reqBytes: body.length };
 
     // D-only OAuth callback. Tokens are stored in macOS Keychain by local-mcp.
     if (req.method === "GET" && req.url.startsWith("/callback")) {
       try {
         const result = await localMcp.handleOAuthCallback(new URL(req.url, "http://localhost").searchParams);
-        const out = Buffer.from(`<!doctype html><meta charset="utf-8"><title>Grok D connector</title><p>${result.body}</p>`);
+        const safeBody = secGuard.escHtml(result.body || "OAuth callback completed.");
+        const out = Buffer.from(`<!doctype html><meta charset="utf-8"><title>Grok D connector</title><p>${safeBody}</p>`);
         entry.status = result.status; entry.mutated = "LOCAL-MCP-oauth-callback"; entry.resBytes = out.length;
-        fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
-        res.writeHead(result.status, { "content-type": "text/html; charset=utf-8", "content-length": String(out.length) });
+        appendSecureLog(entry);
+        res.writeHead(result.status, {
+          "content-type": "text/html; charset=utf-8",
+          "content-length": String(out.length),
+          "content-security-policy": "default-src 'none'; style-src 'unsafe-inline';",
+          "x-content-type-options": "nosniff",
+        });
         return res.end(out);
       } catch (error) {
         entry.status = 500; entry.error = error.message || String(error);
-        fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
-        res.writeHead(500, { "content-type": "text/plain" });
+        appendSecureLog(entry);
+        res.writeHead(500, {
+          "content-type": "text/plain",
+          "content-security-policy": "default-src 'none';",
+          "x-content-type-options": "nosniff",
+        });
         return res.end("OAuth callback failed");
       }
     }
 
-    // DEV LOGIN: no Cursor account needed. App asks for a local session token; we mint one.
+    // DEV LOGIN: no Cursor account needed. App asks for a local session token; check capability before minting.
     if (req.url.startsWith("/auth/cursor_dev_session_token")) {
-      const b64u = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
-      const jwt = `${b64u({ alg: "none", typ: "JWT" })}.${b64u({ sub: "grokbot-local", email: "local@grokbot", exp: Math.floor(Date.now() / 1000) + 86400 * 365 })}.localsig`;
-      const out = Buffer.from(JSON.stringify({ accessToken: jwt, refreshToken: jwt }));
-      console.log(`[${id}] DEV LOGIN -> local session token minted`);
+      if (denyUnauthorized(req, res, "valid capability required to mint session token")) return;
+      const jwts = mintLocalSessionPair();
+      const out = Buffer.from(JSON.stringify({ accessToken: jwts.access, refreshToken: jwts.refresh }));
+      console.log(`[${id}] DEV LOGIN -> local session tokens minted`);
       entry.status = 200; entry.mutated = "DEV-LOGIN-local";
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      appendSecureLog(entry);
       res.writeHead(200, { "content-type": "application/json", "content-length": String(out.length) });
       return res.end(out);
     }
 
-    // TOKEN REFRESH: answer /oauth/token locally so the app never revokes itself
+    // TOKEN REFRESH: answer /oauth/token locally if caller provides valid refresh token or gateway capability
     if (req.url.startsWith("/oauth/token")) {
-      const b64u = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
-      const jwt = `${b64u({ alg: "none", typ: "JWT" })}.${b64u({ sub: "grokbot-local", email: "local@grokbot", exp: Math.floor(Date.now() / 1000) + 86400 * 365 })}.localsig`;
-      const out = Buffer.from(JSON.stringify({ access_token: jwt, refresh_token: jwt }));
-      console.log(`[${id}] REFRESH -> local token re-minted`);
+      const auth = req.headers.authorization || "";
+      const rawToken = auth.startsWith("Bearer ") ? auth.slice(7).trim() : auth.trim();
+      // A refresh-audience JWT is accepted on top of the usual bridge/gateway capabilities.
+      if (!secGuard.verifySessionJwt(rawToken, "grokbot-refresh") &&
+          denyUnauthorized(req, res, "valid refresh credential required")) return;
+      const jwts = mintLocalSessionPair();
+      const out = Buffer.from(JSON.stringify({ access_token: jwts.access, refresh_token: jwts.refresh }));
+      console.log(`[${id}] REFRESH -> local tokens rotated`);
       entry.status = 200; entry.mutated = "REFRESH-local";
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      appendSecureLog(entry);
       res.writeHead(200, { "content-type": "application/json", "content-length": String(out.length) });
       return res.end(out);
     }
 
     // FULL TAKEOVER: answer EnsureSandBox locally with synthetic fake box
-    if (req.url.includes("EnsureSandBox")) {
+    if (/(^|\/)aiserver\.v1\.SandService\/EnsureSandBox(\?|$)/i.test(req.url)) {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "Method Not Allowed" }));
+      }
+      if (denyUnauthorized(req, res, "valid capability required for EnsureSandBox")) return;
       const out = syntheticEnsureSandBox();
       entry.status = 200; entry.resBytes = out.length; entry.mutated = "SYNTHETIC-fakebox";
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      appendSecureLog(entry);
       console.log(`[${id}] SYNTHETIC EnsureSandBox -> fake box (${out.length}B)`);
       res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
       return res.end(out);
     }
 
-    // QUOTA FAKE for the APP: always healthy
-    if (req.url.includes("GetSandTrialClaimStatus")) {
-      entry.status = 200; entry.mutated = "SYNTHETIC-trial"; fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+    // QUOTA FAKE for the APP: always healthy (authenticated)
+    if (req.url.includes("GetSandTrialClaimStatus") && bridgeOrGatewayAuthorized(req)) {
+      entry.status = 200; entry.mutated = "SYNTHETIC-trial"; appendSecureLog(entry);
       res.writeHead(200, { "content-type": "application/proto" }); return res.end(Buffer.alloc(0));
     }
-    if (req.url.includes("GetCurrentPeriodUsage") && PERIOD_USAGE_ORIG) {
-      entry.status = 200; entry.resBytes = PERIOD_USAGE_ORIG.length; entry.mutated = "REPLAY-period-usage"; fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+    if (req.url.includes("GetCurrentPeriodUsage") && PERIOD_USAGE_ORIG && bridgeOrGatewayAuthorized(req)) {
+      entry.status = 200; entry.resBytes = PERIOD_USAGE_ORIG.length; entry.mutated = "REPLAY-period-usage"; appendSecureLog(entry);
       res.writeHead(200, { "content-type": "application/proto", "content-length": String(PERIOD_USAGE_ORIG.length) });
       return res.end(PERIOD_USAGE_ORIG);
     }
-    // QUOTA FAKE: usage shows zero / always available
-    if (req.url.includes("GetSandUsageStatus")) { /* ALL callers */
-      const out = fs.readFileSync("/tmp/grokbot-hack/usage-ok.bin");
+    // QUOTA FAKE: usage shows zero / always available (authenticated)
+    if (req.url.includes("GetSandUsageStatus") && bridgeOrGatewayAuthorized(req)) {
+      const out = fs.existsSync("/tmp/grokbot-hack/usage-ok.bin") ? fs.readFileSync("/tmp/grokbot-hack/usage-ok.bin") : Buffer.alloc(0);
       entry.status = 200; entry.resBytes = out.length; entry.mutated = "SYNTHETIC-usage-ok";
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      appendSecureLog(entry);
       res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
       return res.end(out);
     }
     // box-originated RPCs that need happy answers while token is dead:
 
     // INFERENCE BRIDGE: box InferenceService/Stream -> CLIProxy
-    if (req.url.includes("InferenceService/Stream") && (req.headers["authorization"] || "").match(/local-fake-token|localsig/)) {
+    if (req.url.includes("InferenceService/Stream") && bridgeAuthorized(req)) {
       let reqMsg = body;
       if (body.length > 5 && body[0] === 0) {
         const len = body.readUInt32BE(1);
         if (5 + len <= body.length) reqMsg = body.subarray(5, 5 + len);
       }
-      fs.writeFileSync(`/tmp/grokbot-bodies/${String(id).padStart(4, "0")}-INFERREQ.bin`, reqMsg);
+      if (DUMP_BODIES) {
+        secGuard.writeFile0600(bodyDumpPath(id, "INFERREQ"), reqMsg);
+      }
       entry.mutated = "BRIDGE-inference";
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      appendSecureLog(entry);
       return bridgeInference(reqMsg, res, id);
     }
 
     // INFERENCE BRIDGE: box-originated StreamUnified* -> CLIProxy / OpenBurnBar
-    if (req.url.includes("StreamUnified") && (req.headers["authorization"] || "").match(/local-fake-token|localsig/)) {
+    if (req.url.includes("StreamUnified") && bridgeAuthorized(req)) {
       // connect streaming: first frame is the request (5-byte prefix)
       let reqMsg = body;
       if (body.length > 5 && body[0] === 0) {
         const len = body.readUInt32BE(1);
         if (5 + len <= body.length) reqMsg = body.subarray(5, 5 + len);
       }
-      fs.writeFileSync(`/tmp/grokbot-bodies/${String(id).padStart(4, "0")}-STREAMREQ.bin`, reqMsg);
+      if (DUMP_BODIES) {
+        secGuard.writeFile0600(bodyDumpPath(id, "STREAMREQ"), reqMsg);
+      }
       entry.mutated = "BRIDGE-cliproxy";
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      appendSecureLog(entry);
       return bridgeToCliproxy(reqMsg, res, id);
     }
     // D-only MCP catalog/config/auth/tool bridge. This runs before the
     // read-only marketplace forwarder and never touches Seat C or Cursor.
-    if ((req.headers["authorization"] || "").match(/local-fake-token|localsig/)) {
+    if (bridgeAuthorized(req)) {
       try {
         const out = await localMcp.handleBackendRpc(req.url, body);
         if (out !== null) {
           entry.status = 200; entry.resBytes = out.length; entry.mutated = "LOCAL-MCP-bridge";
-          fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+          appendSecureLog(entry);
           res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
           return res.end(out);
         }
       } catch (error) {
         entry.status = 502; entry.error = error.message || String(error); entry.mutated = "LOCAL-MCP-error";
-        fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+        appendSecureLog(entry);
         res.writeHead(502, { "content-type": "application/proto" });
         return res.end(Buffer.alloc(0));
       }
@@ -1586,19 +1724,19 @@ const server = http.createServer((req, res) => {
       const os = require("os"); const u = os.userInfo(); const localName = u.username || "local";
       const out = Buffer.concat([pbStr(1, "local-auth-0001"), pbStr(3, localName + "@local"), pbStr(4, localName), pbStr(5, "User")]);
       console.log(`[${id}] FAKE GetMe -> ` + localName + "@local");
-      entry.status = 200; entry.mutated = "FAKE-GetMe"; fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      entry.status = 200; entry.mutated = "FAKE-GetMe"; appendSecureLog(entry);
       res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
       return res.end(out);
     }
     if (req.url.includes("GetUserPrivacyMode")) {
       const out = Buffer.from([0x08, 0x02]); // privacy_mode=2 (USAGE_DATA_TRAINING_ALLOWED)
-      entry.status = 200; entry.mutated = "FAKE-privacy"; fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      entry.status = 200; entry.mutated = "FAKE-privacy"; appendSecureLog(entry);
       res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
       return res.end(out);
     }
     if (req.url.includes("GetSandAccessStatus")) {
       const out = Buffer.from([0x08, 0x01]); // state=GRANTED
-      entry.status = 200; entry.mutated = "FAKE-access-GRANTED"; fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      entry.status = 200; entry.mutated = "FAKE-access-GRANTED"; appendSecureLog(entry);
       res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
       return res.end(out);
     }
@@ -1614,27 +1752,27 @@ const server = http.createServer((req, res) => {
       ]);
       const out = Buffer.concat([
         pbStr(1, model),
-        Buffer.concat([encodeVarint((2 << 3) | 2), encodeVarint(modelMsg.length), modelMsg]),
+        pbStr(2, modelMsg),
       ]);
       entry.status = 200; entry.resBytes = out.length; entry.mutated = "SYNTHETIC-available-models";
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      appendSecureLog(entry);
       console.log(`[${id}] SYNTHETIC AvailableModels -> ${model}`);
       res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
       return res.end(out);
     }
 
-    // Sand automation persistence: the host re-creates routines forever if
-    // Create echoes no workflow and List returns empty. Store them and answer
-    // with real payloads.
+    // Sand automation persistence: authenticated routines management
     if (/AutomationsService\/CreateSandAutomation$/.test(req.url.split("?")[0])) {
-      const agentId = String((tryParse(body) || []).find((f) => f.fieldNo === 11 && f.wireType === 2)?.value || "");
-      const name = String((tryParse(body) || []).find((f) => f.fieldNo === 1 && f.wireType === 2)?.value || "automation");
-      const wf = (tryParse(body) || []).find((f) => f.fieldNo === 2 && f.wireType === 2)?.value || Buffer.alloc(0);
-      const storePath = "/tmp/grokbot-hack/box-data/automations-store.json";
-      let store = {};
-      try { store = JSON.parse(fs.readFileSync(storePath, "utf8")); } catch {}
-      // Dedupe: the host retries creations whose response lacks a server id;
-      // identical (agent,name) routines collapse to one stored entry.
+      if (denyUnauthorized(req, res)) return;
+      const parsed = tryParse(body) || [];
+      const agentId = String(parsed.find((f) => f.fieldNo === 11 && f.wireType === 2)?.value || "").trim();
+      if (!agentId || !/^[a-zA-Z0-9_-]+$/.test(agentId)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "missing or invalid agentId for automation" }));
+      }
+      const name = String(parsed.find((f) => f.fieldNo === 1 && f.wireType === 2)?.value || "automation");
+      const wf = parsed.find((f) => f.fieldNo === 2 && f.wireType === 2)?.value || Buffer.alloc(0);
+      const store = loadAutomationsStore();
       const dup = Object.entries(store).find(([, a]) => a.agentId === agentId && a.name === name);
       let autoId, wfOut;
       if (dup) {
@@ -1644,55 +1782,90 @@ const server = http.createServer((req, res) => {
       } else {
         autoId = `auto-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
         store[autoId] = { agentId, name, workflowB64: wf.toString("base64"), createdAt: Date.now() };
-        try { fs.writeFileSync(storePath, JSON.stringify(store, null, 1)); } catch {}
+        saveAutomationsStore(store);
         wfOut = wf;
-        console.log(`[${id}] AUTOMATION create "${name}" agent=${agentId.slice(0, 8)} -> ${autoId} (store now ${Object.keys(store).length})`);
       }
       const out = pbStr(1, wfOut); // CreateAutomationResponse.workflow = echo
       entry.status = 200; entry.resBytes = out.length; entry.mutated = "AUTOMATION-create";
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      appendSecureLog(entry);
       res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
       return res.end(out);
     }
     if (/AutomationsService\/ListSandAutomations$/.test(req.url.split("?")[0])) {
-      const agentId = String((tryParse(body) || []).find((f) => f.fieldNo === 1 && f.wireType === 2)?.value || "");
-      const storePath = "/tmp/grokbot-hack/box-data/automations-store.json";
-      let store = {};
-      try { store = JSON.parse(fs.readFileSync(storePath, "utf8")); } catch {}
+      if (denyUnauthorized(req, res)) return;
+      const parsed = tryParse(body) || [];
+      const agentId = String(parsed.find((f) => (f.fieldNo === 1 || f.fieldNo === 11) && f.wireType === 2)?.value || "").trim();
+      if (!agentId || !/^[a-zA-Z0-9_-]+$/.test(agentId)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "missing or invalid agentId for listing automations" }));
+      }
+      const store = loadAutomationsStore();
       const parts = [];
       for (const [autoId, a] of Object.entries(store)) {
-        if (agentId && a.agentId !== agentId) continue;
+        if (a.agentId !== agentId) continue;
         parts.push(pbStr(1, Buffer.from(a.workflowB64, "base64")));
       }
       const out = Buffer.concat(parts); // ListAutomationsResponse.workflows
       entry.status = 200; entry.resBytes = out.length; entry.mutated = `AUTOMATION-list(${parts.length})`;
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      appendSecureLog(entry);
       if (!res.headersSent) res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
       return res.end(out);
     }
-    if (/AutomationsService\/(DeleteSandAutomation|UpdateSandAutomation)$/.test(req.url.split("?")[0])) {
-      const storePath = "/tmp/grokbot-hack/box-data/automations-store.json";
-      let store = {};
-      try { store = JSON.parse(fs.readFileSync(storePath, "utf8")); } catch {}
-      // id field number differs per request; match any string field against stored ids/names
-      const strFields = (tryParse(body) || []).filter((f) => f.wireType === 2).map((f) => f.value.toString());
-      let changed = 0;
-      for (const [autoId, a] of Object.entries(store)) {
-        if (strFields.includes(autoId) || strFields.includes(a.name)) { delete store[autoId]; changed++; }
+    if (/AutomationsService\/UpdateSandAutomation$/.test(req.url.split("?")[0])) {
+      if (denyUnauthorized(req, res)) return;
+      const store = loadAutomationsStore();
+      const parsedFields = tryParse(body) || [];
+      const agentId = String(parsedFields.find((f) => f.fieldNo === 11 && f.wireType === 2)?.value || "").trim();
+      if (!agentId || !/^[a-zA-Z0-9_-]+$/.test(agentId)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "missing or invalid agentId for updating automation" }));
       }
-      if (changed) { try { fs.writeFileSync(storePath, JSON.stringify(store, null, 1)); } catch {} }
-      console.log(`[${id}] AUTOMATION delete/update matched ${changed} entries`);
-      entry.status = 200; entry.mutated = "AUTOMATION-delete";
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
-      if (!res.headersSent) res.writeHead(200, { "content-type": "application/proto" });
-      return res.end(Buffer.alloc(0));
+      const autoId = String(parsedFields.find((f) => f.fieldNo === 1 && f.wireType === 2)?.value || "").trim();
+      const wf = parsedFields.find((f) => f.fieldNo === 2 && f.wireType === 2)?.value || Buffer.alloc(0);
+      let updatedKey = null;
+      if (autoId && store[autoId] && store[autoId].agentId === agentId) {
+        store[autoId].workflowB64 = wf.toString("base64");
+        store[autoId].updatedAt = Date.now();
+        updatedKey = autoId;
+        saveAutomationsStore(store);
+      }
+      console.log(`[${id}] AUTOMATION update target=${updatedKey || "none"}`);
+      const out = pbStr(1, wf);
+      entry.status = 200; entry.mutated = "AUTOMATION-update";
+      appendSecureLog(entry);
+      if (!res.headersSent) res.writeHead(200, { "content-type": "application/proto", "content-length": String(out.length) });
+      return res.end(out);
+    }
+    if (/AutomationsService\/DeleteSandAutomation$/.test(req.url.split("?")[0])) {
+      if (denyUnauthorized(req, res)) return;
+      const store = loadAutomationsStore();
+      const parsedFields = tryParse(body) || [];
+      const agentId = String(parsedFields.find((f) => f.fieldNo === 11 && f.wireType === 2)?.value || "").trim();
+      if (!agentId || !/^[a-zA-Z0-9_-]+$/.test(agentId)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "missing or invalid agentId for deleting automation" }));
+      }
+      const autoId = String(parsedFields.find((f) => f.fieldNo === 1 && f.wireType === 2)?.value || "").trim();
+      let changed = 0;
+      if (autoId && store[autoId] && store[autoId].agentId === agentId) {
+        delete store[autoId];
+        changed = 1;
+        saveAutomationsStore(store);
+      }
+      console.log(`[${id}] AUTOMATION delete changed=${changed}`);
+      const out = Buffer.alloc(0);
+      entry.status = 200; entry.mutated = `AUTOMATION-delete(${changed})`;
+      appendSecureLog(entry);
+      if (!res.headersSent) res.writeHead(200, { "content-type": "application/proto", "content-length": "0" });
+      return res.end(out);
     }
     // LOCAL AUTOMATION FIRING: the box polls us for due routine events.
     // Answer from the on-disk routines (bridge-created via CreateRoutine).
     if (req.url.includes("/sand/automation-events/poll")) {
+      if (denyUnauthorized(req, res)) return;
       const out = handleAutomationPoll(body);
       entry.status = 200; entry.mutated = "AUTOMATION-poll"; entry.resBytes = out.length;
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      appendSecureLog(entry);
       if (!res.headersSent) res.writeHead(200, { "content-type": "application/json" });
       return res.end(out);
     }
@@ -1702,11 +1875,11 @@ const server = http.createServer((req, res) => {
     // Forwarded even with local-fake-token: the public catalog is account-agnostic.
     const PLUGIN_FORWARD_RE = /List(MarketplacePlugins|Marketplaces|AvailableMcpServers)|Get(Plugin|Marketplace|AvailableMcp)|SearchPlugins|GetPluginCatalog/i;
     const isPluginCatalogRead = PLUGIN_FORWARD_RE.test(req.url);
-    if ((req.headers["authorization"] || "").match(/local-fake-token|localsig/)) {
+    if (bridgeAuthorized(req)) {
       if (!isPluginCatalogRead) {
         console.log(`[${id}] BOX->BACKEND ${req.method} ${req.url} (${body.length}B) -> empty-ok`);
         entry.status = 200; entry.resBytes = 0; entry.note = "box-originated-empty-ok";
-        fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+        appendSecureLog(entry);
         res.writeHead(200, { "content-type": "application/proto" });
         return res.end(Buffer.alloc(0));
       }
@@ -1727,14 +1900,14 @@ const server = http.createServer((req, res) => {
             const out2 = Buffer.concat(chunks2);
             entry.status = upRes.statusCode;
             entry.resBytes = out2.length;
-            fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+            appendSecureLog(entry);
             const h2 = { ...upRes.headers };
             res.writeHead(upRes.statusCode, h2);
             res.end(out2);
           });
         }
       );
-      upReq2.on("error", (e) => { entry.error = String(e); fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n"); res.writeHead(502); res.end("proxy error"); });
+      upReq2.on("error", (e) => { entry.error = String(e); appendSecureLog(entry); res.writeHead(502); res.end("proxy error"); });
       upReq2.end(body);
       return;
     }
@@ -1743,7 +1916,8 @@ const server = http.createServer((req, res) => {
     const isUsage = req.url.includes("GetSandUsageStatus") || req.url.includes("GetCurrentPeriodUsage");
 
     const upReq = https.request(
-      { hostname: UPSTREAM_HOST, port: 443, path: req.url, method: req.method, headers: { ...req.headers, host: UPSTREAM_HOST } },      (upRes) => {
+      { hostname: UPSTREAM_HOST, port: 443, path: req.url, method: req.method, headers: { ...req.headers, host: UPSTREAM_HOST } },
+      (upRes) => {
         const resChunks = [];
         upRes.on("data", (c) => resChunks.push(c));
         upRes.on("end", () => {
@@ -1775,7 +1949,7 @@ const server = http.createServer((req, res) => {
           entry.status = upRes.statusCode;
           entry.resBytes = outBuf.length;
           entry.mutated = mutated;
-          fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+          appendSecureLog(entry);
 
           const h = { ...upRes.headers };
           if (mutated) {
@@ -1790,19 +1964,27 @@ const server = http.createServer((req, res) => {
     );
     upReq.on("error", (e) => {
       entry.error = String(e);
-      fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+      appendSecureLog(entry);
       res.writeHead(502); res.end("proxy error");
     });
     upReq.end(body);
   });
 });
 
-server.listen(8787, "127.0.0.1", () => console.log(`proxy2 on :8787 -> ${UPSTREAM_HOST} (EnsureSandBox rewrite ACTIVE)`));
-if (LISTEN_PORT !== 8787) {
-  try {
-    const server2 = http.createServer(server.listeners("request")[0]);
-    server2.listen(LISTEN_PORT, "127.0.0.1", () => console.log(`proxy2 also listening on :${LISTEN_PORT}`));
-  } catch (e) {
-    console.error("Secondary listen error:", e);
+if (require.main === module) {
+  server.listen(8787, "127.0.0.1", () => console.log(`proxy2 on :8787 -> ${UPSTREAM_HOST} (EnsureSandBox rewrite ACTIVE)`));
+  if (LISTEN_PORT !== 8787) {
+    try {
+      const server2 = http.createServer(server.listeners("request")[0]);
+      server2.listen(LISTEN_PORT, "127.0.0.1", () => console.log(`proxy2 also listening on :${LISTEN_PORT}`));
+    } catch (e) {
+      console.error("Secondary listen error:", e);
+    }
   }
 }
+
+module.exports = {
+  makeModelAuthHeaders,
+  getModelConfig,
+  server,
+};

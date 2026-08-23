@@ -11,7 +11,7 @@ const onboardingCss = fs.readFileSync(path.join(__dirname, "splash", "onboarding
 const renderBody = (onboarding.match(/function render\(\) \{([^}]*)\}/) || [])[1] || "";
 
 assert(info.npmProxy === true, "npm ships the proxy");
-assert(/npx -y openburnbar proxy --port 8320 --allow-local-key/.test(info.install.proxy), info.install.proxy);
+assert(/npx -y (--ignore-scripts )?openburnbar(@[0-9.]+)? proxy --port 8320/.test(info.install.proxy), info.install.proxy);
 assert(info.proxy.daemon.indexOf(":8317") >= 0, info.proxy.daemon);
 assert(models.defaultConfig().proxyTarget === "openburnbar", models.defaultConfig().proxyTarget);
 assert(models.FALLBACK_ORDER[0] === "openburnbar", models.FALLBACK_ORDER.join(","));
@@ -71,9 +71,15 @@ function getFreePort() {
     });
   });
 }
+const TEST_TOKEN = "test-isolated-token-" + Math.random().toString(36).slice(2, 10);
 function get(port, pathname) {
   return new Promise((resolve, reject) => {
-    const req = http.get({ host: "127.0.0.1", port, path: pathname }, (res) => {
+    const req = http.get({
+      host: "127.0.0.1",
+      port,
+      path: pathname,
+      headers: { authorization: `Bearer ${TEST_TOKEN}` },
+    }, (res) => {
       const chunks = [];
       res.on("data", (c) => chunks.push(c));
       res.on("end", () => resolve({ status: res.statusCode, json: JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") }));
@@ -94,7 +100,7 @@ async function waitForInstallRoute(port) {
 (async () => {
   const port = await getFreePort();
   const child = spawn(process.execPath, [path.join(__dirname, "gateway-shim.js")], {
-    env: { ...process.env, GROK_SHIM_PORT: String(port), GROK_SHIM_UP: "http://127.0.0.1:19338" },
+    env: { ...process.env, GROK_SHIM_PORT: String(port), GROK_SHIM_UP: "http://127.0.0.1:19338", SAND_HOST_GATEWAY_TOKEN: TEST_TOKEN },
     stdio: ["ignore", "pipe", "pipe"],
   });
   try {

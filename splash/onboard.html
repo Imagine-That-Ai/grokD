@@ -3,18 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>grok"D" · Seat in</title>
+  <title>Grok D · Setup Wizard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@650;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="onboarding.css">
   <style>
-    html, body { margin: 0; height: 100%; background: #07060c; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #07060f;
+      color: #f3eee6;
+      overflow: hidden;
+    }
   </style>
 </head>
 <body>
   <script src="onboarding.js"></script>
   <script>
+    window.__GD_DEMO__ = true;
     GrokDOnboarding.start({ force: true });
   </script>
 </body>

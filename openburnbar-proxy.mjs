@@ -5,6 +5,10 @@ import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const secGuard = require("./security-guard.js");
 
 const PORT = parseInt(process.env.OPENBURNBAR_PORT || process.argv.slice(2).find((_, i, a) => a[i-1] === "--port") || "8320", 10);
 const HOST = "127.0.0.1";
@@ -229,7 +233,7 @@ async function routeCompletions(body, res) {
   let authFailure = null;
 
   // 1. Custom Provider Endpoint Override
-  if (customBaseUrl && customApiKey) {
+  if (customBaseUrl && customApiKey && secGuard.isApprovedProviderUrl(customBaseUrl)) {
     try {
       const remoteUrl = `${customBaseUrl.replace(/\/+$/, "")}/chat/completions`;
       const up = await fetch(remoteUrl, {
@@ -327,27 +331,36 @@ async function routeCompletions(body, res) {
       }
     }
 
-    // Standard OpenAI-Compatible Multi-Provider Forward
-    try {
-      const headers = { "content-type": "application/json", ...(provider.header ? provider.header(provider.key) : { "authorization": `Bearer ${provider.key}` }) };
-      const remoteUrl = `${provider.baseUrl.replace(/\/+$/, "")}/chat/completions`;
-      const up = await fetch(remoteUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ ...body, model: provider.model || targetModel })
-      });
-      if (up.ok) return pipeStream(up, res);
-      if ([401, 403, 429].includes(up.status)) authFailure = `${provider.name} rejected your credentials (HTTP ${up.status}).`;
-    } catch (e) {
-      console.error(`[openburnbar-proxy] ${provider.name} forward failed:`, e.message);
+    // Standard OpenAI-Compatible Multi-Provider Forward. An unapproved
+    // destination is skipped, not fatal: CLIProxy below still gets a turn.
+    if (!secGuard.isApprovedProviderUrl(provider.baseUrl)) {
+      console.error(`[openburnbar-proxy] Rejected unapproved provider destination: ${provider.baseUrl}`);
+    } else {
+      try {
+        const headers = { "content-type": "application/json", ...(provider.header ? provider.header(provider.key) : { "authorization": `Bearer ${provider.key}` }) };
+        const remoteUrl = `${provider.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+        const up = await fetch(remoteUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ ...body, model: provider.model || targetModel })
+        });
+        if (up.ok) return pipeStream(up, res);
+        if ([401, 403, 429].includes(up.status)) authFailure = `${provider.name} rejected your credentials (HTTP ${up.status}).`;
+      } catch (e) {
+        console.error(`[openburnbar-proxy] ${provider.name} forward failed:`, e.message);
+      }
     }
   }
 
   // 3. CLIProxy (:8322) Active OAuth Subscriptions (Codex / ChatGPT Plus / Claude Pro / xAI)
   try {
+    const headers = { "content-type": "application/json" };
+    if (process.env.CLIPROXY_API_KEY) {
+      headers["authorization"] = `Bearer ${process.env.CLIPROXY_API_KEY}`;
+    }
     const up = await fetch("http://127.0.0.1:8322/v1/chat/completions", {
       method: "POST",
-      headers: { "content-type": "application/json", "authorization": "Bearer local-cliproxy" },
+      headers,
       body: JSON.stringify({ ...body, model: targetModel }),
       signal: AbortSignal.timeout(3000)
     });
@@ -442,9 +455,9 @@ function hostIsLoopback(h) {
   const hp = String(h || "").toLowerCase();
   return hp === `127.0.0.1:${PORT}` || hp === `localhost:${PORT}` || hp === "127.0.0.1" || hp === "localhost";
 }
-// Writes and OAuth callbacks require a trusted web origin: no header at all
-// (curl / node server-to-server), file://, null, loopback, or the app's own
-// remote origins. Random websites are rejected before they can touch config.
+// CORS reflection allowlist: no header at all (curl / node server-to-server),
+// file://, null, loopback, or the app's own remote origins. Random websites
+// never get the reflected header, and writes are bearer-gated besides.
 function originAllowed(o) {
   if (!o) return true;
   if (o === "null") return true; // Electron file:// renderer
@@ -458,6 +471,33 @@ function originAllowed(o) {
     const extra = (process.env.OPENBURNBAR_ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
     return extra.some(a => { try { return new URL(a).origin === u.origin; } catch { return false; } });
   } catch { return false; }
+}
+
+function isRequestAuthorized(r) {
+  const auth = String(r.headers.authorization || "").trim();
+  if (!auth) return false;
+  if (secGuard.verifyProxyBridgeAuth(auth)) return true;
+  if (secGuard.verifyGatewayAuth(auth)) return true;
+  if (secGuard.verifyOAuthTriggerAuth(auth)) return true;
+  return false;
+}
+
+// Collect a request body, capped, then hand the text to `onBody`.
+function readJsonBody(req, onBody, maxBytes = 10 * 1024 * 1024) {
+  let raw = "";
+  let bytes = 0;
+  req.on("data", (c) => { bytes += c.length; if (bytes > maxBytes) { req.destroy(); return; } raw += c; });
+  req.on("end", () => onBody(raw));
+}
+
+// Returns true (and answers 401) when the caller lacks a valid capability.
+// openaiShape picks the error envelope /v1 clients expect.
+function denyUnauthorized(req, res, openaiShape) {
+  if (isRequestAuthorized(req)) return false;
+  const message = "Unauthorized: valid bearer capability required";
+  res.writeHead(401, { "content-type": "application/json" });
+  res.end(JSON.stringify(openaiShape ? { error: { message } } : { ok: false, error: message }));
+  return true;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -484,24 +524,41 @@ const server = http.createServer(async (req, res) => {
 
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
 
-  const isWrite = req.method !== "GET" && req.method !== "HEAD";
-  if ((isWrite || url.pathname.startsWith("/auth/")) && !originAllowed(req.headers.origin)) {
-    res.writeHead(403, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: { message: "Forbidden: untrusted origin" } }));
+  // Health check endpoint
+  if ((url.pathname === "/health" || url.pathname === "/api/health") && (req.method === "GET" || req.method === "HEAD")) {
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(req.method === "HEAD" ? "" : JSON.stringify({ ok: true, status: "healthy", service: "openburnbar-proxy", port: PORT }));
     return;
   }
 
   // OAuth Callback Handler (OpenRouter / Custom OAuth)
   if (url.pathname === "/auth/callback" || url.pathname === "/oauth/callback") {
+    res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'");
     const code = url.searchParams.get("code") || url.searchParams.get("token") || url.searchParams.get("api_key") || url.searchParams.get("key");
-    const provider = url.searchParams.get("provider") || "openrouter";
+    const state = url.searchParams.get("state") || "";
+    const errorParam = url.searchParams.get("error") || url.searchParams.get("error_description");
+
+    if (errorParam) {
+      res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!DOCTYPE html><html><body><h2>OAuth Error</h2><p>${secGuard.escHtml(errorParam)}</p></body></html>`);
+      return;
+    }
+
+    const stateEntry = secGuard.consumeOAuthState(state);
+    if (!stateEntry) {
+      res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!DOCTYPE html><html><body><h2>Invalid or Missing OAuth State</h2><p>OAuth flow must be initiated with a valid pending state nonce.</p></body></html>`);
+      return;
+    }
+
+    const provider = (stateEntry && stateEntry.provider) || url.searchParams.get("provider") || "openrouter";
     if (code) {
       const safeProvider = String(provider || "openrouter").replace(/[^a-zA-Z0-9_-]/g, "");
       const patch = { providers: { ...readModelConfig().providers, [safeProvider]: { enabled: true, apiKey: code, connectedAt: Date.now() } } };
       if (safeProvider === "openrouter") patch.openrouterApiKey = code;
       writeModelConfig(patch);
-      res.writeHead(200, { "content-type": "text/html" });
-      res.end(`<!DOCTYPE html><html><body style="font-family:system-ui,-apple-system;background:#0b0d13;color:#e6edf3;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><div style="text-align:center;padding:32px;background:#161b22;border:1px solid #30363d;border-radius:16px;box-shadow:0 12px 36px rgba(0,0,0,0.5);max-width:440px;"><h2 style="margin:0 0 12px;color:#58a6ff;">⚡ OpenBurnBar Connected!</h2><p style="color:#8b949e;line-height:1.5;">${safeProvider.toUpperCase()} has been authenticated and linked to your local Grok "D" workspace.</p><p style="color:#58a6ff;font-size:13px;margin-top:20px;">You can close this window now.</p><script>setTimeout(() => window.close(), 1500);</script></div></body></html>`);
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!DOCTYPE html><html><body style="font-family:system-ui,-apple-system;background:#0b0d13;color:#e6edf3;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><div style="text-align:center;padding:32px;background:#161b22;border:1px solid #30363d;border-radius:16px;box-shadow:0 12px 36px rgba(0,0,0,0.5);max-width:440px;"><h2 style="margin:0 0 12px;color:#58a6ff;">⚡ OpenBurnBar Connected!</h2><p style="color:#8b949e;line-height:1.5;">${secGuard.escHtml(safeProvider.toUpperCase())} has been authenticated and linked to your local Grok "D" workspace.</p><p style="color:#58a6ff;font-size:13px;margin-top:20px;">You can close this window now.</p></div></body></html>`);
       return;
     }
   }
@@ -554,35 +611,20 @@ const server = http.createServer(async (req, res) => {
   // Provider Config API
   if (url.pathname === "/api/providers" && req.method === "GET") {
     const cfg = readModelConfig();
-    // Redact secrets before serving: this endpoint is readable cross-origin by design.
-    const redact = (val) => {
-      if (Array.isArray(val)) return val.map(redact);
-      if (val && typeof val === "object") {
-        const out = {};
-        for (const [k, v] of Object.entries(val)) {
-          out[k] = (/api_?key|token|secret/i.test(k) && typeof v === "string" && v)
-            ? (v.length > 8 ? `${v.slice(0, 4)}•••${v.slice(-3)}` : "•••")
-            : redact(v);
-        }
-        return out;
-      }
-      return val;
-    };
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, config: redact(cfg), defaults: PROVIDER_DEFAULTS }));
+    res.end(JSON.stringify({ ok: true, config: secGuard.redactProviderSecrets(cfg), defaults: PROVIDER_DEFAULTS }));
     return;
   }
 
   if (url.pathname === "/api/providers" && req.method === "POST") {
-    let raw = "";
-    let bytes = 0;
-    req.on("data", (c) => { bytes += c.length; if (bytes > 10 * 1024 * 1024) { req.destroy(); return; } raw += c; });
-    req.on("end", () => {
+    if (denyUnauthorized(req, res)) return;
+    readJsonBody(req, (raw) => {
       try {
         const body = JSON.parse(raw || "{}");
-        const updated = writeModelConfig(body);
+        const cleanPatch = secGuard.validateProviderConfigPatch(body);
+        const updated = writeModelConfig(cleanPatch);
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true, config: updated }));
+        res.end(JSON.stringify({ ok: true, config: secGuard.redactProviderSecrets(updated) }));
       } catch (e) {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -593,10 +635,8 @@ const server = http.createServer(async (req, res) => {
 
   // OAuth Subscription Trigger API (Codex / ChatGPT Plus, Claude Pro, xAI)
   if (url.pathname === "/api/oauth/login" && req.method === "POST") {
-    let raw = "";
-    let bytes = 0;
-    req.on("data", (c) => { bytes += c.length; if (bytes > 10 * 1024 * 1024) { req.destroy(); return; } raw += c; });
-    req.on("end", async () => {
+    if (denyUnauthorized(req, res)) return;
+    readJsonBody(req, async (raw) => {
       try {
         const body = JSON.parse(raw || "{}");
         const provider = String(body.provider || "codex").toLowerCase();
@@ -606,6 +646,8 @@ const server = http.createServer(async (req, res) => {
         if (provider === "kimi") flag = "-kimi-login";
         if (provider === "antigravity") flag = "-antigravity-login";
 
+        const stateNonce = secGuard.createOAuthState(provider, body.account || "default");
+
         const candidates = [
           process.env.CLIPROXY_BIN,
           path.join(os.homedir(), ".homebrew", "bin", "cliproxyapi"),
@@ -614,12 +656,12 @@ const server = http.createServer(async (req, res) => {
           path.join(os.homedir(), ".local", "bin", "cliproxyapi"),
         ].filter(Boolean);
         const cliproxyBin = candidates.find((c) => { try { return fs.existsSync(c); } catch { return false; } });
-        if (fs.existsSync(cliproxyBin)) {
+        if (cliproxyBin) {
           const { spawn } = await import("node:child_process");
           const child = spawn(cliproxyBin, [flag], { detached: true, stdio: "ignore" });
           child.unref();
           res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: true, message: `Launched ${provider} OAuth browser login` }));
+          res.end(JSON.stringify({ ok: true, state: stateNonce, message: `Launched ${provider} OAuth browser login` }));
         } else {
           res.writeHead(404, { "content-type": "application/json" });
           res.end(JSON.stringify({ ok: false, error: "cliproxyapi binary not found" }));
@@ -634,10 +676,8 @@ const server = http.createServer(async (req, res) => {
 
   // Chat Completions Endpoint
   if (url.pathname === "/v1/chat/completions" && req.method === "POST") {
-    let raw = "";
-    let bytes = 0;
-    req.on("data", (c) => { bytes += c.length; if (bytes > 10 * 1024 * 1024) { req.destroy(); return; } raw += c; });
-    req.on("end", async () => {
+    if (denyUnauthorized(req, res, true)) return;
+    readJsonBody(req, async (raw) => {
       try {
         const body = JSON.parse(raw || "{}");
         await routeCompletions(body, res);

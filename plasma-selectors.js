@@ -6,7 +6,7 @@
  */
 
 (function() {
-  const { execSync, spawn } = require('child_process');
+  const { exec, execSync, spawn } = require('child_process');
   const fs = require('fs');
   const os = require('os');
   const path = require('path');
@@ -346,12 +346,45 @@
     return 'local-d';
   }
 
+  function sanitizeCssColor(val, fallback = '#000') {
+    const s = String(val || '').trim();
+    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(s) ||
+        /^rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+(\s*,\s*[\d.]+\s*)?\)$/.test(s) ||
+        /^[a-zA-Z]{3,20}$/.test(s)) {
+      return s;
+    }
+    return fallback;
+  }
+
+  function sanitizeCssGradient(val, fallback = 'linear-gradient(135deg, #38bdf8, #818cf8)') {
+    const s = String(val || '').trim();
+    if (/^(linear-gradient|radial-gradient)\([a-zA-Z0-9\s,#.%()-]+\)$/.test(s) && !/[<>"';]/.test(s)) {
+      return s;
+    }
+    return fallback;
+  }
+
+  function normalizeProfile(p) {
+    if (!p || typeof p !== 'object') return p;
+    const per = PERSONAS.find(x => x.id === p.personaId) || PERSONAS[0];
+    return {
+      ...p,
+      gradient: sanitizeCssGradient(p.gradient, per.gradient),
+      glow: sanitizeCssColor(p.glow, per.glow),
+      eyeColor: sanitizeCssColor(p.eyeColor, '#000'),
+      eyeCatch: sanitizeCssColor(p.eyeCatch, '#fff'),
+      color: sanitizeCssColor(p.color, '#c084fc'),
+    };
+  }
+
   function getCustomProfiles() {
     try {
       if (fs.existsSync(CUSTOM_PROFILES_PATH)) {
         const raw = JSON.parse(fs.readFileSync(CUSTOM_PROFILES_PATH, 'utf8'));
-        if (Array.isArray(raw)) return raw;
-        if (raw && Array.isArray(raw.profiles)) return raw.profiles;
+        let list = [];
+        if (Array.isArray(raw)) list = raw;
+        else if (raw && Array.isArray(raw.profiles)) list = raw.profiles;
+        return list.map(normalizeProfile);
       }
     } catch {}
     return [];
@@ -385,19 +418,16 @@
     return {
       proxyTarget: 'openburnbar',
       model: 'gpt-5.6-luna',
-      apiKey: 'local-cliproxy',
+      apiKey: '',
       cursorAccount: 'Primary Cursor Account'
     };
   }
 
   function saveModelConfig(cfg) {
     try {
-      fs.writeFileSync(MODEL_CONFIG_PATH, JSON.stringify(cfg, null, 2));
-      try {
-        if (cfg && cfg.model) {
-          require(path.join(ROOT, "model-lib.js")).setModel(cfg.model);
-        }
-      } catch (_) {}
+      const modelLib = require(path.join(ROOT, "model-lib.js"));
+      const updated = modelLib.writeConfig(cfg);
+      modelCfg = updated;
       return true;
     } catch (e) {
       console.error('saveModelConfig err:', e);
@@ -455,8 +485,8 @@
 
   function renderPersonaEyesHtml(p) {
     const style = p.eyeStyle || 'dot';
-    const eCol = p.eyeColor || '#000';
-    const cCol = p.eyeCatch || '#fff';
+    const eCol = sanitizeCssColor(p.eyeColor, '#000');
+    const cCol = sanitizeCssColor(p.eyeCatch, '#fff');
 
     if (style === 'sunglasses') {
       return `
@@ -521,8 +551,8 @@
 
   function renderBotMascotIconHtml(p, size = 38) {
     const per = PERSONAS.find(x => x.id === p.personaId) || PERSONAS[0];
-    const grad = p.gradient || per.gradient;
-    const glow = p.glow || per.glow;
+    const grad = sanitizeCssGradient(p.gradient, per.gradient);
+    const glow = sanitizeCssColor(p.glow, per.glow);
     return `
       <div class="bot-mascot-orb" style="position: relative; width: ${size}px; height: ${size}px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; filter: drop-shadow(0 0 8px ${glow}) drop-shadow(0 0 16px ${glow}); pointer-events: none;">
         <div style="position: absolute; inset: 0; border-radius: 50%; background: ${grad}; box-shadow: inset 0 1.5px 4px rgba(255,255,255,0.92), inset 0 -2.5px 5px rgba(0,0,0,0.5);"></div>
@@ -1219,16 +1249,31 @@
 
     // Helper: Auth state for Proxy
     function isProxyAuthenticated(prxId) {
-      if (prxId === 'openburnbar' || prxId === 'cliproxy' || prxId === 'vibeproxy') {
-        const auth = localStorage.getItem('grok_auth_' + prxId);
-        return auth !== 'logged_out';
+      const auth = localStorage.getItem('grok_auth_' + prxId);
+      if (!auth || auth === 'logged_out') return false;
+      try {
+        const parsed = JSON.parse(auth);
+        return Boolean(parsed && parsed.loggedIn === true);
+      } catch {
+        return false;
       }
-      return !!localStorage.getItem('grok_auth_' + prxId);
     }
 
-    function setProxyAuthenticated(prxId, isAuth, creds = null) {
+    function setProxyAuthenticated(prxId, isAuth, creds) {
       if (isAuth) {
-        localStorage.setItem('grok_auth_' + prxId, JSON.stringify(creds || { loggedIn: true, time: Date.now() }));
+        localStorage.setItem('grok_auth_' + prxId, JSON.stringify({ loggedIn: true, time: Date.now() }));
+        if (creds && typeof creds.key === 'string' && creds.key.trim()) {
+          try {
+            if (window.desktop && window.desktop.setProxyApiKey) {
+              window.desktop.setProxyApiKey(prxId, creds.key.trim());
+            } else if (typeof require === "function") {
+              const os = require("os");
+              const path = require("path");
+              const modelLib = require(path.join(process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d"), "model-lib.js"));
+              modelLib.writeConfig({ proxyTarget: prxId, apiKey: creds.key.trim() });
+            }
+          } catch (_) {}
+        }
       } else {
         localStorage.setItem('grok_auth_' + prxId, 'logged_out');
       }
@@ -1249,8 +1294,8 @@
       const p = allP.find(x => x.id === activeProf) || BASE_PROFILES[3];
       const per = PERSONAS.find(x => x.id === p.personaId) || PERSONAS[0];
 
-      const grad = p.gradient || per.gradient;
-      const glow = p.glow || per.glow;
+      const grad = sanitizeCssGradient(p.gradient, per.gradient);
+      const glow = sanitizeCssColor(p.glow, per.glow);
 
       profOrb.style.filter = `drop-shadow(0 0 14px ${glow}) drop-shadow(0 0 28px ${glow})`;
       
@@ -1328,10 +1373,23 @@
           const newBot = {
             id: 'custom-bot-' + Date.now(),
             label: lbl,
+            kind: 'local',
+            name: lbl,
             personaId: selectedNewPid,
+            avatarShape: perObj.avatarShape || 'blob',
+            avatarColor: perObj.avatarColor || 'violet',
             gradient: perObj.gradient,
             glow: perObj.glow
           };
+          try {
+            const os = require("os");
+            const path = require("path");
+            const pStore = require(path.join(process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d"), "profile-store.js"));
+            pStore.add(newBot);
+          } catch (err) {
+            showToast(`Failed to create seat: ${err.message || err}`);
+            return;
+          }
           const customBots = JSON.parse(localStorage.getItem('grok_custom_bots') || '[]');
           customBots.push(newBot);
           localStorage.setItem('grok_custom_bots', JSON.stringify(customBots));
@@ -1524,15 +1582,24 @@
           e.stopPropagation();
           const name = (modelMenu.querySelector('#new-proxy-name-input').value || '').trim() || 'Custom Proxy';
           const port = (modelMenu.querySelector('#new-proxy-port-input').value || '').trim() || ':8080';
+          const safePort = port.replace(/^:+/, '').replace(/[^0-9]/g, '') || '8080';
+          const proxyUrl = `http://127.0.0.1:${safePort}`;
           const newPrx = {
             id: 'custom-' + Date.now(),
             name: name,
-            port: port,
+            port: `:${safePort}`,
+            url: proxyUrl,
             color: '#38bdf8',
             glow: 'rgba(56, 189, 248, 0.9)',
             logo: PROXIES[0].logo,
             validProviders: ['openai', 'anthropic', 'google']
           };
+          try {
+            const os = require("os");
+            const path = require("path");
+            const mLib = require(path.join(process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d"), "model-lib.js"));
+            mLib.writeConfig({ proxyTarget: "custom", proxyUrl });
+          } catch (_) {}
           PROXIES.push(newPrx);
           showToast(`Added Gateway: ${name}`);
           modelMenu.style.width = 'auto';
@@ -1756,12 +1823,17 @@
             oauthBtn.addEventListener('click', (e) => {
               e.stopPropagation();
               try {
-                exec('node /tmp/grokbot-hack/google-oauth.js 1', (err) => {
-                  if (err) console.error('OAuth err:', err);
-                });
-                setProxyAuthenticated(selectedProxy.id, true);
-                renderModelMenuContent();
-                showToast('Google Authorization opened in browser');
+                if (typeof require === "function") {
+                  try {
+                    const os = require("os");
+                    const path = require("path");
+                    const hub = require(path.join(process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d"), "provider-hub.js"));
+                    hub.triggerOAuth(selectedProxy.id);
+                    showToast('OAuth sign-in initiated in browser');
+                    return;
+                  } catch (_) {}
+                }
+                showToast('Initiating OAuth login...');
               } catch (err) {
                 console.error(err);
               }
