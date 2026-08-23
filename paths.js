@@ -14,7 +14,17 @@ const SEAT4 = process.env.GROK_SEAT4 || path.join(os.homedir(), "Library/Applica
 function existingHack() {
   if (process.env.GROKBOT_HACK) return process.env.GROKBOT_HACK;
   try {
-    if (fs.existsSync(path.join(TMP_HACK, "box-data"))) return TMP_HACK;
+    if (fs.existsSync(HACK)) return HACK;
+    if (fs.existsSync(TMP_HACK)) {
+      const lstat = fs.lstatSync(TMP_HACK);
+      const uid = process.getuid ? process.getuid() : null;
+      if (uid === null || lstat.uid === uid) {
+        const real = fs.realpathSync(TMP_HACK);
+        if (real === HACK || fs.existsSync(path.join(real, "box-data"))) {
+          return real;
+        }
+      }
+    }
   } catch {}
   return HACK;
 }

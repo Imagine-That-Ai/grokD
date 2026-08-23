@@ -52,17 +52,21 @@ echo "✓ Node.js $(node -v) & Python3 $(python3 -V 2>&1 | awk '{print $2}') ver
 # 3. Clone or Update Grok-D Workspace
 GROK_ROOT="$HOME/.grok/grokbot-d"
 REPO_URL="https://github.com/Imagine-That-Ai/grokD.git"
+PINNED_REF="${GROK_PINNED_REF:-main}"
 
 if [ -d "$GROK_ROOT/.git" ]; then
   echo "✓ Updating existing Grok \"D\" workspace at $GROK_ROOT..."
   cd "$GROK_ROOT"
-  git fetch origin main
-  git reset --hard origin/main
+  git fetch origin "$PINNED_REF"
+  git checkout "$PINNED_REF" 2>/dev/null || git reset --hard "origin/$PINNED_REF"
 else
-  echo "✓ Cloning Grok \"D\" workspace to $GROK_ROOT..."
+  echo "✓ Cloning Grok \"D\" workspace to $GROK_ROOT (ref: $PINNED_REF)..."
   mkdir -p "$(dirname "$GROK_ROOT")"
   rm -rf "$GROK_ROOT" 2>/dev/null || true
-  git -c credential.helper= clone --depth=1 "$REPO_URL" "$GROK_ROOT"
+  if ! git -c credential.helper= clone --depth=1 --branch "$PINNED_REF" "$REPO_URL" "$GROK_ROOT"; then
+    echo "ERROR: Failed to clone ref $PINNED_REF from $REPO_URL" >&2
+    exit 1
+  fi
   cd "$GROK_ROOT"
 fi
 

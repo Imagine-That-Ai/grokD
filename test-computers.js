@@ -12,28 +12,95 @@ const HOME = os.homedir();
 const ROOT = path.join(HOME, ".grok", "grokbot-d");
 const SEAT4 = path.join(HOME, "Library/Application Support/GrokBotSeat4");
 
+const secGuard = require("./security-guard");
+
 function readUrl(file) {
   try {
     const j = JSON.parse(fs.readFileSync(file, "utf8"));
-    return j && j.baseUrl ? j.baseUrl : null;
+    if (!j || typeof j.baseUrl !== "string") return null;
+    const u = j.baseUrl;
+    if (u === "http://127.0.0.1:1337" || u === "http://localhost:1337") {
+      return u;
+    }
+    if (secGuard.isApprovedRemoteComputerDescriptor(u)) {
+      return u;
+    }
+    return null;
   } catch { return null; }
 }
 
-function probe(url) {
-  return new Promise((resolve) => {
-    if (!url) return resolve({ code: 0, body: "no-url" });
-    const u = new URL(url.replace(/\/$/, "") + "/health");
-    const lib = u.protocol === "https:" ? https : http;
-    const req = lib.get(u, { timeout: 6000 }, (res) => {
-      const c = [];
-      res.on("data", (d) => c.push(d));
-      res.on("end", () => resolve({
-        code: res.statusCode,
-        body: Buffer.concat(c).toString("utf8").slice(0, 80).replace(/\s+/g, " "),
-      }));
+async function probe(url) {
+  if (!url || typeof url !== "string") return { code: 0, body: "no-url" };
+  let u;
+  try {
+    u = new URL(url.replace(/\/$/, "") + "/health");
+  } catch {
+    return { code: 0, body: "invalid-url" };
+  }
+
+  const isLocal = (u.hostname === "127.0.0.1" || u.hostname === "localhost") && u.protocol === "http:" && u.port === "1337";
+  if (!isLocal) {
+    if (u.protocol !== "https:" || !secGuard.isApprovedRemoteComputerDescriptor(url)) {
+      return { code: 0, body: "unapproved-descriptor" };
+    }
+    const pinnedIp = await secGuard.resolveAndCheckHost(u.hostname);
+    if (!pinnedIp) {
+      return { code: 0, body: "dns-rebind-rejected" };
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      let hardTimer;
+      let req;
+      const done = (res) => {
+        if (settled) return;
+        settled = true;
+        if (hardTimer) clearTimeout(hardTimer);
+        resolve(res);
+      };
+      hardTimer = setTimeout(() => {
+        try { if (req) req.destroy(); } catch (_) {}
+        done({ code: 0, body: "timeout" });
+      }, 6500);
+
+      req = https.get({
+        protocol: "https:",
+        hostname: u.hostname,
+        port: 443,
+        path: u.pathname,
+        lookup: (_hostname, _options, callback) => callback(null, pinnedIp, 4),
+        headers: { host: u.host, accept: "application/json" },
+        timeout: 6000,
+        servername: u.hostname,
+      }, (res) => {
+        res.resume();
+        done({ code: res.statusCode, body: res.statusCode === 200 || res.statusCode === 204 ? "ok" : "not-ok" });
+      });
+      req.on("timeout", () => { req.destroy(); done({ code: 0, body: "socket-timeout" }); });
+      req.on("error", (e) => done({ code: 0, body: "connection-error" }));
     });
-    req.on("error", (e) => resolve({ code: 0, body: e.message.slice(0, 80) }));
-    req.on("timeout", () => { req.destroy(); resolve({ code: 0, body: "timeout" }); });
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let hardTimer;
+    let req;
+    const done = (res) => {
+      if (settled) return;
+      settled = true;
+      if (hardTimer) clearTimeout(hardTimer);
+      resolve(res);
+    };
+    hardTimer = setTimeout(() => {
+      try { if (req) req.destroy(); } catch (_) {}
+      done({ code: 0, body: "timeout" });
+    }, 4000);
+
+    req = http.get("http://127.0.0.1:1337/health", { timeout: 3500 }, (res) => {
+      res.resume();
+      done({ code: res.statusCode, body: res.statusCode === 200 ? "ok" : "not-ok" });
+    });
+    req.on("timeout", () => { req.destroy(); done({ code: 0, body: "socket-timeout" }); });
+    req.on("error", () => done({ code: 0, body: "connect-refused" }));
   });
 }
 

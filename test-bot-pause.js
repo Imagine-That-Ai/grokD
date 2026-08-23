@@ -41,6 +41,7 @@ const already = writeAuto(agents, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "off",
 });
 
 (async () => {
+try {
 assert(pause.isPaused() === false, "starts unpaused");
 assert(pause.isPaused("local-d") === false, "local not paused");
 ok("not-paused");
@@ -63,15 +64,17 @@ assert(r1b.already === true, "second pause is already");
 ok("pause-idempotent");
 
 const r2 = await pause.resume({ seats: ["local-d"], computers: [] });
-assert(pause.isPaused("local-d") === false, "resumed");
-assert(JSON.parse(fs.readFileSync(joke, "utf8")).enabled === true, "joke back");
-assert(JSON.parse(fs.readFileSync(daily, "utf8")).enabled === true, "daily back");
-assert(JSON.parse(fs.readFileSync(already, "utf8")).enabled === false, "already-off still off");
+assert(pause.isPaused("local-d") === false, "local resumed");
+assert(JSON.parse(fs.readFileSync(joke, "utf8")).enabled === true, "joke re-enabled");
+assert(JSON.parse(fs.readFileSync(daily, "utf8")).enabled === true, "daily re-enabled");
+assert(JSON.parse(fs.readFileSync(already, "utf8")).enabled === false, "already-off stays off");
+assert(r2.localRestored >= 2, `localRestored ${r2.localRestored}`);
 ok("resume-local");
 
 const calls = [];
 const fakePost = async (conn, method, body) => {
-  calls.push({ tag: conn.tag, method, body });
+  const tag = conn && conn.tag ? conn.tag : "cursor-a";
+  calls.push({ tag, method, body });
   if (method === "listAgents") {
     return [
       { id: "run-1", name: "Factory Commander", isRunning: true },
@@ -97,6 +100,8 @@ await pause.pause({
   ],
   post: fakePost,
 });
+assert(calls.some((c) => c.tag === "cursor-a" && c.method === "setAgentAutomationEnabled" && c.body.isEnabled === false), "disable A cron");
+assert(!calls.some((c) => c.tag === "cursor-b"), "did not touch B cron");
 assert(calls.some((c) => c.tag === "cursor-a" && c.method === "interruptAgentRun" && c.body.id === "run-1"), "interrupt A");
 assert(!calls.some((c) => c.tag === "cursor-b"), "did not touch B");
 assert(pause.isPaused("cursor-a") === true, "A paused");
@@ -136,6 +141,8 @@ assert(pause.isPaused("cursor-c") === true, "marked paused immediately");
 assert(Date.now() - started < 200, "did not wait on hung remote");
 ok("pause-fast");
 
-fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${n}/8 bot-pause checks passed`);
+} finally {
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
 })().catch((e) => { console.error(e); process.exit(1); });

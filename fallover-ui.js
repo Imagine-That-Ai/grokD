@@ -50,11 +50,11 @@ function rowHtml(cfg, switchHtml) {
   return ROWS.map((r) => {
     const on = !!(cfg && cfg[r.key]);
     return `
-      <div class="gd-setrow" data-fo="${r.key}" role="switch" aria-checked="${on ? "true" : "false"}" tabindex="0" data-tip="${esc(r.tip)}" title="${esc(r.tip)}">
+      <div class="gd-setrow" data-fo="${esc(r.key)}" role="switch" aria-checked="${on ? "true" : "false"}" tabindex="0" data-tip="${esc(r.tip)}" title="${esc(r.tip)}">
         <span class="gd-fo-ico" aria-hidden="true">${ICONS[r.icon] || ""}</span>
         <div class="gd-setcopy">
-          <b>${r.label}</b>
-          <p>${r.sub}</p>
+          <b>${esc(r.label)}</b>
+          <p>${esc(r.sub)}</p>
         </div>
         ${switchHtml(on)}
       </div>`;

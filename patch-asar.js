@@ -9,11 +9,15 @@ const SRC = process.argv[2] || "/tmp/grokbot-asar";
 const mainPath = path.join(SRC, "dist", "electron-main", "main.cjs");
 const preloadPath = path.join(SRC, "dist", "electron-preload", "preload.cjs");
 
+// Injected into Cursor's bundle: read active-env.json and short-circuit to
+// local mode. All three IPn injection sites embed this verbatim.
+const LOCAL_ENV_PROBE = 'const os=require("os"),path=require("path"),fs=require("fs"),root=process.env.GROK_PROFILE_ROOT||path.join(os.homedir(),".grok","grokbot-d");let isLoc=false;try{isLoc=require(path.join(root,"profile-auth-preload.js")).isLocalMode()}catch{try{const st=fs.statSync(path.join(root,"active-env.json"));if(!process.getuid||st.uid===process.getuid()){const env=JSON.parse(fs.readFileSync(path.join(root,"active-env.json"),"utf8"));isLoc=Boolean(env&&env.mode==="local"&&(env.profileId==="local-d"||env.profileId==="local"))}}catch{isLoc=false}}if(isLoc)';
+
 const IPN_OFFICIAL = 'async function IPn(t){let e=await t.getAuthStatus().catch(o3s);if(e.kind==="logging-in")return{identity:null,access:a8t};let r=db(e);return r===null?{identity:null,access:e.kind==="logged-in"?a8t:Dhr}:{identity:r,access:await t.readAccess().catch(s3s)}}';
-const IPN_PATCH = 'async function IPn(t){let e=await t.getAuthStatus().catch(o3s);if(e.kind==="logging-in")return{identity:null,access:{state:"granted",reason:"none"}};let r=db(e);return{identity:r||e.authId||e.email||"cursor",access:{state:"granted",reason:"none"}}}';
+const IPN_PATCH = 'async function IPn(t){let e=await t.getAuthStatus().catch(o3s);try{' + LOCAL_ENV_PROBE + 'return{identity:db(e)||e.authId||e.email||"cursor",access:{state:"granted",reason:"none"}}}catch{}if(e.kind==="logging-in")return{identity:null,access:a8t};let r=db(e);return r===null?{identity:null,access:e.kind==="logged-in"?a8t:Dhr}:{identity:r,access:await t.readAccess().catch(s3s)}}';
 
 const READ_OFFICIAL = 'async read(a){if(!t.codec.isAvailable())return null;let l;try{l=await XYe.promises.readFile(t.filePath,"utf8")}catch(u){return lBs(u)||xe("gateway-descriptor","read",u),null}try{let u=JSON.parse(l);return!J1t(u)||u.version!==K6n||u.accountScope!==a||typeof u.savedAtMs!="number"||e()-u.savedAtMs>r||typeof u.encrypted!="string"?null:cBs(JSON.parse(t.codec.decrypt(u.encrypted)))}catch(u){return xe("gateway-descriptor","decrypt",u),null}}';
-const READ_PATCH = 'async read(a){if(!t.codec.isAvailable())return null;let n=async()=>{try{let p=t.filePath.replace(/gateway-descriptor\\.json$/,"sand-data/local-exec-daemon-connection.json");return cBs(JSON.parse(await XYe.promises.readFile(p,"utf8")))}catch{return null}};let l;try{l=await XYe.promises.readFile(t.filePath,"utf8")}catch(u){return lBs(u)?await n():(xe("gateway-descriptor","read",u),null)}try{let u=JSON.parse(l);let x=!J1t(u)||u.version!==K6n||u.accountScope!==a||typeof u.savedAtMs!="number"||e()-u.savedAtMs>r||typeof u.encrypted!="string"?null:cBs(JSON.parse(t.codec.decrypt(u.encrypted)));return x||await n()}catch(u){return xe("gateway-descriptor","decrypt",u),await n()}}';
+const READ_PATCH = 'async read(a){if(!t.codec.isAvailable())return null;let n=async()=>{try{const os=require("os"),path=require("path"),root=process.env.GROK_PROFILE_ROOT||path.join(os.homedir(),".grok","grokbot-d");if(!require(path.join(root,"profile-auth-preload.js")).isLocalMode())return null;let p=t.filePath.replace(/gateway-descriptor\\.json$/,"sand-data/local-exec-daemon-connection.json");return cBs(JSON.parse(await XYe.promises.readFile(p,"utf8")))}catch{return null}};let l;try{l=await XYe.promises.readFile(t.filePath,"utf8")}catch(u){return lBs(u)?await n():(xe("gateway-descriptor","read",u),null)}try{let u=JSON.parse(l);let x=!J1t(u)||u.version!==K6n||u.accountScope!==a||typeof u.savedAtMs!="number"||e()-u.savedAtMs>r||typeof u.encrypted!="string"?null:cBs(JSON.parse(t.codec.decrypt(u.encrypted)));return x||await n()}catch(u){return xe("gateway-descriptor","decrypt",u),await n()}}';
 
 const AUTH_OFFICIAL = 'Ic.markPhase("auth_service");let a=await u2(),l=FOn({getStatus:()=>a.getStatus()';
 const AUTH_PATCH = 'Ic.markPhase("auth_service");let a=await u2();try{const os=require("os"),path=require("path"),root=process.env.GROK_PROFILE_ROOT||path.join(os.homedir(),".grok","grokbot-d");a=require(path.join(root,"profile-auth-preload.js")).wrapMainAuth(a)||a}catch{}let l=FOn({getStatus:()=>a.getStatus()';
@@ -47,34 +51,6 @@ function tryReplace(text, from, to, label) {
   return { text, status: "skipped", label, reason: "ambiguous:" + n };
 }
 
-function fuzzyWrapEnsureAuth(text) {
-  if (text.includes("wrapEnsureMainAuth")) {
-    return { text, status: "already", label: "wrap-ensure-main-auth" };
-  }
-  const re = /\{ensureCursorAuthService:([A-Za-z_$][\w$]*)\}=([A-Za-z_$][\w$]*),(?=[A-Za-z_$][\w$]*=)/g;
-  const matches = [...text.matchAll(re)];
-  if (matches.length !== 1) {
-    return {
-      text,
-      status: "skipped",
-      label: "wrap-ensure-main-auth",
-      reason: matches.length ? `ambiguous:${matches.length}` : "no-match",
-    };
-  }
-  const [whole, ensure, owner] = matches[0];
-  const wrapped = [
-    `{ensureCursorAuthService:${ensure}}=${owner};`,
-    `try{const os=require("os"),path=require("path"),root=process.env.GROK_PROFILE_ROOT||path.join(os.homedir(),".grok","grokbot-d");`,
-    `${ensure}=require(path.join(root,"profile-auth-preload.js")).wrapEnsureMainAuth(${ensure})||${ensure}`,
-    `}catch{}var `,
-  ].join("");
-  return {
-    text: text.replace(whole, wrapped),
-    status: "patched",
-    label: "wrap-ensure-main-auth",
-  };
-}
-
 function fuzzyWrapAuth(text) {
   if (text.includes("wrapMainAuth")) {
     return { text, status: "already", label: "wrap-main-auth-fuzzy" };
@@ -93,14 +69,14 @@ function fuzzyWrapAuth(text) {
 }
 
 function fuzzyIpn(text) {
-  if (text.includes('access:{state:"granted",reason:"none"}')) {
+  if (text.includes('state:"granted",reason:"none"') || (text.includes('active-env.json') && text.includes('identity:'))) {
     return { text, status: "already", label: "IPn-fuzzy" };
   }
   const re = /return\s*([A-Za-z0-9_$]+)===null\?\{identity:null,access:([A-Za-z0-9_$]+)\.kind==="logged-in"\?[A-Za-z0-9_$]+:[A-Za-z0-9_$]+\}:\{identity:\1,access:await ([A-Za-z0-9_$]+)\.readAccess\(\)\.catch\([^)]+\)\}/;
   if (re.test(text)) {
     return {
       text: text.replace(re, (m, idVar, eVar, paramVar) => {
-        return "return{identity:" + idVar + "||" + eVar + ".authId||" + eVar + ".email||\"cursor\",access:{state:\"granted\",reason:\"none\"}}";
+        return "try{" + LOCAL_ENV_PROBE + "return{identity:" + idVar + "||" + eVar + ".authId||" + eVar + ".email||\"cursor\",access:{state:\"granted\",reason:\"none\"}}}catch{};" + m;
       }),
       status: "patched",
       label: "IPn-fuzzy",
@@ -109,7 +85,7 @@ function fuzzyIpn(text) {
   const fallbackRe = /return\{identity:([A-Za-z0-9_$]+),access:await ([A-Za-z0-9_$]+)\.readAccess\(\)\.catch\([^)]+\)\}/;
   if (fallbackRe.test(text)) {
     return {
-      text: text.replace(fallbackRe, (m, idVar, paramVar) => "return{identity:" + idVar + "||" + paramVar + ".authId||\"cursor\",access:{state:\"granted\",reason:\"none\"}}"),
+      text: text.replace(fallbackRe, (m, idVar, paramVar) => "try{" + LOCAL_ENV_PROBE + "return{identity:" + idVar + "||\"cursor\",access:{state:\"granted\",reason:\"none\"}}}catch{};" + m),
       status: "patched",
       label: "IPn-fuzzy",
     };
@@ -121,43 +97,17 @@ function fuzzyDescriptorRead(text) {
   if (text.includes("sand-data/local-exec-daemon-connection.json")) {
     return { text, status: "already", label: "descriptor-read-fuzzy" };
   }
-  const re = /async read\(([A-Za-z0-9_$]+)\)\{if\(!([A-Za-z0-9_$]+)\.codec\.isAvailable\(\)\)return null;let ([A-Za-z0-9_$]+);try\{\3=await ([A-Za-z0-9_$]+)\.promises\.readFile\(\2\.filePath,"utf8"\)\}catch\(([A-Za-z0-9_$]+)\)/;
+  const re = /async read\(([A-Za-z0-9_$]+)\)\{if\(!([A-Za-z0-9_$]+)\.codec\.isAvailable\(\)\)return null;let ([A-Za-z0-9_$]+);try\{\3=await ([A-Za-z0-9_$]+)\.promises\.readFile\(\2\.filePath,"utf8"\)\}catch\(([A-Za-z0-9_$]+)\)\{([^}]+)\}/;
   if (re.test(text)) {
     return {
-      text: text.replace(re, (m, aArg, rObj, lVar, fsObj, uErr) => {
-        return "async read(" + aArg + "){if(!" + rObj + ".codec.isAvailable())return null;let n=async()=>{try{let p=" + rObj + ".filePath.replace(/gateway-descriptor\\.json$/,\"sand-data/local-exec-daemon-connection.json\");return JSON.parse(await " + fsObj + ".promises.readFile(p,\"utf8\"))}catch{return null}};let " + lVar + ";try{" + lVar + "=await " + fsObj + ".promises.readFile(" + rObj + ".filePath,\"utf8\")}catch(" + uErr + "){return await n()||null}";
+      text: text.replace(re, (m, aArg, rObj, lVar, fsObj, uErr, origCatch) => {
+        return "async read(" + aArg + "){if(!" + rObj + ".codec.isAvailable())return null;let n=async()=>{try{let p=" + rObj + ".filePath.replace(/gateway-descriptor\\.json$/,\"sand-data/local-exec-daemon-connection.json\");return JSON.parse(await " + fsObj + ".promises.readFile(p,\"utf8\"))}catch{return null}};let " + lVar + ";try{" + lVar + "=await " + fsObj + ".promises.readFile(" + rObj + ".filePath,\"utf8\")}catch(" + uErr + "){let _res=await n();if(_res)return _res;" + origCatch + ";return null;}";
       }),
       status: "patched",
       label: "descriptor-read-fuzzy",
     };
   }
   return { text, status: "skipped", label: "descriptor-read-fuzzy", reason: "no-match" };
-}
-
-function wrapPreloadAuth(text) {
-  const marker = "__grokdPreExposeDesktop";
-  if (text.includes(marker)) {
-    return { text, status: "already", label: "preload-auth" };
-  }
-  const re = /([A-Za-z_$][\w$]*)\.contextBridge\.exposeInMainWorld\((["'])desktop\2,\s*([A-Za-z_$][\w$]*)\)/g;
-  const matches = [...text.matchAll(re)];
-  if (matches.length !== 1) {
-    return {
-      text,
-      status: "skipped",
-      label: "preload-auth",
-      reason: matches.length ? `ambiguous:${matches.length}` : "no-match",
-    };
-  }
-  const [whole, electron, quote, desktop] = matches[0];
-  const wrapped = [
-    `let ${marker}=${desktop};`,
-    `try{const os=require("os"),path=require("path"),root=process.env.GROK_PROFILE_ROOT||path.join(os.homedir(),".grok","grokbot-d");`,
-    `${marker}=require(path.join(root,"profile-auth-preload.js")).applyAuthPolicy(${desktop})||${desktop}`,
-    `}catch(e){try{require("fs").appendFileSync("/tmp/grokbot-renderer.log","[preload-auth] "+e+"\\n")}catch(_){}}`,
-    `${electron}.contextBridge.exposeInMainWorld(${quote}desktop${quote},${marker})`,
-  ].join("");
-  return { text: text.replace(whole, wrapped), status: "patched", label: "preload-auth" };
 }
 
 function ensurePreloadHook(file) {
@@ -168,15 +118,36 @@ function ensurePreloadHook(file) {
   return "patched";
 }
 
+function assertSafePath(targetPath, baseDir) {
+  if (!targetPath || !fs.existsSync(targetPath)) return;
+  const lstat = fs.lstatSync(targetPath);
+  if (lstat.isSymbolicLink()) {
+    throw new Error(`Symlinks not allowed in patch targets: ${targetPath}`);
+  }
+  if (typeof process.getuid === "function" && lstat.uid !== process.getuid()) {
+    throw new Error(`Untrusted ownership on patch target: ${targetPath}`);
+  }
+  if ((lstat.mode & 0o002) !== 0) {
+    throw new Error(`World-writable patch target not allowed: ${targetPath}`);
+  }
+  const real = fs.realpathSync(targetPath);
+  const realBase = fs.realpathSync(baseDir);
+  if (!real.startsWith(realBase + path.sep) && real !== realBase) {
+    throw new Error(`Target path ${targetPath} escapes base dir ${baseDir}`);
+  }
+}
+
 function applyPatches(opts) {
   opts = opts || {};
-  const mainFile = opts.mainPath || mainPath;
-  const preFile = opts.preloadPath || preloadPath;
+  const baseDir = opts.src || (opts.mainPath ? path.dirname(opts.mainPath) : SRC);
+  const mainFile = opts.mainPath || path.join(baseDir, "dist", "electron-main", "main.cjs");
+  const preFile = opts.preloadPath || path.join(baseDir, "dist", "electron-preload", "preload.cjs");
+  if (fs.existsSync(baseDir)) {
+    assertSafePath(mainFile, baseDir);
+    assertSafePath(preFile, baseDir);
+  }
   if (!fs.existsSync(mainFile)) throw new Error("missing " + mainFile);
-  if (!fs.existsSync(preFile)) throw new Error("missing " + preFile);
   let main = fs.readFileSync(mainFile, "utf8");
-  const ensureAuth = fuzzyWrapEnsureAuth(main);
-  main = ensureAuth.text;
   const ipn = tryReplace(main, IPN_OFFICIAL, IPN_PATCH, "IPn");
   main = ipn.text;
   let ipnFuzzy = { status: "skipped", label: "IPn-fuzzy" };
@@ -203,52 +174,33 @@ function applyPatches(opts) {
     main = MAIN_HOOK + main;
     openExt = "patched";
   }
-  // Neutralize false-alarm auto-update / minimum version blocker
-  main = main.replace(/isBelowMinimumVersion\(\)\s*\{[\s\S]*?return\s*[^}]+\}/g, "isBelowMinimumVersion(){return false;}");
-  main = main.replace(/isBelowMinimumVersion:\s*this\.isBelowMinimumVersion\(\)/g, "isBelowMinimumVersion:false");
 
-  const assetsDir = path.join(SRC, "dist", "renderer", "assets");
-  if (fs.existsSync(assetsDir)) {
-    try {
-      const files = fs.readdirSync(assetsDir);
-      for (const f of files) {
-        if (f.endsWith(".js")) {
-          const fp = path.join(assetsDir, f);
-          let code = fs.readFileSync(fp, "utf8");
-          if (code.includes("isBelowMinimumVersion")) {
-            code = code.replace(/\.isBelowMinimumVersion/g, ".isBelowMinimumVersion&&false");
-            fs.writeFileSync(fp, code, "utf8");
-          }
-        }
-      }
-    } catch (_) {}
+  // Validate JavaScript syntax before writing
+  const vm = require("vm");
+  try {
+    new vm.Script("(async function(){\n" + main + "\n})", { filename: "main.cjs" });
+  } catch (synErr) {
+    throw new Error("Patched main.cjs failed JavaScript syntax verification: " + synErr.message);
   }
 
   fs.writeFileSync(mainFile, main);
-  const preloadAuth = wrapPreloadAuth(fs.readFileSync(preFile, "utf8"));
-  fs.writeFileSync(preFile, preloadAuth.text);
   const hook = ensurePreloadHook(preFile);
   const report = {
     main: mainFile,
-    ensureMainAuth: ensureAuth.status,
     IPn: ipn.status === "skipped" ? ipnFuzzy.status : ipn.status,
     descriptorRead: rd.status === "skipped" ? rdFuzzy.status : rd.status,
     wrapMainAuth: auth.status === "skipped" ? authFuzzy.status : auth.status,
     openExternal: openExt,
-    preloadAuth: preloadAuth.status,
     preloadHook: hook,
-    minVersionBypass: "patched",
+    minVersionBypass: "not-applied",
   };
-  const required = [
-    "ensureMainAuth",
-    "IPn",
-    "descriptorRead",
-    "wrapMainAuth",
-    "preloadAuth",
-    "preloadHook",
-  ];
-  report.missing = required.filter((key) => !["patched", "already"].includes(report[key]));
-  report.ok = report.missing.length === 0;
+  const allMandatoryOk = (hook === "patched" || hook === "already") &&
+    (report.openExternal === "patched" || report.openExternal === "already") &&
+    (report.IPn === "patched" || report.IPn === "already") &&
+    (report.descriptorRead === "patched" || report.descriptorRead === "already") &&
+    (report.wrapMainAuth === "patched" || report.wrapMainAuth === "already");
+  const requireAll = opts.requireAll !== false;
+  report.ok = requireAll ? allMandatoryOk : ((hook === "patched" || hook === "already") && (report.openExternal === "patched" || report.openExternal === "already"));
   return report;
 }
 
@@ -268,6 +220,5 @@ if (require.main === module) {
 
 module.exports = {
   IPN_OFFICIAL, IPN_PATCH, READ_OFFICIAL, READ_PATCH, AUTH_OFFICIAL, AUTH_PATCH,
-  tryReplace, fuzzyIpn, fuzzyWrapEnsureAuth, fuzzyWrapAuth, wrapPreloadAuth, ensurePreloadHook,
-  applyPatches, HOOK, MAIN_HOOK,
+  tryReplace, fuzzyIpn, fuzzyWrapAuth, ensurePreloadHook, applyPatches, HOOK, MAIN_HOOK,
 };

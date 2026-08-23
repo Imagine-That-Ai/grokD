@@ -9,12 +9,22 @@ function textOf(el) {
 }
 
 function isShown(el) {
+  if (!el) return false;
   let n = el;
   for (let i = 0; n && i < 16; i++) {
-    if (n.style && n.style.display === "none") return false;
+    if (n.hidden) return false;
+    if (n.style) {
+      if (n.style.display === "none" || n.style.visibility === "hidden" || n.style.opacity === "0") return false;
+    }
+    if (typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+      try {
+        const cs = window.getComputedStyle(n);
+        if (cs && (cs.display === "none" || cs.visibility === "hidden" || cs.opacity === "0")) return false;
+      } catch (_) {}
+    }
     n = n.parentElement || n.parentNode || null;
   }
-  return !!el;
+  return true;
 }
 
 function chatSurface(doc) {
@@ -85,10 +95,22 @@ function stepIntoChat(doc, opts) {
   const cancel = clickLabeled(doc, /^Cancel$/i);
   if (cancel) return { action: "clicked-cancel", ok: false };
   if (typeof opts.createNamed === "function") {
+    if (doc && doc._gdCreatingBot) {
+      return { action: "box-create-in-flight", ok: false };
+    }
     try {
-      opts.createNamed("New Bot");
+      if (doc) doc._gdCreatingBot = true;
+      const res = opts.createNamed("New Bot");
+      if (res && typeof res.then === "function") {
+        res.catch(() => {}).finally(() => {
+          if (doc) doc._gdCreatingBot = false;
+        });
+      } else {
+        if (doc) doc._gdCreatingBot = false;
+      }
       return { action: "box-create", ok: false };
     } catch (e) {
+      if (doc) doc._gdCreatingBot = false;
       return { action: "create-failed", ok: false, error: String(e && e.message || e) };
     }
   }

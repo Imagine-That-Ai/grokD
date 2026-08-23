@@ -203,3 +203,20 @@
   color: #ffffff;
   border-color: rgba(255, 255, 255, 0.4);
 }
+
+/* Setup Wizard Menu Button - iOS x ChatGPT Minimal Style */
+.whimsical-model-item.is-wizard-btn,
+#grok-menu-setup-wizard {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: all 0.16s ease !important;
+}
+
+.whimsical-model-item.is-wizard-btn:hover,
+#grok-menu-setup-wizard:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  transform: translateY(-1px);
+}

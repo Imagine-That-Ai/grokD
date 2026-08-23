@@ -27,28 +27,49 @@ function pickChief(agents, preferredId) {
 function buildPack(opts) {
   opts = opts || {};
   const when = opts.when || new Date().toISOString();
+  function sanitizeTranscript(text, maxLen) {
+    if (text == null) return "(none captured)";
+    let s = String(text).slice(0, maxLen);
+    s = s.replace(/`{3,}/g, "'''").replace(/~{3,}/g, "---");
+    s = s.replace(/<!--/g, "&lt;!--").replace(/-->/g, "--&gt;");
+    return s;
+  }
+  function sanitizeField(text, maxLen = 120) {
+    if (text == null) return "";
+    let s = String(text).split(/[\r\n]/)[0].slice(0, maxLen);
+    return s.replace(/[:`#*_[\]<>~]/g, " ").replace(/\s+/g, " ").trim();
+  }
+
   const lines = [
     "# Fall-over handoff",
     "",
-    "From: " + (opts.from || "unknown"),
-    "To: " + (opts.to || "local-d"),
-    "When: " + when,
-    "Why: " + (opts.why || "included quota spent"),
+    "From: " + sanitizeField(opts.from || "unknown", 64),
+    "To: " + sanitizeField(opts.to || "local-d", 64),
+    "When: " + sanitizeField(when, 64),
+    "Why: " + sanitizeField(opts.why || "included quota spent", 128),
     "",
     "You are the chief on Local D. Disperse this work. Do not wait for a recap.",
     "",
     "## Last user request",
-    opts.lastUser || "(none captured)",
+    "<!-- UNTRUSTED_EXTERNAL_TRANSCRIPT_START -->",
+    "```text",
+    sanitizeTranscript(opts.lastUser, 4000),
+    "```",
+    "<!-- UNTRUSTED_EXTERNAL_TRANSCRIPT_END -->",
     "",
     "## Open work",
-    opts.openWork || "(none listed)",
+    "```text",
+    sanitizeTranscript(opts.openWork, 2000),
+    "```",
     "",
     "## Roster",
   ];
   const roster = Array.isArray(opts.agents) ? opts.agents : [];
   if (!roster.length) lines.push("(empty)");
   for (const a of roster) {
-    lines.push("- " + (a.name || a.id) + (a.id ? " (" + a.id + ")" : ""));
+    const name = sanitizeField(a.name || a.id, 64);
+    const id = sanitizeField(a.id, 64);
+    lines.push("- " + name + (id ? " (" + id + ")" : ""));
   }
   lines.push("");
   return lines.join("\n");
@@ -56,9 +77,10 @@ function buildPack(opts) {
 
 function writePack(text) {
   const dir = path.join(ROOT, "runtime", "handoffs");
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, "handoff-" + Date.now() + ".md");
-  fs.writeFileSync(file, String(text || ""));
+  const secGuard = require("./security-guard");
+  secGuard.ensureDir0700(dir);
+  const file = path.join(dir, "handoff-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + ".md");
+  secGuard.writeFile0600(file, String(text || ""));
   return file;
 }
 

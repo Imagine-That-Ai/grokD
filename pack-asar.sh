@@ -25,8 +25,12 @@ else
   echo "disk-eval hook already present"
 fi
 
-bash "$(dirname "$0")/asar-cli.sh" pack "$ASAR_SRC" /tmp/grokbot-hack/app.asar
-cp /tmp/grokbot-hack/app.asar "$DEST"
+STAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/grok-pack-XXXXXX")
+trap 'rm -rf "$STAGE_DIR"' EXIT
+chmod 700 "$STAGE_DIR"
+
+bash "$(dirname "$0")/asar-cli.sh" pack "$ASAR_SRC" "$STAGE_DIR/app.asar"
+cp "$STAGE_DIR/app.asar" "$DEST"
 
 # Update ElectronAsarIntegrity in Info.plist
 python3 - <<'PY'
@@ -45,8 +49,8 @@ with open(plist, "w", encoding="utf-8") as f:
     f.write(c)
 PY
 
-if ! codesign --force --deep --sign - "$APP" >/tmp/grokbot-hack/codesign.out 2>&1; then
-  cat /tmp/grokbot-hack/codesign.out >&2
+if ! codesign --force --deep --sign - "$APP" >"$STAGE_DIR/codesign.out" 2>&1; then
+  cat "$STAGE_DIR/codesign.out" >&2
   exit 1
 fi
 echo "packed $DEST"

@@ -82,7 +82,7 @@ gateway_token() {
     "$NODE" -e "try{process.stdout.write(require(process.argv[1]).getGatewayToken())}catch(e){process.exit(1)}" "$RUN_JS/security-guard.js" 2>/dev/null
     return $?
   fi
-  printf '%s\n' "fake-gateway-token"
+  return 1
 }
 
 HOST_TOKEN="$(gateway_token 2>/dev/null || true)"
@@ -237,7 +237,7 @@ if ! is_listen 8320; then
     nohup "$NODE" "$RUN_JS/openburnbar-proxy.mjs" --port 8320 >"$HACK/openburnbar-proxy.out" 2>&1 &
     echo "started openburnbar-proxy pid $! (:8320)"
   elif command -v npx >/dev/null 2>&1; then
-    nohup npx -y openburnbar@latest proxy --port 8320 --allow-local-key >"$HACK/openburnbar-proxy.out" 2>&1 &
+    nohup npx -y openburnbar@0.2.0 proxy --port 8320 --allow-local-key >"$HACK/openburnbar-proxy.out" 2>&1 &
     echo "started openburnbar proxy via npx pid $! (:8320)"
   fi
 else

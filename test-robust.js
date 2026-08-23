@@ -4,9 +4,10 @@ const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
 
+const secGuard = require("./security-guard");
 const HOST = "http://127.0.0.1:1337";
 const PROXY = "http://127.0.0.1:8787";
-const TOKEN = "fake-gateway-token";
+const TOKEN = secGuard.getGatewayToken();
 const BOX = "/tmp/grokbot-hack/box-data/agents";
 const STAMP = Date.now().toString(36);
 
@@ -170,10 +171,10 @@ const { resolveTeammate } = require("./bridge-lib.js");
 
   // 7. routine create + poll fire -> transcript
   const tokenR = `ROUTINE-${STAMP}`;
+  const dest = created || grok;
+  const localId = `harness-${STAMP}`;
+  const dir = path.join(BOX, dest.id, "automations", localId);
   try {
-    const dest = created || grok;
-    const localId = `harness-${STAMP}`;
-    const dir = path.join(BOX, dest.id, "automations", localId);
     fs.mkdirSync(dir, { recursive: true });
     const cfg = {
       name: `Pulse ${STAMP}`,
@@ -187,7 +188,7 @@ const { resolveTeammate } = require("./bridge-lib.js");
     fs.writeFileSync(path.join(dir, "automation.json"), JSON.stringify(cfg, null, 2));
     const poll = await fetch(`${PROXY}/sand/automation-events/poll`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
       body: "{}",
     });
     const pollText = await poll.text();
@@ -196,11 +197,19 @@ const { resolveTeammate } = require("./bridge-lib.js");
       timeoutMs: 25000,
       label: `routine fire ${tokenR}`,
     });
-    // disable so it does not keep firing
-    cfg.enabled = false;
-    fs.writeFileSync(path.join(dir, "automation.json"), JSON.stringify(cfg, null, 2));
     pass("routine-poll-fires-chat");
-  } catch (e) { fail("routine-poll-fires-chat", e); }
+  } catch (e) {
+    fail("routine-poll-fires-chat", e);
+  } finally {
+    try {
+      const cfgPath = path.join(dir, "automation.json");
+      if (fs.existsSync(cfgPath)) {
+        const c = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+        c.enabled = false;
+        fs.writeFileSync(cfgPath, JSON.stringify(c, null, 2));
+      }
+    } catch (_) {}
+  }
 
   // 8. existing minute-joke routine has actually produced a joke (historical proof if present)
   try {

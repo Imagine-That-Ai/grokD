@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Fast, no-network unit tests for gateway-shim helpers.
 const path = require("path");
+const secGuard = require("./security-guard");
 const assert = (c, m) => { if (!c) throw new Error(m); };
 const {
   isIdle, resolveTargets, broadcastOk, distinctiveToken, hayHasMessage,
@@ -77,7 +78,8 @@ ok("parse-broadcast");
   if (listed.status !== 200) throw new Error("list");
   const bc = offlineFallback("broadcastToAgents", { targets: ["aaa"] }, new Error("ECONNREFUSED"));
   if (bc.status !== 502 || bc.json.ok !== false) throw new Error("broadcast");
-  if (!authorizationMatches("Bearer fake-gateway-token")) throw new Error("auth ok");
+  const gwToken = secGuard.getGatewayToken();
+  if (!authorizationMatches(`Bearer ${gwToken}`)) throw new Error("auth ok");
   if (authorizationMatches("")) throw new Error("empty auth");
   if (authorizationMatches("Bearer other")) throw new Error("wrong auth");
   if (resolveUp("http://127.0.0.1:19338") !== "http://127.0.0.1:19338") throw new Error("loopback up");
@@ -272,7 +274,8 @@ ok("parse-broadcast");
     assert(bc.status === 502, `bc status ${bc.status}`);
     assert(bc.json && bc.json.ok === false, JSON.stringify(bc.json));
     assert(bc.json.scheduled == null, "broadcast must not schedule");
-    assert(authorizationMatches("Bearer fake-gateway-token"), "auth ok");
+    const gwToken = secGuard.getGatewayToken();
+    assert(authorizationMatches(`Bearer ${gwToken}`), "auth ok");
     assert(!authorizationMatches(""), "empty auth");
     assert(!authorizationMatches("Bearer other"), "wrong auth");
     assert(resolveUp("http://127.0.0.1:19338") === "http://127.0.0.1:19338", "loopback up");

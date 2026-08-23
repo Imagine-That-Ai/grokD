@@ -8,14 +8,13 @@
 
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
-const http = require("http");
 const https = require("https");
+const dns = require("dns");
+const secGuard = require("./security-guard");
+const paths = require("./paths");
 
-const ROOT = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
-const HACK = process.env.GROKBOT_HACK || path.join(ROOT, "hack");
-const TMP_HACK = "/tmp/grokbot-hack";
-const SEAT4 = process.env.GROK_SEAT4 || path.join(os.homedir(), "Library/Application Support/GrokBotSeat4");
+const ROOT = paths.ROOT;
+const SEAT4 = paths.SEAT4;
 const STATE = path.join(ROOT, "runtime", "paused.json");
 const POLICY = path.join(ROOT, "runtime", "pause-policy.json");
 
@@ -25,8 +24,7 @@ function readJson(p, fallback) {
 }
 
 function writeJson(p, obj) {
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(obj, null, 2) + "\n");
+  secGuard.writeJsonAtomic0600(p, obj);
 }
 
 function defaultState() {
@@ -52,8 +50,16 @@ function loadState() {
 }
 
 function saveState(s) {
-  writeJson(STATE, s);
-  try { writeJson(path.join(TMP_HACK, "paused.json"), s); } catch {}
+  const lockFile = path.join(ROOT, "runtime", ".paused.lock");
+  const fd = secGuard.acquireFileLock(lockFile, { waitMs: 4000, staleMs: 15000 });
+  if (fd === null) {
+    throw new Error("Failed to acquire bot pause state lock");
+  }
+  try {
+    writeJson(STATE, s);
+  } finally {
+    secGuard.releaseFileLock(lockFile, fd);
+  }
 }
 
 function pausedSeats() {
@@ -90,11 +96,15 @@ function agentRoots() {
   const seen = new Set();
   const add = (p) => {
     if (!p || seen.has(p) || !fs.existsSync(p)) return;
-    seen.add(p);
-    out.push(p);
+    try {
+      const st = fs.lstatSync(p);
+      if (st.isSymbolicLink()) return;
+      if (typeof process.getuid === "function" && st.uid !== process.getuid()) return;
+      seen.add(p);
+      out.push(p);
+    } catch (_) {}
   };
-  add(path.join(HACK, "box-data", "agents"));
-  add(path.join(TMP_HACK, "box-data", "agents"));
+  add(path.join(paths.existingHack(), "box-data", "agents"));
   add(path.join(ROOT, "profile-data", "local-d", "box-data", "agents"));
   return out;
 }
@@ -112,6 +122,9 @@ function listLocalAutos() {
       for (const folder of folders) {
         if (!folder.isDirectory()) continue;
         const file = path.join(autoRoot, folder.name, "automation.json");
+        try {
+          if (fs.lstatSync(file).isSymbolicLink()) continue;
+        } catch (_) { continue; }
         const cfg = readJson(file, null);
         if (!cfg || typeof cfg !== "object") continue;
         found.push({ file, root, agentId: ent.name, folder: folder.name, cfg });
@@ -130,7 +143,7 @@ function autoOn(cfg) {
 
 function setLocalEnabled(file, cfg, on) {
   const next = Object.assign({}, cfg, { enabled: on, isEnabled: on });
-  fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n");
+  secGuard.writeFile0600(file, JSON.stringify(next, null, 2) + "\n");
 }
 
 function pauseLocal() {
@@ -138,14 +151,18 @@ function pauseLocal() {
   let localDisabled = 0;
   for (const row of listLocalAutos()) {
     if (!autoOn(row.cfg)) continue;
-    setLocalEnabled(row.file, row.cfg, false);
-    localDisabled += 1;
-    saved.push({
-      file: row.file,
-      agentId: row.agentId,
-      folder: row.folder,
-      name: row.cfg.name || row.folder,
-    });
+    try {
+      setLocalEnabled(row.file, row.cfg, false);
+      localDisabled += 1;
+      saved.push({
+        file: row.file,
+        agentId: row.agentId,
+        folder: row.folder,
+        name: row.cfg.name || row.folder,
+      });
+    } catch (e) {
+      console.error("[pause] failed to pause local auto:", row.file, e);
+    }
   }
   return { localDisabled, saved };
 }
@@ -153,10 +170,11 @@ function pauseLocal() {
 function interruptLocal() {
   const http = require("http");
   const payload = Buffer.from("{}");
+  const token = secGuard.getGatewayToken();
   const list = () => new Promise((resolve, reject) => {
     const req = http.request({
       host: "127.0.0.1", port: 1337, path: "/api/listAgents", method: "POST",
-      headers: { "content-type": "application/json", authorization: "Bearer fake-gateway-token", "content-length": payload.length },
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "content-length": payload.length },
       timeout: 3000,
     }, (res) => {
       const chunks = [];
@@ -179,8 +197,8 @@ function interruptLocal() {
       const body = Buffer.from(JSON.stringify({ id: a.id }));
       return new Promise((resolve) => {
         const req = http.request({
-          host: "127.0.0.1", port: 1337, path: "/api/interruptAgentRun", method: "POST",
-          headers: { "content-type": "application/json", authorization: "Bearer fake-gateway-token", "content-length": body.length },
+          host: "127.0.0.1", port: 1337, path: "/api/interruptAgent", method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "content-length": body.length },
           timeout: 3000,
         }, (res) => { res.resume(); res.on("end", resolve); });
         req.on("error", () => resolve());
@@ -210,6 +228,8 @@ function discoverComputers() {
     const j = readJson(file, null);
     if (!j || typeof j.baseUrl !== "string") return;
     if (/127\.0\.0\.1|localhost/.test(j.baseUrl)) return;
+    if (!secGuard.isApprovedRemoteComputerDescriptor(j.baseUrl)) return;
+    if (j.token && secGuard.isGatewayOrLoopbackMarker(j.token)) return;
     const key = j.baseUrl.replace(/\/$/, "");
     if (seen.has(key)) return;
     seen.add(key);
@@ -230,31 +250,63 @@ function discoverComputers() {
   return out;
 }
 
-function postComputer(conn, method, body) {
+async function postComputer(conn, method, body) {
+  if (!conn || !conn.baseUrl) throw new Error("no computer");
+  if (!secGuard.isApprovedRemoteComputerDescriptor(conn.baseUrl)) {
+    throw new Error("unapproved remote descriptor domain");
+  }
+  if (conn.token && secGuard.isGatewayOrLoopbackMarker(conn.token)) {
+    throw new Error("gateway master token cannot be sent to remote computer");
+  }
+  const u = new URL(conn.baseUrl.replace(/\/$/, "") + "/api/" + method);
+  if (u.protocol !== "https:") throw new Error("insecure protocol for remote descriptor");
+  if (secGuard.isPrivateOrLoopbackIp(u.hostname)) {
+    throw new Error("private or loopback IP rejected");
+  }
+  const cleanHost = String(u.hostname || "").toLowerCase().trim().replace(/\.+$/, "");
+  const records = await dns.promises.lookup(cleanHost, { all: true, verbatim: true });
+  if (!records || !records.length) throw new Error("DNS resolution failed");
+  for (const rec of records) {
+    if (secGuard.isPrivateOrLoopbackIp(rec.address)) {
+      throw new Error("DNS record resolved to private or loopback IP");
+    }
+  }
+  const pinnedIp = records[0].address;
+  const payload = Buffer.from(JSON.stringify(body || {}));
+  const headers = {
+    host: u.host,
+    "content-type": "application/json",
+    accept: "application/json",
+    "content-length": payload.length,
+  };
+  if (conn.token) headers.authorization = "Bearer " + String(conn.token).replace(/[\r\n]/g, "");
+
   return new Promise((resolve, reject) => {
-    if (!conn || !conn.baseUrl) return reject(new Error("no computer"));
-    const u = new URL(conn.baseUrl.replace(/\/$/, "") + "/api/" + method);
-    const payload = Buffer.from(JSON.stringify(body || {}));
-    const lib = u.protocol === "https:" ? https : http;
-    const headers = Object.assign({
-      "content-type": "application/json",
-      accept: "application/json",
-      "content-length": payload.length,
-    }, conn.headers || {});
-    if (conn.token) headers.authorization = "Bearer " + conn.token;
-    const req = lib.request({
+    const MAX_RESP = 1024 * 1024;
+    let size = 0;
+    const req = https.request({
       protocol: u.protocol,
-      hostname: u.hostname,
-      port: u.port || (u.protocol === "https:" ? 443 : 80),
+      host: pinnedIp,
+      servername: u.hostname,
+      port: u.port || 443,
       path: u.pathname,
       method: "POST",
       headers,
-      rejectUnauthorized: false,
+      rejectUnauthorized: true,
       timeout: 4000,
     }, (res) => {
       const chunks = [];
-      res.on("data", (c) => chunks.push(c));
+      res.on("data", (c) => {
+        size += c.length;
+        if (size > MAX_RESP) {
+          req.destroy();
+          reject(new Error("Response too large"));
+          return;
+        }
+        chunks.push(c);
+      });
       res.on("end", () => {
+        if (size > MAX_RESP) return;
         const text = Buffer.concat(chunks).toString("utf8");
         let json = null;
         try { json = JSON.parse(text); } catch {}
@@ -269,17 +321,34 @@ function postComputer(conn, method, body) {
   });
 }
 
+let _pauseGeneration = 0;
+
 async function pauseRemote(computers, post) {
   const fn = post || postComputer;
   const remote = [];
   let interrupted = 0;
   let disabled = 0;
-  for (const conn of computers || []) {
+  let errors = [];
+  const cappedComputers = (computers || []).slice(0, 10);
+  const deadline = Date.now() + 15000;
+  for (const conn of cappedComputers) {
+    if (Date.now() > deadline) {
+      errors.push({ tag: conn.tag, op: "pauseRemote", error: "aggregate deadline exceeded" });
+      break;
+    }
     let agents = [];
     try { agents = await fn(conn, "listAgents", {}); }
-    catch { continue; }
+    catch (e) {
+      errors.push({ tag: conn.tag, op: "listAgents", error: String(e && e.message || e) });
+      continue;
+    }
     if (!Array.isArray(agents)) continue;
-    for (const a of agents) {
+    const cappedAgents = agents.slice(0, 50);
+    for (const a of cappedAgents) {
+      if (Date.now() > deadline) {
+        errors.push({ tag: conn.tag, agentId: a.id, op: "pauseRemote", error: "aggregate deadline exceeded" });
+        break;
+      }
       if (!a || !a.id) continue;
       const busy = !!(a.isRunning || a.isComposingMessage || a.isRunningTurn);
       if (busy) {
@@ -289,14 +358,20 @@ async function pauseRemote(computers, post) {
             const r = await fn(conn, "interruptAgentRun", { id: a.id });
             cut = !r || r.hadActiveRun !== false;
             interrupted += 1;
-          } catch {}
+          } catch (e) {
+            errors.push({ tag: conn.tag, agentId: a.id, op: "interrupt", error: String(e && e.message || e) });
+          }
         }
       }
       let autos = [];
       try { autos = await fn(conn, "getAgentAutomations", { id: a.id }); }
-      catch { autos = []; }
+      catch (e) {
+        errors.push({ tag: conn.tag, agentId: a.id, op: "getAgentAutomations", error: String(e && e.message || e) });
+        autos = [];
+      }
       if (!Array.isArray(autos)) continue;
-      for (const auto of autos) {
+      const cappedAutos = autos.slice(0, 50);
+      for (const auto of cappedAutos) {
         if (!auto || !auto.id) continue;
         if (auto.isEnabled === false || auto.enabled === false) continue;
         try {
@@ -312,18 +387,22 @@ async function pauseRemote(computers, post) {
             automationId: auto.id,
             name: auto.name || auto.id,
           });
-        } catch {}
+        } catch (e) {
+          errors.push({ tag: conn.tag, agentId: a.id, automationId: auto.id, op: "disable", error: String(e && e.message || e) });
+        }
       }
     }
   }
-  return { interrupted, disabled, remote };
+  return { interrupted, disabled, remote, errors };
 }
 
 async function resumeRemote(saved, computers, post) {
   const fn = post || postComputer;
   const byTag = new Map((computers || []).map((c) => [c.tag, c]));
   let n = 0;
+  const restoredIds = new Set();
   for (const row of saved || []) {
+    // Finding 33: Only send to the matching computer connection for this tag
     const conn = byTag.get(row.tag);
     if (!conn) continue;
     try {
@@ -333,9 +412,10 @@ async function resumeRemote(saved, computers, post) {
         isEnabled: true,
       });
       n += 1;
+      restoredIds.add(`${row.tag}|${row.agentId}|${row.automationId}`);
     } catch {}
   }
-  return n;
+  return { count: n, restoredIds };
 }
 
 function computersForSeats(want, provided) {
@@ -345,109 +425,202 @@ function computersForSeats(want, provided) {
   const out = [];
   for (const c of list || []) {
     const tag = c.tag === "seat4" && active ? active : c.tag;
-    if (ids.has(tag)) out.push(Object.assign({}, c, { tag }));
+    if (ids.has(tag) || ids.has("all")) out.push(Object.assign({}, c, { tag }));
   }
   return out;
 }
 
 function resolveSeats(opts) {
   const raw = opts && opts.seats;
-  if (Array.isArray(raw) && raw.length) return raw.map(String);
-  const found = ["local-d"];
+  const discovered = ["local-d"];
   for (const c of (opts && opts.computers) || discoverComputers()) {
     const tag = c.tag === "seat4" ? (activeProfileId() || "seat4") : c.tag;
-    if (tag && !found.includes(tag)) found.push(tag);
+    if (tag && !discovered.includes(tag)) discovered.push(tag);
   }
-  return found;
+  if (Array.isArray(raw) && raw.length) {
+    const out = [];
+    for (const s of raw) {
+      const str = String(s);
+      if (str === "all") {
+        for (const d of discovered) {
+          if (!out.includes(d)) out.push(d);
+        }
+      } else if (!out.includes(str)) {
+        out.push(str);
+      }
+    }
+    return out.length ? out : discovered;
+  }
+  return discovered;
+}
+
+const _activePausePromises = new Map();
+let _pauseMutex = Promise.resolve();
+
+async function withPauseLock(fn) {
+  const prev = _pauseMutex;
+  let release;
+  _pauseMutex = new Promise((resolve) => { release = resolve; });
+  await prev.catch(() => {});
+  const lockPath = path.join(ROOT, ".pause.lock");
+  const fd = secGuard.acquireFileLock(lockPath, { waitMs: 8000, staleMs: 25000 });
+  if (fd === null) {
+    release();
+    throw new Error("Failed to acquire .pause.lock: another pause/resume operation is in progress");
+  }
+  try {
+    return await fn();
+  } finally {
+    secGuard.releaseFileLock(lockPath, fd);
+    release();
+  }
 }
 
 async function pause(opts) {
-  opts = opts || {};
-  const seats = resolveSeats(opts);
-  const cur = loadState();
-  const pending = seats.filter((id) => !cur.seats[id]);
-  if (!pending.length) {
-    return { paused: true, already: true, seats: pausedSeats() };
-  }
-  let local = { localDisabled: 0, saved: [] };
-  if (pending.includes("local-d")) {
-    local = pauseLocal();
-    try { interruptLocal(); } catch {}
-  }
-  const now = Date.now();
-  const next = loadState();
-  for (const id of pending) {
-    next.seats[id] = {
-      at: now,
-      local: id === "local-d" ? local.saved : [],
-      remote: [],
-    };
-  }
-  next.at = now;
-  saveState(next);
-
-  const computers = computersForSeats(pending.filter((id) => id !== "local-d"), opts.computers);
-  const finish = async () => {
-    const remote = await pauseRemote(computers, opts.post);
-    const s = loadState();
-    for (const id of pending) {
-      if (!s.seats[id]) continue;
-      s.seats[id].remote = remote.remote.filter((r) => r.tag === id);
+  return withPauseLock(async () => {
+    opts = opts || {};
+    const seats = resolveSeats(opts);
+    const cur = loadState();
+    const pending = seats.filter((id) => !cur.seats[id]);
+    if (!pending.length) {
+      return { paused: true, already: true, seats: pausedSeats() };
     }
-    saveState(s);
-    return remote;
-  };
+    let local = { localDisabled: 0, saved: [] };
+    let localErrors = [];
+    if (pending.includes("local-d")) {
+      try {
+        local = pauseLocal();
+      } catch (e) {
+        localErrors.push({ tag: "local-d", op: "pauseLocal", error: String(e && e.message || e) });
+      }
+      try {
+        await interruptLocal();
+      } catch (e) {
+        localErrors.push({ tag: "local-d", op: "interruptLocal", error: String(e && e.message || e) });
+      }
+    }
+    const now = Date.now();
+    const next = loadState();
+    const currentGen = `${now}-${crypto.randomUUID()}`;
+    for (const id of pending) {
+      next.seats[id] = {
+        at: now,
+        local: id === "local-d" ? local.saved : [],
+        remote: [],
+        gen: currentGen,
+        inFlight: true,
+      };
+    }
+    next.at = now;
+    saveState(next);
 
-  if (opts.waitRemote === false) {
-    finish().catch(() => {});
+    const computers = computersForSeats(pending.filter((id) => id !== "local-d"), opts.computers);
+    const finish = async () => {
+      const remote = await pauseRemote(computers, opts.post);
+      await withPauseLock(async () => {
+        const s = loadState();
+        for (const id of pending) {
+          if (!s.seats[id] || s.seats[id].gen !== currentGen) {
+            const disabledRows = remote.remote.filter((r) => r.tag === id);
+            if (disabledRows.length) {
+              const currentS = loadState();
+              if (!currentS.seats[id] || currentS.seats[id].gen === currentGen) {
+                resumeRemote(disabledRows, computers, opts.post).catch(() => {});
+              }
+            }
+            continue;
+          }
+          s.seats[id].remote = remote.remote.filter((r) => r.tag === id);
+          delete s.seats[id].inFlight;
+        }
+        saveState(s);
+      });
+      return remote;
+    };
+
+    const p = finish();
+    for (const id of pending) {
+      _activePausePromises.set(id, p);
+    }
+
+    if (opts.waitRemote === false) {
+      p.catch(() => {});
+      return {
+        paused: localErrors.length === 0,
+        already: false,
+        seats: pending,
+        localDisabled: local.localDisabled,
+        saved: local.saved,
+        pendingRemote: true,
+        computers: computers.length,
+        errors: localErrors,
+      };
+    }
+
+    const remote = await p;
+    const allErrors = [...localErrors, ...remote.errors];
     return {
-      paused: true,
+      paused: allErrors.length === 0,
       already: false,
       seats: pending,
       localDisabled: local.localDisabled,
       saved: local.saved,
-      pendingRemote: true,
+      interrupted: remote.interrupted,
+      remoteDisabled: remote.disabled,
+      remoteErrors: remote.errors,
+      errors: allErrors,
       computers: computers.length,
     };
-  }
-
-  const remote = await finish();
-  return {
-    paused: true,
-    already: false,
-    seats: pending,
-    localDisabled: local.localDisabled,
-    saved: local.saved,
-    interrupted: remote.interrupted,
-    remoteDisabled: remote.disabled,
-    computers: computers.length,
-  };
+  });
 }
 
 async function resume(opts) {
-  opts = opts || {};
-  const cur = loadState();
-  const seats = (opts.seats && opts.seats.length) ? opts.seats.map(String) : Object.keys(cur.seats);
-  const have = seats.filter((id) => cur.seats[id]);
-  if (!have.length) return { paused: isPaused(), already: true, seats: pausedSeats() };
-  let localN = 0;
-  let remoteN = 0;
-  const computers = computersForSeats(have.filter((id) => id !== "local-d"), opts.computers);
-  for (const id of have) {
-    const saved = cur.seats[id] || {};
-    if (id === "local-d") localN += resumeLocal(saved.local);
-    remoteN += await resumeRemote(saved.remote, computers, opts.post);
-    delete cur.seats[id];
-  }
-  cur.at = Date.now();
-  saveState(cur);
-  return {
-    paused: isPaused(),
-    already: false,
-    seats: have,
-    localEnabled: localN,
-    remoteEnabled: remoteN,
-  };
+  return withPauseLock(async () => {
+    opts = opts || {};
+    _pauseGeneration++;
+    const cur = loadState();
+    const rawSeats = (opts.seats && opts.seats.length) ? opts.seats.map(String) : Object.keys(cur.seats);
+    const seats = rawSeats.includes("all") ? Object.keys(cur.seats) : rawSeats;
+    const have = seats.filter((id) => cur.seats[id]);
+    if (!have.length) return { paused: isPaused(), already: true, seats: pausedSeats() };
+
+    // Wait for any in-flight pause on these seats
+    for (const id of have) {
+      if (_activePausePromises.has(id)) {
+        try { await _activePausePromises.get(id); } catch {}
+        _activePausePromises.delete(id);
+      }
+    }
+
+    const freshState = loadState();
+    let localN = 0;
+    let remoteN = 0;
+    const computers = computersForSeats(have.filter((id) => id !== "local-d"), opts.computers);
+    for (const id of have) {
+      const saved = freshState.seats[id] || {};
+      if (id === "local-d") localN += resumeLocal(saved.local);
+      const res = await resumeRemote(saved.remote, computers, opts.post);
+      remoteN += res.count;
+      if (saved.remote && saved.remote.length > 0) {
+        saved.remote = saved.remote.filter((r) => !res.restoredIds.has(`${r.tag}|${r.agentId}|${r.automationId}`));
+      }
+      if (!saved.remote || saved.remote.length === 0) {
+        delete freshState.seats[id];
+      }
+    }
+    freshState.at = Date.now();
+    saveState(freshState);
+    return {
+      paused: isPaused(),
+      already: false,
+      seats: have,
+      localEnabled: localN,
+      localRestored: localN,
+      remoteRestored: remoteN,
+      remoteEnabled: remoteN,
+      computers: computers.length,
+    };
+  });
 }
 
 async function setSeatPaused(id, want, opts) {

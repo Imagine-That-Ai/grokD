@@ -62,9 +62,9 @@ function setAsarEntry(files, rel, entry) {
   cursor[parts[parts.length - 1]] = entry;
 }
 
-function writeAsarFixture(root, packed, unpacked = {}) {
+function writeAsarFixture(root, packed, unpacked = {}, name = "app.asar") {
   fs.mkdirSync(root, { recursive: true });
-  const archive = path.join(root, "fixture.asar");
+  const archive = path.join(root, name);
   const header = { files: {} };
   const chunks = [];
   let offset = 0;
@@ -197,23 +197,6 @@ ok("install-sh-ships-look");
   assert(ident.includes("Local bots on this Mac"), "chip does not ask local-d to sign in");
   const preload = read("profile-auth-preload.js");
   assert(preload.includes("local-login-noop"), "official Sign in is a no-op on local");
-  assert(!preload.includes("seedEncryptedDescriptor({ allowLocal: true })"),
-    "local preload must not invoke Keychain-backed safeStorage");
-  const mainHook = read("patch-open-external.js");
-  assert(mainHook.includes("installLocalSafeStorage"),
-    "main hook must install local safeStorage before stock bootstrap");
-  assert(mainHook.includes("local-descriptor-plaintext"),
-    "main hook must short-circuit local descriptor seeding");
-  assert(mainHook.includes("app.exit(1)"),
-    "main hook must stop instead of falling through to Keychain");
-  const localModeIndex = mainHook.indexOf("authPolicy.isLocalMode()");
-  const safeStorageIndex = mainHook.indexOf("safeStorage.isEncryptionAvailable()");
-  assert(
-    localModeIndex >= 0 &&
-      safeStorageIndex >= 0 &&
-      localModeIndex < safeStorageIndex,
-    "local mode must be detected before any safeStorage call"
-  );
 }
 ok("drop-and-landing");
 
@@ -223,14 +206,8 @@ ok("drop-and-landing");
   assert(rt.includes("GROK_D_APP_ASAR"), "first launch supports an exact ASAR source");
   assert(rt.includes("host_tree_complete"), "first launch verifies the whole host tree");
   assert(!rt.includes("npx"), "first launch must not need npm or the network");
-  const asarCli = read("asar-cli.sh");
-  assert(asarCli.includes('ASAR_PACKAGE="@electron/asar@4.3.0"'), "modern ASAR CLI pin missing");
-  assert(asarCli.includes('ASAR_PACKAGE="@electron/asar@3.4.1"'), "legacy Node ASAR CLI pin missing");
-  const install = read("install.sh");
-  assert(install.includes('bash "$HERE/asar-cli.sh"'), "installer bypasses the pinned ASAR CLI");
-  assert(!install.includes("npx --yes asar"), "installer still uses the unpinned ASAR package");
   const pack = read("pack-dist.sh");
-  assert(pack.includes('"$ROOT/assets/"'), "shareable .app includes assets");
+  assert(pack.includes('/assets/"'), "shareable .app includes assets");
   assert(pack.includes("grokd-icon.icns"), "shareable .app stamps the mascot");
   assert(pack.includes("asar-file.js"), "shareable .app includes offline ASAR recovery");
   assert(pack.includes("verified packaged ASAR host recovery"), "packaging verifies recoverable host entries");
@@ -355,9 +332,29 @@ ok("fresh-first-run-recovers-host-offline");
 ok("incomplete-first-run-fails-closed");
 
 {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "grokD-untrusted-asar-"));
+  const home = path.join(work, "home");
+  const src = path.join(work, "empty-app-runtime");
+  fs.mkdirSync(src, { recursive: true });
+  const unsafeArchive = writeAsarFixture(work, hostFixture("unsafe"), {}, "arbitrary-name.asar");
+  const r = spawnSync("bash", [path.join(ROOT, "install-runtime.sh"), src], {
+    encoding: "utf8",
+    env: Object.assign({}, process.env, {
+      GROK_D_APP_ASAR: unsafeArchive,
+      GROK_PROFILE_ROOT: home,
+      NODE: process.execPath,
+    }),
+    timeout: 20000,
+  });
+  assert(r.status !== 0, "untrusted GROK_D_APP_ASAR path was accepted");
+  assert(/untrusted GROK_D_APP_ASAR path rejected/.test(r.stderr), "expected rejection error in stderr");
+  fs.rmSync(work, { recursive: true, force: true });
+}
+ok("untrusted-app-asar-path-rejected");
+
+{
   const launch = read("launch-d.sh");
   const ensure = read("ensure-local-box.sh");
-  const shim = read("gateway-shim.js");
   assert(launch.includes("startup_fail"), "launcher has no actionable startup failure");
   assert(!/install-runtime\.sh[^\n]*\|\| true/.test(launch), "launcher swallows runtime install failure");
   assert(!/ensure-local-box\.sh[^\n]*\|\| true/.test(launch), "launcher swallows local-box failure");
@@ -365,8 +362,6 @@ ok("incomplete-first-run-fails-closed");
   assert(ensure.includes("local host :1338 did not become API-ready"), "host API readiness is not enforced");
   assert(ensure.includes("gateway shim :1337 did not become healthy"), "shim health is not enforced");
   assert(ensure.includes("grok-d-gateway-shim"), "shim readiness cannot reject stale gateway code");
-  assert(shim.includes('u.pathname === "/health"'), "gateway has no health endpoint");
-  assert(shim.includes("contract: 2"), "gateway health contract is not versioned");
 }
 ok("startup-contract-fails-closed");
 

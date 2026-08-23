@@ -5,6 +5,8 @@ const fs = require("fs");
 const path = require("path");
 
 const MAX_HEADER_BYTES = 64 * 1024 * 1024;
+const MAX_ARCHIVE_SIZE = 512 * 1024 * 1024;
+const MAX_ENTRY_SIZE = 64 * 1024 * 1024;
 
 function fail(message) {
   throw new Error(`asar-file: ${message}`);
@@ -25,6 +27,7 @@ function readHeader(archivePath) {
   const stat = fs.statSync(archive);
   if (!stat.isFile()) fail(`not a file: ${archive}`);
   if (stat.size < 16) fail(`archive is too small: ${archive}`);
+  if (stat.size > MAX_ARCHIVE_SIZE) fail(`archive exceeds maximum allowed size (${stat.size} > ${MAX_ARCHIVE_SIZE})`);
 
   const fd = fs.openSync(archive, "r");
   try {
@@ -104,15 +107,29 @@ function sha256(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
 
-function verifyIntegrity(buffer, entry, entryPath) {
+function verifyIntegrity(buffer, entry, entryPath, opts) {
   const integrity = entry.integrity;
-  if (!integrity) return;
+  if (!integrity) fail(`missing integrity metadata for ${entryPath}`);
   const algorithm = String(integrity.algorithm || "").replace(/-/g, "").toUpperCase();
   if (algorithm !== "SHA256") fail(`unsupported integrity algorithm for ${entryPath}: ${integrity.algorithm}`);
   const expected = String(integrity.hash || "").toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(expected)) fail(`invalid SHA-256 integrity hash for ${entryPath}`);
   const actual = sha256(buffer);
   if (actual !== expected) fail(`SHA-256 mismatch for ${entryPath}`);
+
+  if (opts && typeof opts === "object") {
+    const trusted = opts.trustedDigests || (opts.requireManifest ? opts : null);
+    if (trusted) {
+      const expectedPinned = trusted[entryPath] ? String(trusted[entryPath]).toLowerCase() : null;
+      if (!expectedPinned) {
+        if (opts.requireManifest || opts.trustedDigests) {
+          fail(`missing trusted digest in manifest for ${entryPath}`);
+        }
+      } else if (actual !== expectedPinned) {
+        fail(`external trusted digest mismatch for ${entryPath}: expected ${expectedPinned}, got ${actual}`);
+      }
+    }
+  }
 
   if (Array.isArray(integrity.blocks)) {
     const blockSize = integer(integrity.blockSize, `integrity block size for ${entryPath}`);
@@ -129,18 +146,36 @@ function verifyIntegrity(buffer, entry, entryPath) {
 }
 
 function readUnpackedFile(archive, parts, entry, entryPath) {
+  const archiveDir = path.dirname(path.resolve(archive));
   const root = path.resolve(`${archive}.unpacked`);
+  if (!fs.existsSync(root)) fail(`unpacked root directory does not exist: ${root}`);
+  const stRoot = fs.lstatSync(root);
+  if (stRoot.isSymbolicLink() || !stRoot.isDirectory()) fail(`unpacked root is a symlink or not a directory: ${root}`);
+  const rootReal = fs.realpathSync(root);
+  if (!rootReal.startsWith(archiveDir + path.sep) && rootReal !== archiveDir) {
+    fail(`unpacked root is outside the archive directory: ${root}`);
+  }
+  let current = root;
+  for (const part of parts) {
+    current = path.join(current, part);
+    if (!fs.existsSync(current)) fail(`unpacked entry path component missing: ${current}`);
+    const st = fs.lstatSync(current);
+    if (st.isSymbolicLink()) fail(`unpacked entry contains symbolic link: ${current}`);
+  }
   const source = path.resolve(root, ...parts);
-  if (source !== root && !source.startsWith(root + path.sep)) fail(`unpacked entry escaped its root: ${entryPath}`);
+  const realSource = fs.realpathSync(source);
+  if (realSource !== rootReal && !realSource.startsWith(rootReal + path.sep)) fail(`unpacked entry escaped its root: ${entryPath}`);
   const stat = fs.lstatSync(source);
   if (!stat.isFile() || stat.isSymbolicLink()) fail(`unpacked entry is not a regular file: ${entryPath}`);
   const size = integer(entry.size, `size for ${entryPath}`);
+  if (size > MAX_ENTRY_SIZE) fail(`entry size exceeds maximum allowed size: ${size} > ${MAX_ENTRY_SIZE}`);
   if (stat.size !== size) fail(`size mismatch for ${entryPath}: expected ${size}, got ${stat.size}`);
   return fs.readFileSync(source);
 }
 
 function readPackedFile(meta, entry, entryPath) {
   const size = integer(entry.size, `size for ${entryPath}`);
+  if (size > MAX_ENTRY_SIZE) fail(`entry size exceeds maximum allowed size: ${size} > ${MAX_ENTRY_SIZE}`);
   const offset = integer(entry.offset, `offset for ${entryPath}`);
   const start = meta.dataOffset + offset;
   const end = start + size;
@@ -155,7 +190,7 @@ function readPackedFile(meta, entry, entryPath) {
   }
 }
 
-function readEntry(meta, entryPath) {
+function readEntry(meta, entryPath, opts) {
   const { entry, parts } = resolveEntry(meta.header, entryPath);
   const buffer = entry.unpacked
     ? readUnpackedFile(meta.archive, parts, entry, entryPath)
@@ -163,12 +198,25 @@ function readEntry(meta, entryPath) {
   if (buffer.length !== integer(entry.size, `size for ${entryPath}`)) {
     fail(`short read for ${entryPath}`);
   }
-  verifyIntegrity(buffer, entry, entryPath);
+  verifyIntegrity(buffer, entry, entryPath, opts);
   return { buffer, entry };
 }
 
-function readFile(archivePath, entryPath) {
-  return readEntry(readHeader(archivePath), entryPath).buffer;
+function readFile(archivePath, entryPath, opts) {
+  return readEntry(readHeader(archivePath), entryPath, opts).buffer;
+}
+
+function authenticateArchive(archivePath, trustedDigests) {
+  if (!trustedDigests || typeof trustedDigests !== "object") return true;
+  const meta = readHeader(archivePath);
+  for (const [entryPath, expectedHash] of Object.entries(trustedDigests)) {
+    const { buffer } = readEntry(meta, entryPath, { trustedDigests });
+    const actual = sha256(buffer);
+    if (actual.toLowerCase() !== String(expectedHash).toLowerCase()) {
+      fail(`external digest mismatch for ${entryPath}: expected ${expectedHash}, got ${actual}`);
+    }
+  }
+  return true;
 }
 
 function sameDestination(destination, buffer, entry) {
@@ -218,19 +266,55 @@ function writeAtomic(destinationPath, buffer, entry) {
   }
 }
 
-function extractFile(archivePath, entryPath, destinationPath) {
-  const { buffer, entry } = readEntry(readHeader(archivePath), entryPath);
+function resolveManifest(archivePath, opts) {
+  if (opts && opts.trustedDigests && typeof opts.trustedDigests === "object") return opts.trustedDigests;
+  const abs = path.resolve(String(archivePath || ""));
+  const directManifest = `${abs}.manifest.json`;
+  if (fs.existsSync(directManifest)) {
+    try {
+      const st = fs.lstatSync(directManifest);
+      if (!st.isSymbolicLink() && st.isFile()) {
+        return JSON.parse(fs.readFileSync(directManifest, "utf8"));
+      }
+    } catch {}
+  }
+  const dirManifest = path.join(path.dirname(abs), "app.asar.manifest.json");
+  if (fs.existsSync(dirManifest)) {
+    try {
+      const st = fs.lstatSync(dirManifest);
+      if (!st.isSymbolicLink() && st.isFile()) {
+        return JSON.parse(fs.readFileSync(dirManifest, "utf8"));
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function extractFile(archivePath, entryPath, destinationPath, opts) {
+  opts = opts || {};
+  const trustedDigests = opts.trustedDigests || resolveManifest(archivePath, opts);
+  if (!trustedDigests && opts.allowUntrusted !== true && opts.requireManifest) {
+    fail(`production extraction requires independent signed/pinned manifest for ${entryPath}`);
+  }
+  const effectiveOpts = Object.assign({}, opts, trustedDigests ? { trustedDigests } : {});
+  const { buffer, entry } = readEntry(readHeader(archivePath), entryPath, effectiveOpts);
   const written = writeAtomic(destinationPath, buffer, entry);
   return { bytes: buffer.length, destination: path.resolve(destinationPath), written };
 }
 
 function main(argv) {
-  if (argv.length !== 6 || argv[2] !== "extract-file") {
-    console.error("usage: node asar-file.js extract-file <archive> <entry> <destination>");
+  if ((argv.length !== 6 && argv.length !== 7) || argv[2] !== "extract-file") {
+    console.error("usage: node asar-file.js extract-file <archive> <entry> <destination> [manifest_file]");
     return 2;
   }
   try {
-    const result = extractFile(argv[3], argv[4], argv[5]);
+    let opts = null;
+    if (argv.length === 7 && argv[6]) {
+      const manifestPath = path.resolve(argv[6]);
+      const manifestJson = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+      opts = { trustedDigests: manifestJson };
+    }
+    const result = extractFile(argv[3], argv[4], argv[5], opts);
     console.log(`${result.written ? "extracted" : "verified"} ${argv[4]} (${result.bytes} bytes)`);
     return 0;
   } catch (error) {
@@ -242,10 +326,15 @@ function main(argv) {
 if (require.main === module) process.exitCode = main(process.argv);
 
 module.exports = {
+  MAX_ARCHIVE_SIZE,
+  MAX_ENTRY_SIZE,
+  authenticateArchive,
   extractFile,
   normalizeEntryPath,
   readFile,
   readHeader,
+  readUnpackedFile,
   resolveEntry,
+  resolveManifest,
   verifyIntegrity,
 };

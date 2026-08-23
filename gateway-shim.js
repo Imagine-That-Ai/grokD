@@ -10,10 +10,12 @@ const crypto = require("crypto");
 const { execFileSync } = require("child_process");
 const { newId } = require("./clone-bot");
 
+const paths = require("./paths");
+const secGuard = require("./security-guard");
+
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.GROK_SHIM_PORT || 1337);
-const TOKEN = "fake-gateway-token";
-const paths = require("./paths");
+const TOKEN = secGuard.getGatewayToken();
 const AGENTS_ROOT = process.env.GROKBOT_HACK
   ? path.join(process.env.GROKBOT_HACK, "box-data/agents")
   : path.join(paths.existingHack(), "box-data", "agents");
@@ -25,34 +27,67 @@ function resolveUp(raw) {
   if (!raw) return fallback;
   try {
     const u = new URL(raw);
-    if (u.protocol === "http:" && u.hostname === "127.0.0.1") return raw;
+    if (u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost") && !u.username && !u.password) {
+      const port = Number(u.port) || 1338;
+      if (port > 0 && port < 65536) return `http://127.0.0.1:${port}`;
+    }
   } catch {}
-  if (process.env.GROK_SHIM_ALLOW_UP === "1") return raw;
   return fallback;
 }
 const UP = resolveUp(process.env.GROK_SHIM_UP);
-
-function safeEqual(a, b) {
-  const aa = Buffer.from(String(a));
-  const bb = Buffer.from(String(b));
-  const max = Math.max(aa.length, bb.length, 1);
-  const pa = Buffer.alloc(max);
-  const pb = Buffer.alloc(max);
-  aa.copy(pa);
-  bb.copy(pb);
-  return crypto.timingSafeEqual(pa, pb) && aa.length === bb.length;
-}
+const UP_URL = new URL(UP);
 
 function allowedAuthHeaders() {
-  const headers = [AUTH];
-  const extra = String(process.env.SAND_HOST_GATEWAY_TOKEN || "").trim();
-  if (extra) headers.push(`Bearer ${extra}`);
-  return headers;
+  const token = secGuard.getGatewayToken();
+  return [`Bearer ${token}`];
 }
 
-function authorizationMatches(header) {
-  const got = String(header || "");
-  return allowedAuthHeaders().some((allowed) => safeEqual(got, allowed));
+const READ_METHODS = new Set(["listAgents", "getAgent", "getStatus", "health", "ping", "status", "getHealth"]);
+const PROXY_ALLOWED_METHODS = new Set([
+  "listAgents", "getAgent", "getStatus", "health", "ping", "status", "getHealth",
+  "sendPrompt", "broadcastToAgents"
+]);
+const CONTROL_ALLOWED_METHODS = new Set(["interruptAgent", "stopAgent", "deleteLocalAgents"]);
+const BRIDGE_ALLOWED_METHODS = new Set([
+  "listAgents", "getAgent", "getStatus", "health", "ping", "status", "getHealth",
+  "sendPrompt", "broadcastToAgents"
+]);
+
+function authorizationMatches(header, reqPath = "", method = "") {
+  const got = String(header || "").trim();
+  if (!got) return false;
+
+  if (reqPath === "/api/oauth/login" || reqPath === "/oauth/login") {
+    return secGuard.verifyOAuthTriggerAuth(got);
+  }
+
+  // Full gateway master token is authorized for everything
+  if (secGuard.verifyGatewayAuth(got)) return true;
+  if (allowedAuthHeaders().some((allowed) => secGuard.timingSafeEqualStr(got, allowed))) return true;
+
+  const rawToken = got.startsWith("Bearer ") ? got.slice(7).trim() : got;
+
+  // bot-create: strictly for createAgent
+  if ((reqPath === "/api/createAgent" || method === "createAgent") && secGuard.verifySessionJwt(rawToken, "bot-create")) {
+    return true;
+  }
+  // agent-control: control methods like interruptAgent, stopAgent, deleteLocalAgents
+  if (CONTROL_ALLOWED_METHODS.has(method) && secGuard.verifySessionJwt(rawToken, "agent-control")) {
+    return true;
+  }
+  // local-mcp: strictly read-only methods
+  if (READ_METHODS.has(method) && secGuard.verifySessionJwt(rawToken, "local-mcp")) {
+    return true;
+  }
+  // grokbot-proxy: proxy read & prompt dispatch, not destructive APIs or arbitrary raw proxy
+  if (PROXY_ALLOWED_METHODS.has(method) && secGuard.verifySessionJwt(rawToken, "grokbot-proxy")) {
+    return true;
+  }
+  // gateway-bridge: bridge operations (read + dispatch)
+  if (BRIDGE_ALLOWED_METHODS.has(method) && secGuard.verifySessionJwt(rawToken, "gateway-bridge")) {
+    return true;
+  }
+  return false;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -66,12 +101,23 @@ function isIdle(agent) {
   return !agent || (!agent.isRunning && !agent.isComposingMessage);
 }
 
+const MAX_BROADCAST_TARGETS = 16;
+
 function resolveTargets(method, body) {
   if (!body || typeof body !== "object") return [];
-  if (method === "sendPrompt") return body.agentId ? [String(body.agentId)] : [];
+  if (method === "sendPrompt") {
+    const id = String(body.agentId || "").trim();
+    return UUID_RE.test(id) ? [id] : [];
+  }
   if (method === "broadcastToAgents") {
     if (!Array.isArray(body.targets) || !body.targets.length) return [];
-    return body.targets.map((x) => String(x || "").trim()).filter(Boolean);
+    const valid = new Set();
+    for (const t of body.targets) {
+      const id = String(t || "").trim();
+      if (UUID_RE.test(id)) valid.add(id);
+      if (valid.size >= MAX_BROADCAST_TARGETS) break;
+    }
+    return Array.from(valid);
   }
   return [];
 }
@@ -102,21 +148,24 @@ function agentDbPath(id) {
 }
 
 function createLocalAgent(body, root = AGENTS_ROOT) {
-  const name = String(body && body.name || "").trim() || "New Bot";
+  const existing = getLocalAgents();
+  if (existing.length >= 64) {
+    throw new Error("agent quota exceeded (max 64 agents)");
+  }
+  const name = String(body && body.name || "").trim().slice(0, 64) || "New Bot";
   const id = newId();
   const dir = path.join(root, id);
   fs.mkdirSync(dir, { recursive: true });
   const prof = {
     name,
-    description: String((body && body.description) || ""),
-    title: String((body && body.title) || ""),
-    origin: String((body && body.origin) || "user"),
+    description: String((body && body.description) || "").slice(0, 1024),
+    title: String((body && body.title) || "").slice(0, 128),
+    origin: String((body && body.origin) || "user").slice(0, 32),
     createdAt: Date.now(),
   };
   fs.writeFileSync(path.join(dir, "profile.json"), JSON.stringify(prof, null, 2) + "\n");
-  try {
-    execFileSync("sqlite3", [path.join(dir, "store.db"), "CREATE TABLE IF NOT EXISTS transcript_entries (id TEXT, entry TEXT);"], { timeout: 4000 });
-  } catch {}
+  const dbFile = path.join(dir, "store.db");
+  execFileSync("sqlite3", [dbFile, "CREATE TABLE IF NOT EXISTS transcript_entries (id TEXT, entry TEXT);"], { timeout: 4000 });
   const agent = { id, ...prof, isRunning: false, isComposingMessage: false };
   return { id, name, agent };
 }
@@ -158,7 +207,6 @@ function getLocalAgents() {
       avatarVersion: prof.avatarVersion || null,
       isRunning: false,
       isComposingMessage: false,
-      path: path.join(root, ent.name, "store.db"),
     });
   }
   return list;
@@ -166,16 +214,30 @@ function getLocalAgents() {
 
 const { sqliteRead } = require("./sqlite-ro");
 
-function readEntries(id) {
+function readEntries(id, minRowId = 0) {
   const db = agentDbPath(id);
   if (!db || !fs.existsSync(db)) return "";
   try {
+    if (minRowId > 0) {
+      return sqliteRead(db, `SELECT entry FROM transcript_entries WHERE rowid > ${minRowId} ORDER BY rowid DESC LIMIT 20;`);
+    }
     return sqliteRead(db, "SELECT entry FROM transcript_entries ORDER BY rowid DESC LIMIT 20;");
   } catch { return ""; }
 }
 
-function transcriptHas(id, message) {
-  return hayHasMessage(readEntries(id), message);
+function getMaxRowId(id) {
+  const db = agentDbPath(id);
+  if (!db || !fs.existsSync(db)) return 0;
+  try {
+    const raw = sqliteRead(db, "SELECT MAX(rowid) as maxId FROM transcript_entries;");
+    const m = String(raw).match(/\d+/);
+    return m ? parseInt(m[0], 10) : 0;
+  } catch { return 0; }
+}
+
+function transcriptHas(id, message, minRowId = 0) {
+  const tok = distinctiveToken(message);
+  return hayHasMessage(readEntries(id, minRowId), tok || message);
 }
 
 async function waitUntilIdle(id, fetchAgents, opts = {}) {
@@ -201,9 +263,14 @@ async function waitUntilIdle(id, fetchAgents, opts = {}) {
 async function waitTranscripts(ids, message, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 12000, pollMs = opts.pollMs ?? 400;
   const sleepFn = opts.sleep || sleep, hasFn = opts.has || transcriptHas;
+  const baselines = opts.baselines || new Map();
   const pending = new Set(ids), t0 = Date.now();
+  const token = distinctiveToken(message);
   for (;;) {
-    for (const id of [...pending]) if (hasFn(id, message)) pending.delete(id);
+    for (const id of [...pending]) {
+      const minRow = baselines.get(id) || 0;
+      if (hasFn(id, token || message, minRow)) pending.delete(id);
+    }
     if (!pending.size || Date.now() - t0 >= timeoutMs) return [...pending];
     await sleepFn(pollMs);
   }
@@ -214,35 +281,77 @@ function broadcastMessage(body) {
 }
 
 function normalizeCreateAgent(raw) {
-  const parsed = parseJson(raw) || {};
-  if (parsed.description == null) parsed.description = "";
-  if (!String(parsed.name || "").trim()) parsed.name = "New Bot";
-  if (!parsed.origin) parsed.origin = "user";
-  return JSON.stringify(parsed);
+  const parsed = parseJson(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("invalid json payload for createAgent");
+  }
+  const name = String(parsed.name || "New Bot").trim().slice(0, 64) || "New Bot";
+  const description = String(parsed.description || "").slice(0, 1024);
+  const title = String(parsed.title || "").slice(0, 128);
+  const origin = String(parsed.origin || "user").slice(0, 32);
+  const model = parsed.model ? String(parsed.model).slice(0, 64) : undefined;
+  return JSON.stringify({ name, description, title, origin, ...(model ? { model } : {}) });
 }
 
-async function postApi(method, body, inboundAuth = AUTH) {
+let _activeDispatchCount = 0;
+const MAX_CONCURRENT_DISPATCH = 16;
+const _dispatchRateWindows = new Map();
+
+function checkDispatchRateLimit(callerKey = "global", cost = 1) {
+  const now = Date.now();
+  const windowMs = 60000;
+  const maxReqs = 120;
+  let record = _dispatchRateWindows.get(callerKey);
+  if (!record || now - record.start > windowMs) {
+    record = { start: now, count: 0 };
+    _dispatchRateWindows.set(callerKey, record);
+  }
+  record.count += Math.max(1, cost);
+  return record.count <= maxReqs;
+}
+
+async function postApi(method, body, opts = {}) {
   if (/^(getStatus|health|ping|status|getHealth)$/i.test(method)) {
     const res = { ok: true, status: "idle", mode: "local", connected: true, timestamp: Date.now() };
     return { status: 200, text: JSON.stringify(res), json: res, type: "application/json" };
   }
+  if (method === "createAgent" || method === "deleteAgent" || method === "deleteAgents" || method === "deleteLocalAgents") {
+    if (!checkDispatchRateLimit("mutating", 1)) {
+      const err = { ok: false, error: "Too Many Requests: mutating rate limit exceeded" };
+      return { status: 429, text: JSON.stringify(err), json: err, type: "application/json" };
+    }
+  }
+  if (!opts.alreadyCounted && (method === "sendPrompt" || method === "broadcastToAgents")) {
+    const targets = resolveTargets(method, body);
+    const cost = Math.max(1, targets.length);
+    if (!checkDispatchRateLimit("global", cost)) {
+      const err = { ok: false, error: "Too Many Requests: dispatch rate limit exceeded" };
+      return { status: 429, text: JSON.stringify(err), json: err, type: "application/json" };
+    }
+    if (_activeDispatchCount >= MAX_CONCURRENT_DISPATCH) {
+      const err = { ok: false, error: "Too Many Requests: maximum concurrency reached" };
+      return { status: 429, text: JSON.stringify(err), json: err, type: "application/json" };
+    }
+  }
   let raw = Buffer.isBuffer(body) || typeof body === "string" ? body : JSON.stringify(body ?? {});
-  if (method === "createAgent") raw = normalizeCreateAgent(raw);
+  if (method === "createAgent") {
+    try {
+      raw = normalizeCreateAgent(raw);
+    } catch (normErr) {
+      const err = { ok: false, error: normErr.message };
+      return { status: 400, text: JSON.stringify(err), json: err, type: "application/json" };
+    }
+  }
   if (method === "listAgents" || method === "getAgent") {
     try {
       const r = await fetch(`${UP}/api/${method}`, {
         method: "POST",
-        headers: { "content-type": "application/json", authorization: inboundAuth },
+        headers: { "content-type": "application/json", authorization: AUTH },
         body: raw,
       });
       const text = await r.text();
       let res = parseJson(text);
-      if (Array.isArray(res)) {
-        res = res.map((a) => ({ ...a, isRunning: false, isRunningTurn: false, isComposingMessage: false }));
-        return { status: 200, text: JSON.stringify(res), json: res, type: "application/json" };
-      }
-      if (res && res.id) {
-        res = { ...res, isRunning: false, isRunningTurn: false, isComposingMessage: false };
+      if (Array.isArray(res) || (res && res.id)) {
         return { status: 200, text: JSON.stringify(res), json: res, type: "application/json" };
       }
       return { status: r.status, text, json: res, type: r.headers.get("content-type") || "application/json" };
@@ -250,16 +359,20 @@ async function postApi(method, body, inboundAuth = AUTH) {
       return offlineFallback(method, parseJson(raw) || {}, e);
     }
   }
+  const isDispatch = !opts.alreadyCounted && (method === "sendPrompt" || method === "broadcastToAgents");
+  if (isDispatch) _activeDispatchCount++;
   try {
     const r = await fetch(`${UP}/api/${method}`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: inboundAuth },
+      headers: { "content-type": "application/json", authorization: AUTH },
       body: raw,
     });
     const text = await r.text();
     return { status: r.status, text, json: parseJson(text), type: r.headers.get("content-type") || "application/json" };
   } catch (e) {
     return offlineFallback(method, parseJson(raw) || {}, e);
+  } finally {
+    if (isDispatch) _activeDispatchCount = Math.max(0, _activeDispatchCount - 1);
   }
 }
 
@@ -299,8 +412,9 @@ function offlineFallback(method, parsedBody, err) {
       return { status: 400, text: JSON.stringify(fail), json: fail, type: "application/json" };
     }
   }
-  if (method === "deleteAgents") {
-    const deleted = deleteLocalAgents(parsedBody.ids);
+  if (method === "deleteAgents" || method === "deleteAgent") {
+    const ids = parsedBody.ids || (parsedBody.id ? [parsedBody.id] : [parsedBody.agentId]);
+    const deleted = deleteLocalAgents(ids);
     return { status: 200, text: JSON.stringify(deleted), json: deleted, type: "application/json" };
   }
   const fail = { ok: false, error: String((err && err.message) || err || "upstream") };
@@ -309,74 +423,166 @@ function offlineFallback(method, parsedBody, err) {
 
 async function handleSpecial(method, raw, body, deps = {}) {
   const auth = deps.auth || AUTH;
-  const post = deps.post || ((m, b) => postApi(m, b, auth));
+  const post = deps.post || ((m, b, extra) => postApi(m, b, extra));
   const fetchAgents = deps.fetchAgents || (async () => (await post("listAgents", {})).json);
   const waitIdle = deps.waitIdle || ((id) => waitUntilIdle(id, fetchAgents));
-  const waitTx = deps.waitTx || ((ids, msg) => waitTranscripts(ids, msg));
+  const waitTx = deps.waitTx || ((ids, msg, opts) => waitTranscripts(ids, msg, opts));
 
+  const isDispatch = method === "sendPrompt" || method === "broadcastToAgents";
   const targets = resolveTargets(method, body);
-  for (const id of targets) await waitIdle(id);
-  const first = await post(method, raw);
-  if (method !== "broadcastToAgents" || !targets.length || !broadcastOk(first.json)) return first;
-
-  const msg = broadcastMessage(body);
-  let miss = await waitTx(targets, msg);
-  if (!miss.length) return first;
-
-  console.log("[shim] broadcast retry");
-  for (const id of miss) await waitIdle(id);
-  await post(method, raw);
-  miss = await waitTx(targets, msg);
-  if (miss.length) {
-    for (const id of miss) {
-      console.log("[shim] broadcast fallback sendPrompt");
-      await post("sendPrompt", { agentId: id, prompt: msg, awaitTurn: false });
+  if (method === "broadcastToAgents") {
+    if (body && Array.isArray(body.targets) && body.targets.length > MAX_BROADCAST_TARGETS) {
+      const err = { ok: false, error: `Too many broadcast targets: maximum is ${MAX_BROADCAST_TARGETS}` };
+      return { status: 400, text: JSON.stringify(err), json: err, type: "application/json" };
     }
   }
-  return first;
+
+  if (isDispatch) {
+    const cost = Math.max(1, targets.length);
+    if (!checkDispatchRateLimit("global", cost)) {
+      const err = { ok: false, error: "Too Many Requests: dispatch rate limit exceeded" };
+      return { status: 429, text: JSON.stringify(err), json: err, type: "application/json" };
+    }
+    if (_activeDispatchCount >= MAX_CONCURRENT_DISPATCH) {
+      const err = { ok: false, error: "Too Many Requests: maximum concurrency reached" };
+      return { status: 429, text: JSON.stringify(err), json: err, type: "application/json" };
+    }
+    _activeDispatchCount++;
+  }
+
+  try {
+    for (const id of targets) {
+      const idleState = await waitIdle(id);
+      if (idleState === "timeout") {
+        const busyErr = { ok: false, error: "agent busy: timed out waiting for idle state" };
+        return { status: 409, text: JSON.stringify(busyErr), json: busyErr, type: "application/json" };
+      }
+    }
+
+    const baselines = new Map();
+    for (const id of targets) {
+      baselines.set(id, getMaxRowId(id));
+    }
+
+    const dispatchId = `gd-tx-${crypto.randomBytes(8).toString("hex")}`;
+    const canonicalBody = (method === "broadcastToAgents" && typeof body === "object" && body !== null)
+      ? JSON.stringify({ ...body, targets, dispatchId })
+      : raw;
+
+    const first = await post(method, canonicalBody, { alreadyCounted: true });
+    if (method !== "broadcastToAgents" || !targets.length) return first;
+    if (!broadcastOk(first.json)) return first;
+
+    const msg = broadcastMessage(body);
+    const miss = await waitTx(targets, msg || dispatchId, { baselines });
+    if (!miss.length) return first;
+
+    console.log("[shim] broadcast partial delivery for targets:", miss);
+    for (const id of miss) await waitIdle(id);
+    const second = await post(method, JSON.stringify({ ...body, targets: miss, dispatchId: `gd-tx-${crypto.randomBytes(8).toString("hex")}` }), { alreadyCounted: true });
+    return second && second.json ? second : first;
+  } finally {
+    if (isDispatch) _activeDispatchCount = Math.max(0, _activeDispatchCount - 1);
+  }
 }
+
+const MAX_SHIM_BODY = 10 * 1024 * 1024;
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
+    let size = 0;
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > MAX_SHIM_BODY) {
+        const err = new Error("Payload Too Large");
+        err.status = 413;
+        req.destroy();
+        return reject(err);
+      }
+      chunks.push(c);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
 }
 
+const ALLOWED_API_METHODS = new Set([
+  "listAgents", "getAgent", "createAgent", "deleteAgent", "deleteAgents", "deleteLocalAgents",
+  "sendPrompt", "broadcastToAgents", "getStatus", "health",
+  "ping", "status", "getHealth", "interruptAgent", "stopAgent",
+]);
+
+const HOP_BY_HOP_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+]);
+
 async function proxyRaw(req, res, raw) {
   const u = new URL(req.url || "/", "http://127.0.0.1");
-  const path = u.pathname || "";
-  if (/UpdateEnvironmentVariables/i.test(path)) {
+  const reqPath = u.pathname || "";
+  if (/UpdateEnvironmentVariables/i.test(reqPath)) {
     res.writeHead(200, { "content-type": "application/proto" });
     return void res.end(Buffer.alloc(0));
   }
-  const headers = { ...req.headers, host: "127.0.0.1:1338" };
-  delete headers.connection;
+  const headers = {};
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (!HOP_BY_HOP_HEADERS.has(k.toLowerCase())) {
+      headers[k] = v;
+    }
+  }
+  headers.host = UP_URL.host;
   try {
-    const r = await fetch(`${UP}${u.pathname}${u.search}`, {
+    const upReq = http.request({
+      hostname: UP_URL.hostname,
+      port: UP_URL.port,
+      path: u.pathname + u.search,
       method: req.method || "GET",
       headers,
-      body: (req.method === "GET" || req.method === "HEAD") ? undefined : raw,
+    }, (upRes) => {
+      const outHeaders = {};
+      for (const [k, v] of Object.entries(upRes.headers)) {
+        if (k === "transfer-encoding" || k === "connection") continue;
+        outHeaders[k] = v;
+      }
+      res.writeHead(upRes.statusCode || 200, outHeaders);
+      upRes.pipe(res);
     });
-    const buf = Buffer.from(await r.arrayBuffer());
-    const outHeaders = {};
-    r.headers.forEach((v, k) => {
-      if (k === "transfer-encoding" || k === "connection") return;
-      outHeaders[k] = v;
+
+    upReq.on("error", (e) => {
+      if (!res.headersSent) {
+        res.writeHead(502, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: String(e && e.message || e || "upstream offline") }));
+      }
     });
-    res.writeHead(r.status, outHeaders);
-    res.end(buf);
+
+    req.on("close", () => {
+      upReq.destroy();
+    });
+
+    if (raw && req.method !== "GET" && req.method !== "HEAD") {
+      upReq.write(raw);
+    }
+    upReq.end();
   } catch (e) {
-    res.writeHead(502, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: false, error: String(e && e.message || e || "upstream offline") }));
+    if (!res.headersSent) res.writeHead(502, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: String(e && e.message || e || "upstream error") }));
   }
 }
 
 async function onRequest(req, res) {
   try {
     const u = new URL(req.url || "/", "http://127.0.0.1");
+    // Minimal unauthenticated health check endpoint
     if (u.pathname === "/health" && (req.method === "GET" || req.method === "HEAD")) {
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       return void res.end(req.method === "HEAD" ? "" : JSON.stringify({
@@ -386,28 +592,43 @@ async function onRequest(req, res) {
         contract: 2,
       }));
     }
+
+    const inboundAuth = String(req.headers.authorization || "");
+
     if (u.pathname === "/install/openburnbar" && (req.method === "GET" || req.method === "HEAD")) {
       let payload = { npmProxy: false };
       try { payload = require("./openburnbar-install").info(); } catch (_) {}
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       return void res.end(req.method === "HEAD" ? "" : JSON.stringify(payload));
     }
+
     const raw = await readBody(req);
     const m = /^\/api\/([^/]+)$/.exec(u.pathname);
     if (m && req.method === "POST") {
-      const inboundAuth = String(req.headers.authorization || "");
-      if (!authorizationMatches(inboundAuth)) {
-        const fail = { ok: false, error: "unauthorized" };
-        res.writeHead(401, { "content-type": "application/json" });
-        return void res.end(JSON.stringify(fail));
+      let rawMethod = m[1];
+      try { rawMethod = decodeURIComponent(rawMethod); } catch (_) {
+        res.writeHead(400, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ ok: false, error: "invalid-route" }));
       }
-      const method = decodeURIComponent(m[1]);
+      if (!ALLOWED_API_METHODS.has(rawMethod)) {
+        res.writeHead(404, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ ok: false, error: "method-not-found" }));
+      }
+      const method = rawMethod;
+      if (!authorizationMatches(inboundAuth, u.pathname, method)) {
+        res.writeHead(401, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ ok: false, error: "unauthorized" }));
+      }
       const body = parseJson(raw);
       const out = (method === "sendPrompt" || method === "broadcastToAgents")
         ? await handleSpecial(method, raw, body, { auth: inboundAuth })
-        : await postApi(method, raw, inboundAuth);
+        : await postApi(method, raw);
       res.writeHead(out.status || 502, { "content-type": out.type || "application/json" });
       return void res.end(out.text != null ? out.text : JSON.stringify({ error: "upstream" }));
+    }
+    if (!authorizationMatches(inboundAuth, u.pathname, "")) {
+      res.writeHead(401, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ ok: false, error: "unauthorized" }));
     }
     await proxyRaw(req, res, raw);
   } catch (e) {
@@ -429,5 +650,5 @@ module.exports = {
   parseJson, isIdle, resolveTargets, broadcastOk, distinctiveToken, hayHasMessage,
   agentDbPath, getLocalAgents, readEntries, sqliteRead, transcriptHas, waitUntilIdle, waitTranscripts,
   broadcastMessage, postApi, handleSpecial, onRequest, start, offlineFallback,
-  createLocalAgent, deleteLocalAgents, authorizationMatches, resolveUp,
+  createLocalAgent, deleteLocalAgents, authorizationMatches, resolveUp, allowedAuthHeaders,
 };

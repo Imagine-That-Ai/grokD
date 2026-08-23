@@ -62,6 +62,10 @@ rsync -a \
   --exclude 'PROMPT-npm-openburnbar-proxy.md' \
   --exclude 'live-cursor-chat.js' \
   --exclude 'sync-to-tmp.sh' \
+  --exclude 'NOTES.md' \
+  --exclude 'workflows/' \
+  --exclude 'deploy.sh' \
+  --exclude 'loop-grok-d.js' \
   --exclude 'assets/meshy_elon.glb' \
   --exclude 'assets/meshy_elon_textured.glb' \
   --exclude 'test-*.js' \

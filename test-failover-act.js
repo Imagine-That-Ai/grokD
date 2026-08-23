@@ -5,6 +5,7 @@ const os = require("os");
 const path = require("path");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "grok-foact-"));
 process.env.GROK_PROFILE_ROOT = tmp;
+fs.writeFileSync(path.join(tmp, "failover-config.json"), JSON.stringify({ enabled: true }));
 const assert = (c, m) => { if (!c) throw new Error(m); };
 const { act } = require("./failover-act");
 

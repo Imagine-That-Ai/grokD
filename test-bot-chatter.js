@@ -16,7 +16,8 @@ const ok = (name) => { n++; console.log("PASS ", name); };
 ok("parseChatter");
 
 {
-  assert(bc.sameBot("sally", "sally the seashell slinging slut"), "prefix name");
+  assert(!bc.sameBot("Bot 1", "Bot 10"), "different numbered bots do not collide");
+  assert(!bc.sameBot("sally", "sally the seashell slinging slut"), "prefix name does not collide");
   assert(bc.sameBot("Chief Mini Me", "chief mini me "), "case + space");
   assert(!bc.sameBot("sally", "salt lake"), "different bot");
   assert(!bc.sameBot("Y", "Yolanda"), "two-letter name is not a prefix match");
@@ -120,7 +121,7 @@ ok("runLabel");
     { id: "b1", content: "[Bot-to-bot from Robust Bench]: ping", ts: 100 },
     { id: "b2", content: "[Bot-to-bot from someone else]: hi", ts: 150 },
   ];
-  const thread = bc.mergeThread("Robust Bench", "sally the seashell slinging slut", mine, theirs);
+  const thread = bc.mergeThread("Robust Bench", "sally", mine, theirs);
   assert(thread.length === 2, JSON.stringify(thread));
   assert(thread[0].dir === "out" && thread[0].text === "ping", JSON.stringify(thread[0]));
   assert(thread[1].dir === "in" && thread[1].text === "pong", JSON.stringify(thread[1]));

@@ -8,6 +8,8 @@ failover-config.json
 model-config.json
 onboarding.json
 profiles.json
+gateway.token
+session.key
 **/sand-secrets.json
 **/gateway-descriptor.json
 **/*-secrets.json
@@ -15,6 +17,7 @@ profiles.json
 # Packed app + extracted asar + scratch
 dist/
 drop/
+podex-kernel/target/
 # Local kitchen (box dumps, screenshots, old seat icons). The shipping
 # face-tat mascot is assets/grokd-icon.icns — that file is tracked.
 hack/

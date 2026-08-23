@@ -112,8 +112,7 @@ async function probeSeat(label, token) {
   out.orbs = !!(out.page && out.page.orbs);
   out.composer = !!(out.page && out.page.composer);
   out.loggedIn = (out.status && out.status.mode === "local")
-    || (out.status && out.status.identity && out.status.identity.kind === "logged-in")
-    || (out.status && out.status.mode === "cursor" && out.composer && !out.cover);
+    || (out.status && out.status.identity && out.status.identity.kind === "logged-in");
   if (out.status && out.status.mode === "cursor" && !out.conn.remote) {
     const t0 = Date.now();
     while (Date.now() - t0 < 12000 && !conn().remote) await sleep(500);
@@ -150,37 +149,62 @@ async function main() {
     process.exit(0);
   }
 
-  for (const seat of SEATS) {
-    const prev = dPid();
-    const sw = switchTo(seat.id);
-    let parsed = null;
-    try { parsed = JSON.parse(sw.stdout.split("\n").pop()); } catch {}
-    const waited = (parsed && parsed.noop)
-      ? { pid: dPid(), ready: await waitReady(15000).catch(() => null), noop: true }
-      : await waitD(prev);
-    const token = `HARNESS-${seat.id.replace(/[^A-Z0-9]/gi, "").toUpperCase()}-${Date.now().toString().slice(-6)}`;
-    const row = {
-      seat: seat.id,
-      label: seat.label,
-      kind: seat.kind,
-      switch: sw,
-      wait: waited,
-      probe: await probeSeat(seat.label, token),
-    };
-    results.push(row);
-    console.log(JSON.stringify({
-      seat: row.seat,
-      label: row.label,
-      dPid: row.probe.dPid,
-      bUp: row.probe.bUp,
-      loggedIn: row.probe.loggedIn,
-      cover: row.probe.cover,
-      queued: row.probe.queued,
-      conn: row.probe.conn,
-      replied: row.probe.replied,
-      ok: row.probe.ok,
-    }));
-    if (!bUp()) throw new Error("B died during " + seat.id);
+  const initialProfile = (() => {
+    try {
+      const p = path.join(process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d"), "active-env.json");
+      return JSON.parse(fs.readFileSync(p, "utf8")).profileId || "local-d";
+    } catch { return "local-d"; }
+  })();
+
+  try {
+    for (const seat of SEATS) {
+      const prev = dPid();
+      const sw = switchTo(seat.id);
+      let parsed = null;
+      try { parsed = JSON.parse(sw.stdout.split("\n").pop()); } catch {}
+      const switchOk = sw.status === 0 && (!parsed || parsed.ok !== false);
+      if (!switchOk) {
+        results.push({
+          seat: seat.id,
+          label: seat.label,
+          kind: seat.kind,
+          switch: sw,
+          wait: null,
+          probe: { label: seat.label, token: null, ok: false, error: "Profile switch failed before probe" },
+        });
+        continue;
+      }
+      const waited = (parsed && parsed.noop)
+        ? { pid: dPid(), ready: await waitReady(15000).catch(() => null), noop: true }
+        : await waitD(prev);
+      const token = `HARNESS-${seat.id.replace(/[^A-Z0-9]/gi, "").toUpperCase()}-${Date.now().toString().slice(-6)}`;
+      const row = {
+        seat: seat.id,
+        label: seat.label,
+        kind: seat.kind,
+        switch: sw,
+        wait: waited,
+        probe: await probeSeat(seat.label, token),
+      };
+      results.push(row);
+      console.log(JSON.stringify({
+        seat: row.seat,
+        label: row.label,
+        dPid: row.probe.dPid,
+        bUp: row.probe.bUp,
+        loggedIn: row.probe.loggedIn,
+        cover: row.probe.cover,
+        queued: row.probe.queued,
+        conn: row.probe.conn,
+        replied: row.probe.replied,
+        ok: row.probe.ok,
+      }));
+      if (!bUp()) throw new Error("B died during " + seat.id);
+    }
+  } finally {
+    try {
+      switchTo(initialProfile);
+    } catch (_) {}
   }
 
   const summary = {

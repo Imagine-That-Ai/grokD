@@ -1683,20 +1683,39 @@
         loop();
       }
 
+      destroy() {
+        this.isRunning = false;
+        if (this.animFrameId) {
+          cancelAnimationFrame(this.animFrameId);
+          this.animFrameId = null;
+        }
+        this.clearTimeline();
+        if (this.audioCtx) {
+          try { this.audioCtx.close(); } catch (_) {}
+          this.audioCtx = null;
+        }
+        if (this.stage) {
+          try { this.stage.remove(); } catch (_) {}
+          this.stage = null;
+        }
+      }
+
       dismiss() {
         if (this.stage) {
           this.stage.classList.add("fading-out");
           setTimeout(() => {
-            this.clearTimeline();
-            this.isRunning = false;
-            try { this.stage.remove(); } catch(e) {}
+            this.destroy();
           }, 650);
         }
       }
     }
 
+    if (window.__grokd_splash_instance && typeof window.__grokd_splash_instance.destroy === "function") {
+      try { window.__grokd_splash_instance.destroy(); } catch (_) {}
+    }
     // Auto-instantiate on load
-    let splashInstance = new GrokDSplash();
+    window.__grokd_splash_instance = new GrokDSplash();
+    let splashInstance = window.__grokd_splash_instance;
   </script>
 </body>
 </html>

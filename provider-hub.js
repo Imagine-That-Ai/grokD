@@ -47,6 +47,8 @@
       .replace(/\s(height)="[^"]*"/g, "");
   } catch {}
 
+  const secGuard = require("./security-guard");
+
   function readConfig() {
     try {
       if (fs.existsSync(CONFIG_PATH)) return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
@@ -54,17 +56,31 @@
     return {};
   }
 
-  function saveConfig(patch) {
+  function saveConfig(patchOrFn) {
+    const lockFile = path.join(path.dirname(CONFIG_PATH), ".model-config.lock");
+    const fd = secGuard.acquireFileLock(lockFile, { waitMs: 4000, staleMs: 15000 });
+    if (fd === null) {
+      console.error("[provider-hub] saveConfig lock acquisition failed");
+      return null;
+    }
     try {
       const cur = readConfig();
-      const next = { ...cur, ...patch };
-      fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), { encoding: "utf8", mode: 0o600 });
-      try { fs.chmodSync(CONFIG_PATH, 0o600); } catch (_) {}
+      const patch = typeof patchOrFn === "function" ? patchOrFn(cur) : patchOrFn;
+      const next = {
+        ...cur,
+        ...patch,
+        providers: {
+          ...(cur.providers || {}),
+          ...((patch && patch.providers) || {}),
+        },
+      };
+      secGuard.writeJsonAtomic0600(CONFIG_PATH, next);
       return next;
     } catch (e) {
       console.error("[provider-hub] saveConfig error:", e);
-      return readConfig();
+      return null;
+    } finally {
+      secGuard.releaseFileLock(lockFile, fd);
     }
   }
 
@@ -77,16 +93,37 @@
     return new Promise((resolve, reject) => {
       let u;
       try { u = new URL(url); } catch (e) { return reject(e); }
+      if (u.protocol !== "http:") return reject(new Error("Invalid protocol for loopback hubFetch"));
+      if (u.hostname !== "127.0.0.1" && u.hostname !== "localhost") return reject(new Error("Invalid host for loopback hubFetch"));
+      if (u.username || u.password) return reject(new Error("UserInfo forbidden"));
+      const port = Number(u.port) || 80;
+      const headers = Object.assign({
+        "content-type": "application/json",
+      }, opts.headers || {});
+
+      // Use a narrowly-scoped single-use session JWT rather than raw master token
+      if (opts.auth === true && !headers["authorization"]) {
+        headers["authorization"] = `Bearer ${secGuard.mintSessionJwt({ audience: "openburnbar-oauth", expiresInSeconds: 30 })}`;
+      }
+
       const req = nodeHttp.request({
-        hostname: u.hostname,
-        port: Number(u.port) || 80,
+        hostname: "127.0.0.1",
+        port,
         path: u.pathname + u.search,
         method: opts.method || "GET",
-        headers: { "content-type": "application/json", ...(opts.headers || {}) },
+        headers,
         timeout: timeoutMs,
       }, (res) => {
         const chunks = [];
-        res.on("data", (c) => chunks.push(c));
+        let totalLen = 0;
+        res.on("data", (c) => {
+          totalLen += c.length;
+          if (totalLen > 1024 * 1024) {
+            req.destroy(new Error("Response exceeds 1MB limit"));
+            return;
+          }
+          chunks.push(c);
+        });
         res.on("end", () => {
           const text = Buffer.concat(chunks).toString();
           let json = null;
@@ -101,9 +138,19 @@
     });
   }
 
+  async function getActiveHubUrl() {
+    if (await alive(`${HUB}/api/openburnbar-identity`)) return HUB;
+    if (await alive(`http://127.0.0.1:8330/api/openburnbar-identity`)) return `http://127.0.0.1:8330`;
+    return null;
+  }
+
   async function triggerOAuth(provider) {
     try {
-      const r = await hubFetch(`${HUB}/api/oauth/login`, { method: "POST", body: JSON.stringify({ provider }) });
+      const activeHub = await getActiveHubUrl();
+      if (!activeHub) {
+        throw new Error("No verified OpenBurnBar hub active on loopback");
+      }
+      const r = await hubFetch(`${activeHub}/api/oauth/login`, { method: "POST", auth: true, body: JSON.stringify({ provider }) });
       return r.json || { ok: false };
     } catch (e) {
       console.error("[provider-hub] OAuth trigger error:", e);
@@ -122,9 +169,9 @@
     minimax: '<svg viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="4.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 12h7M12 8.5v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   };
   const PROVIDERS = [
-    { id: "openrouter", name: "OpenRouter", sub: "Every model · free tier included", brand: "#6c7bff", oauth: true, logo: "openrouter-color.svg" },
+    { id: "openrouter", name: "OpenRouter", sub: "Every model · free tier included", brand: "#6c7bff", oauth: false, logo: "openrouter-color.svg" },
     { id: "openai", name: "ChatGPT", sub: "Plus & Pro via Codex login", brand: "#19c39c", oauth: true, logo: "openai.svg" },
-    { id: "claude", name: "Claude", sub: "Pro & Team · native messages API", brand: "#f08057", oauth: true, logo: "claude-color.svg" },
+    { id: "claude", name: "Claude", sub: "Pro & Team · native messages API", brand: "#f08057", oauth: false, logo: "claude-color.svg" },
     { id: "xai", name: "xAI Grok", sub: "Grok subscription · x.ai", brand: "#e8e8ee", oauth: true, logo: "xai.svg" },
     { id: "deepseek", name: "DeepSeek", sub: "chat · reasoner", brand: "#5b8cff", oauth: false, logo: "deepseek-color.svg" },
     { id: "gemini", name: "Gemini", sub: "Flash & Pro · Google AI", brand: "#8ab4ff", oauth: false, logo: "gemini-color.svg" },
@@ -255,7 +302,19 @@
 
   // ---- live status ---------------------------------------------------------
   async function alive(url) {
-    try { const r = await hubFetch(url, { timeoutMs: 1600 }); return r.ok; } catch {}
+    try {
+      const r = await hubFetch(url, { timeoutMs: 1600 });
+      if (!r.ok || !r.json) return false;
+      const j = r.json;
+      return Boolean(
+        j.service === "openburnbar" ||
+        j.service === "openburnbar-proxy" ||
+        j.service === "openburnbar-hub" ||
+        j.application === "openburnbar" ||
+        j.application === "openburnbar-hub" ||
+        j.identity === "openburnbar"
+      );
+    } catch {}
     return false;
   }
 
@@ -293,17 +352,26 @@
   }
 
   function paintCard(card, p, cfg) {
-    const on = connected(cfg, p);
+    const provObj = typeof p === "string" ? PROVIDERS.find((x) => x.id === p) : p;
+    const pId = provObj ? provObj.id : p;
+    const hasOAuth = !!(provObj && provObj.oauth);
+    const on = connected(cfg, pId);
     card.classList.toggle("on", on);
     const dotrow = card.querySelector(".gd-dotrow");
     const btn = card.querySelector(".gd-btn");
     if (on) {
-      const key = cfg.providers?.[p]?.apiKey || cfg[p === "claude" ? "anthropicApiKey" : `${p}ApiKey`] || "";
+      const key = cfg.providers?.[pId]?.apiKey || cfg[pId === "claude" ? "anthropicApiKey" : `${pId}ApiKey`] || "";
       dotrow.innerHTML = `<i></i>Connected ${key && key.includes("•") ? `· ${maskOf(key)}` : ""}`;
-      if (btn && !btn.dataset.keep) { btn.textContent = "Refresh"; btn.dataset.mode = "refresh"; }
+      if (btn && !btn.dataset.keep) {
+        btn.textContent = hasOAuth ? "Refresh" : "Replace key";
+        btn.dataset.mode = hasOAuth ? "refresh" : "key";
+      }
     } else {
       dotrow.innerHTML = `<i></i>Not linked`;
-      if (btn && !btn.dataset.keep) { btn.textContent = p.oauth ? "Login" : "Add key"; btn.dataset.mode = p.oauth ? "login" : "key"; }
+      if (btn && !btn.dataset.keep) {
+        btn.textContent = hasOAuth ? "Login" : "Add key";
+        btn.dataset.mode = hasOAuth ? "login" : "key";
+      }
     }
   }
 
@@ -376,22 +444,34 @@
     const onKey = (e) => { if (e.key === "Escape") close(); };
     modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
     modal.querySelector(".gd-x").addEventListener("click", close);
-    document.addEventListener("keydown", onKey, true);
+    setupEvents(modal);
 
     const pill = modal.querySelector(".gd-pill");
     pollGateway(pill);
     const body = modal.querySelector(".gd-body");
     body.querySelectorAll(".gd-card").forEach((card) => paintCard(card, card.dataset.pid, cfg));
     probeEngines(body);
+  }
 
-    // OAuth / refresh buttons
+  function setupEvents(modal) {
+    const onKey = (e) => { if (e.key === "Escape") close(); };
+    window.addEventListener("keydown", onKey);
+
+    const close = () => {
+      window.removeEventListener("keydown", onKey);
+      modal.classList.remove("gd-on");
+      setTimeout(() => modal.remove(), 340);
+    };
+
+    modal.querySelector(".gd-x").addEventListener("click", close);
+
     modal.querySelectorAll(".gd-card").forEach((card) => {
       const pid = card.dataset.pid;
       const meta = PROVIDERS.find((x) => x.id === pid);
       const btn = card.querySelector(".gd-btn");
       btn.addEventListener("click", async () => {
         if (btn.dataset.mode === "key") {
-          card.querySelector(".gd-keyrow input")?.focus();
+          modal.querySelector(`.gd-keyrow[data-kid='${pid}'] input`)?.focus();
           toast(`${meta.name}: paste the key below, then Save`);
           return;
         }
@@ -410,7 +490,6 @@
       });
     });
 
-    // Key saves
     modal.querySelectorAll("[data-save]").forEach((b) => {
       b.addEventListener("click", () => {
         const pid = b.dataset.save;
@@ -418,12 +497,26 @@
         const val = (input.value || "").trim();
         if (!val) { toast("Paste a key first"); return; }
         const meta = PROVIDERS.find((x) => x.id === pid);
-        const topLevel = pid === "claude" ? "anthropicApiKey" : `${pid}ApiKey`;
-        const cur = readConfig();
-        saveConfig({
-          [topLevel]: val,
-          providers: { ...(cur.providers || {}), [pid]: { ...(cur.providers?.[pid] || {}), enabled: true, apiKey: val, savedAt: Date.now() } },
+        const updated = saveConfig((cur) => {
+          const patch = {
+            providers: {
+              ...(cur.providers || {}),
+              [pid]: { ...(cur.providers?.[pid] || {}), enabled: true, apiKey: val, savedAt: Date.now() },
+            },
+          };
+          if (pid === "claude") {
+            patch.anthropicApiKey = val;
+            patch.claudeApiKey = val;
+            patch.providers.anthropic = { ...(cur.providers?.anthropic || {}), enabled: true, apiKey: val, savedAt: Date.now() };
+          } else {
+            patch[`${pid}ApiKey`] = val;
+          }
+          return patch;
         });
+        if (!updated) {
+          toast(`Failed to save ${meta.name} key: file lock/write error`);
+          return;
+        }
         input.value = "";
         input.placeholder = "saved · type to replace";
         toast(`${meta.name} key saved · gateway hot-reloaded`);

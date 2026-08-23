@@ -115,13 +115,23 @@ missing_host_files() {
 find_app_asar() {
   local candidate
   if [ -n "${GROK_D_APP_ASAR:-}" ]; then
-    if [ ! -f "$GROK_D_APP_ASAR" ]; then
-      echo "install-runtime: GROK_D_APP_ASAR does not exist: $GROK_D_APP_ASAR" >&2
+    if [ -f "$GROK_D_APP_ASAR" ] && [ ! -L "$GROK_D_APP_ASAR" ]; then
+      case "$GROK_D_APP_ASAR" in
+        */Contents/Resources/app.asar|*/app.asar)
+          printf '%s\n' "$GROK_D_APP_ASAR"
+          return 0
+          ;;
+        *)
+          echo "install-runtime: untrusted GROK_D_APP_ASAR path rejected: $GROK_D_APP_ASAR" >&2
+          return 1
+          ;;
+      esac
+    else
+      echo "install-runtime: specified GROK_D_APP_ASAR does not exist or is a symlink: $GROK_D_APP_ASAR" >&2
       return 1
     fi
-    printf '%s\n' "$GROK_D_APP_ASAR"
-    return 0
   fi
+
   for candidate in \
     "$APP_SRC/../app.asar" \
     "$HOME/Applications/grok\"D\".app/Contents/Resources/app.asar" \
@@ -129,7 +139,7 @@ find_app_asar() {
     "/Applications/grok\"D\".app/Contents/Resources/app.asar" \
     "/Applications/Grok Bot D.app/Contents/Resources/app.asar"
   do
-    if [ -f "$candidate" ]; then
+    if [ -f "$candidate" ] && [ ! -L "$candidate" ]; then
       printf '%s\n' "$candidate"
       return 0
     fi

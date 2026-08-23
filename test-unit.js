@@ -59,11 +59,17 @@ ok("resolveTeammate");
   assert(!allowedHackPath(path.join(os.homedir(), ".ssh", "id_rsa")), "ssh");
   assert(!allowedHackPath(path.join(os.homedir(), ".aws", "credentials")), "aws");
   assert(!allowedHackPath(path.join(os.homedir(), "Library", "Keychains", "login.keychain-db")), "keychain");
+  assert(!allowedHackPath("/tmp/grokbot-hack/.git/hooks/pre-commit"), ".git hooks");
+  assert(!allowedHackPath(path.join(DEV, ".git", "config")), ".git config");
   assert(!allowedHackPath("/tmp/other.js"), "other tmp");
-  assert(safeRunCmd("node /tmp/grokbot-hack/suite-exec/hello.js"), "node hello");
-  assert(safeRunCmd(`node ${DEV_JOB}`), "node developer");
+  assert(safeRunCmd("cat /tmp/grokbot-hack/suite-exec/hello.js"), "cat hello");
+  assert(safeRunCmd(`cat ${DEV_JOB}`), "cat developer");
   assert(safeRunCmd("echo hi"), "no path shell");
   assert(safeRunCmd("git --version"), "git version");
+  assert(safeRunCmd("git status"), "git status");
+  assert(!safeRunCmd("git commit -m 'evil hook'"), "git commit blocked");
+  assert(!safeRunCmd("git push origin main"), "git push blocked");
+  assert(!safeRunCmd("node /tmp/grokbot-hack/suite-exec/hello.js"), "node interpreter blocked");
   assert(!safeRunCmd("rm -rf " + os.homedir()), "rm users");
   assert(!safeRunCmd("node /etc/passwd"), "node etc");
   assert(!safeRunCmd("cat ~/.ssh/id_rsa"), "cat ssh");
@@ -82,8 +88,8 @@ ok("resolveTeammate");
   assert(ops.writes.length === 1, `writes ${ops.writes.length}`);
   assert(ops.writes[0].path.endsWith("/suite-exec/hello.js"), ops.writes[0].path);
   assert(ops.writes[0].content.includes("EXEC-1"), ops.writes[0].content);
-  assert(ops.runs.length === 1 && ops.runs[0].startsWith("node "), ops.runs);
-  assert(ops.stdoutPath && ops.stdoutPath.endsWith("/out.txt"), ops.stdoutPath);
+  // Prompt-marker Run execution is strictly disabled for security
+  assert(ops.runs.length === 0, "prompt runs must be disabled");
 
   const jail = parseFileOps("Write a file at /etc/passwd containing exactly: root::0:0");
   assert(jail.writes.length === 0, "jail write");
@@ -91,10 +97,10 @@ ok("resolveTeammate");
   assert(jailOut.stdoutPath == null, "jail stdout");
   const alt = parseFileOps("create a file at /tmp/grokbot-hack/x.js with: console.log(1);\nExecute: node /tmp/grokbot-hack/x.js");
   assert(alt.writes.length === 1 && alt.writes[0].path.endsWith("/x.js"), alt.writes);
-  assert(alt.runs.length === 1 && alt.runs[0].startsWith("node "), alt.runs);
+  assert(alt.runs.length === 0, "prompt runs disabled in alt");
   const dev = parseFileOps(`Write a file at ${DEV_JOB} containing exactly: console.log(1);\nRun: node ${DEV_JOB}`);
   assert(dev.writes.length === 1 && dev.writes[0].path === path.resolve(DEV_JOB), JSON.stringify(dev.writes));
-  assert(dev.runs.length === 1 && dev.runs[0].includes(DEV_JOB), dev.runs);
+  assert(dev.runs.length === 0, "prompt runs disabled in dev");
   ok("parseFileOps");
 }
 

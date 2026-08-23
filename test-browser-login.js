@@ -62,7 +62,7 @@ assert(br.activeProfileId() === "cursor-a", "env id");
 assert(br.profileDir("cursor-a").endsWith("/cursor-a"), "dir a");
 assert(br.profileDir("cursor-b").endsWith("/cursor-b"), "dir b");
 assert(br.profileDir("cursor-c").endsWith("/cursor-c"), "dir c");
-assert(br.profileDir("../evil").endsWith("..-evil"), "sanitize");
+assert(br.profileDir("../evil").startsWith(path.join(tmp, "browser-profiles") + path.sep), "sanitize");
 ok("per-seat-dirs");
 
 const dir = br.prepareProfile("cursor-a");

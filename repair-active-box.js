@@ -11,12 +11,16 @@ const box = require("./box-state");
 
 const SEAT4 = process.env.GROK_SEAT4 || path.join(os.homedir(), "Library/Application Support/GrokBotSeat4");
 
-function repair() {
+function repairInternal() {
   const profile = store.getActive();
-  const report = { id: profile && profile.id, kind: profile && profile.kind, action: "none" };
-  if (!profile) return report;
+  const all = store.list();
+  if (!profile || !all.some((p) => p.id === profile.id)) {
+    return { id: null, kind: null, action: "invalid-profile" };
+  }
+  const report = { id: profile.id, kind: profile.kind, action: "none" };
   if (profile.kind === "local") {
     box.clearCursorHost(SEAT4);
+    try { fs.rmSync(path.join(SEAT4, "sand-secrets.json"), { force: true }); } catch (_) {}
     const dir = store.profileDataDir(profile.id);
     box.installLocalCredential(SEAT4, [dir, store.profileDataDir("local-d")]);
     box.writeLocalHost(SEAT4);
@@ -30,24 +34,23 @@ function repair() {
   const identity = profile.identitySource || profile.sourceUserData;
   const remote = box.chooseCursorConnection(identity, dir);
   if (remote) {
-    if (!box.isRemoteConnection(box.connectionPath(SEAT4))) {
-      box.installConnection(remote, SEAT4);
+    const installed = box.installConnection(remote, SEAT4);
+    if (installed) {
       report.action = "installed-remote";
-    } else {
-      report.action = "already-remote";
+      const j = box.readJson(box.connectionPath(SEAT4));
+      report.baseUrl = j && j.baseUrl;
+      return report;
     }
-    const j = box.readJson(box.connectionPath(SEAT4));
-    report.baseUrl = j && j.baseUrl;
-    return report;
   }
-  if (box.isRemoteConnection(box.connectionPath(SEAT4))) {
-    report.action = "already-remote";
-    report.baseUrl = (box.readJson(box.connectionPath(SEAT4)) || {}).baseUrl;
-    return report;
-  }
+  box.clearCursorHost(SEAT4);
   report.action = "needs-reconnect";
   report.reason = "no Cursor VM on disk";
   return report;
+}
+
+function repair() {
+  // withSwitchLock is reentrant, so a switch already in progress just runs inline.
+  return require("./switch-profile").withSwitchLock(repairInternal);
 }
 
 if (require.main === module) {

@@ -14,14 +14,24 @@ rm -rf "$DEST"
 mkdir -p "$(dirname "$DEST")"
 ditto "$SRC_APP" "$DEST"
 
+OVERLAY_SRC="$ROOT"
+CLEAN_DIR=""
+if [ -x "$ROOT/export-public.sh" ]; then
+  CLEAN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/grokD-dist-src.XXXXXX")"
+  bash "$ROOT/export-public.sh" "$CLEAN_DIR"
+  OVERLAY_SRC="$CLEAN_DIR"
+fi
+trap 'if [ -n "$CLEAN_DIR" ]; then rm -rf "$CLEAN_DIR"; fi' EXIT
+
 RT="$DEST/Contents/Resources/grokbot-d"
 mkdir -p "$RT"
+chmod 0700 "$RT"
 for f in \
   paths.js box-state.js profile-store.js switch-profile.js relaunch-d.js \
   profile-auth-preload.js profile-ui-inject.js seed-cursor-box.js \
   bubble-rim.js provider-logos.js glass-theme.js \
   account-identity.js browser-login.js patch-open-external.js \
-  model-lib.js model-config.json command-client.js cdp-eval.js \
+  model-lib.js security-guard.js command-client.js cdp-eval.js \
   runbox.js gateway-shim.js proxy2.js fakebox.js protoutil.js \
   bridge-lib.js local-mcp.js routine-guard.js \
   onboard-accounts.js bot-pause.js failover.js failover-act.js \
@@ -35,21 +45,21 @@ for f in \
   repair-overlay.sh \
   sync-to-tmp.sh
  do
-  [ -e "$ROOT/$f" ] || continue
-  cp "$ROOT/$f" "$RT/$f"
+  [ -e "$OVERLAY_SRC/$f" ] || continue
+  cp "$OVERLAY_SRC/$f" "$RT/$f"
 done
 mkdir -p "$RT/splash"
-[ -d "$ROOT/splash" ] && cp -R "$ROOT/splash/." "$RT/splash/"
-if [ -d "$ROOT/assets" ]; then
+[ -d "$OVERLAY_SRC/splash" ] && cp -R "$OVERLAY_SRC/splash/." "$RT/splash/"
+if [ -d "$OVERLAY_SRC/assets" ]; then
   mkdir -p "$RT/assets"
   rsync -a \
     --exclude 'meshy_elon.glb' \
     --exclude 'meshy_elon_textured.glb' \
-    "$ROOT/assets/" "$RT/assets/"
+    "$OVERLAY_SRC/assets/" "$RT/assets/"
 fi
-if [ -d "$ROOT/gallery-icons" ]; then
+if [ -d "$OVERLAY_SRC/gallery-icons" ]; then
   mkdir -p "$RT/gallery-icons"
-  rsync -a "$ROOT/gallery-icons/" "$RT/gallery-icons/"
+  rsync -a "$OVERLAY_SRC/gallery-icons/" "$RT/gallery-icons/"
 fi
 if [ -f "$ROOT/assets/grokd-icon.icns" ]; then
   cp "$ROOT/assets/grokd-icon.icns" "$DEST/Contents/Resources/icon.icns"
@@ -77,8 +87,23 @@ cat > "$RT/profiles.starter.json" <<'JSON'
   ]
 }
 JSON
+cat > "$RT/model-config.starter.json" <<'JSON'
+{
+  "proxyTarget": "openburnbar",
+  "apiKey": "",
+  "model": "grok-4.6",
+  "cursorAccount": "Primary Cursor Account"
+}
+JSON
 printf '%s\n' '{ "mode": "local" }' > "$RT/active-env.starter.json"
+chmod 0600 "$RT"/*.json 2>/dev/null || true
 cp "$ROOT/INSTALL.md" "$DEST/../INSTALL.md" 2>/dev/null || true
+
+# Sanity check: ensure no private secrets or live model-config.json exist in RT
+if [ -f "$RT/model-config.json" ]; then
+  echo "ERROR: live model-config.json found in dist runtime directory!" >&2
+  exit 1
+fi
 
 for required in asar-file.js asar-cli.sh install-runtime.sh ensure-local-box.sh launch-d.sh; do
   if [ ! -f "$RT/$required" ]; then
@@ -86,7 +111,6 @@ for required in asar-file.js asar-cli.sh install-runtime.sh ensure-local-box.sh 
     exit 1
   fi
 done
-
 BIN="$DEST/Contents/MacOS/Grok Bot"
 REAL="$DEST/Contents/MacOS/Grok Bot.real"
 if [ ! -x "$REAL" ]; then
@@ -94,7 +118,6 @@ if [ ! -x "$REAL" ]; then
   exit 1
 fi
 cp "$RT/launch-d.sh" "$BIN"
-
 node - "$RT/asar-file.js" "$DEST/Contents/Resources/app.asar" <<'NODE'
 const helper = require(process.argv[2]);
 const archive = process.argv[3];
@@ -113,8 +136,9 @@ NODE
 
 # Drop debug leftovers from the copied user-data? none in the app.
 chmod +x "$DEST/Contents/MacOS/Grok Bot" "$RT"/*.sh 2>/dev/null || true
-if ! codesign --force --sign - "$DEST" >/tmp/grokbot-d-dist-codesign.out 2>&1; then
-  cat /tmp/grokbot-d-dist-codesign.out >&2
+CS_LOG="${CLEAN_DIR:-/tmp}/grokbot-d-dist-codesign.out"
+if ! codesign --force --sign - "$DEST" >"$CS_LOG" 2>&1; then
+  cat "$CS_LOG" >&2
   exit 1
 fi
 

@@ -97,7 +97,7 @@ vec3 starField(vec2 p) {
     float tw = 0.82 + 0.18 * sin(uTime * (0.6 + n * 2.2) + n * 31.0);
     // faint colour index so the field is not uniformly white
     vec3 tint = mix(vec3(0.72, 0.80, 1.0), vec3(1.0, 0.87, 0.70), hash(cell + 5.7));
-    sum += tint * mag * tw * smoothstep(0.030, 0.0, d);
+    sum += tint * mag * tw * (1.0 - smoothstep(0.0, 0.030, d));
     gp *= 1.93;
   }
   return sum;
@@ -189,12 +189,12 @@ vec3 daySky(vec2 p) {
 
   // the sun itself, and the aureole Mie already threw forward
   float ang = acos(clamp(mu, -1.0, 1.0));
-  float disc = smoothstep(SUN_ANG * 1.35, SUN_ANG * 0.55, ang);
+  float disc = 1.0 - smoothstep(SUN_ANG * 0.55, SUN_ANG * 1.35, ang);
   inscatter += vec3(2.6, 2.3, 1.8) * disc;
 
   // aerial perspective: the last stretch to the horizon goes pale and warm,
   // which is also what gives the copy a quiet band to sit on
-  float low = smoothstep(0.30, -0.02, dir.y);
+  float low = 1.0 - smoothstep(-0.02, 0.30, dir.y);
   inscatter = mix(inscatter, vec3(0.94, 0.91, 0.88), low * 0.30);
 
   // exposure with a soft shoulder: the sun's neighbourhood keeps its gold
@@ -259,7 +259,7 @@ vec3 diskEmit(vec3 x, vec3 vel, vec3 n, vec3 e1, vec3 e2, float rd, float spin, 
   float texture = 0.30 + 1.05 * sw * sw + 0.42 * sw2 + 0.30 * spiral;
 
   float edgeIn = smoothstep(RISCO, RISCO + 0.9, rd);
-  float edgeOut = smoothstep(ROUT, ROUT - 3.2, rd);
+  float edgeOut = 1.0 - smoothstep(ROUT - 3.2, ROUT, rd);
   float emis = pow(RISCO / rd, 3.0) * edgeIn * edgeOut * texture;
 
   // beaming: specific intensity picks up g^3, emitted spectrum adds the rest
@@ -385,10 +385,10 @@ vec4 nebula(vec2 frag, vec4 N, vec4 L, float t) {
   if (dens <= 0.0005) return vec4(0.0);
 
   // dust lanes take light back out, which is what gives a nebula its structure
-  float dust = smoothstep(0.52, 0.18, fbm(p * 1.9 + 3.3));
+  float dust = 1.0 - smoothstep(0.18, 0.52, fbm(p * 1.9 + 3.3));
   dens *= 0.35 + 0.65 * dust;
 
-  float core = smoothstep(0.55, 0.02, r) * cover;
+  float core = (1.0 - smoothstep(0.02, 0.55, r)) * cover;
   float hue = L.z;
 
   vec3 col = mix(vec3(0.78, 0.13, 0.24), vec3(0.20, 0.34, 0.86), hue);   // Ha -> reflection
@@ -404,7 +404,7 @@ vec4 nebula(vec2 frag, vec4 N, vec4 L, float t) {
   vec3 sdir = sunDirection();
   float mus = clamp(dot(vdir, sdir), 0.0, 1.0);
   float rim = pow(mus, 6.0);
-  float thin = smoothstep(0.34, 0.02, dens);
+  float thin = 1.0 - smoothstep(0.02, 0.34, dens);
 
   vec3 lit = mix(vec3(0.97, 0.94, 0.93), vec3(0.80, 0.87, 0.97), 0.55 - 0.35 * rim);
   lit = mix(lit, vec3(1.0, 0.93, 0.80), rim * 0.75);                  // sunward warmth
@@ -448,7 +448,7 @@ void main() {
     float mask;
     vec3 hole = renderHole(frag, H, O, uTime, hit, mask);
     float march = H.z / BCRIT * RMARCH;
-    float edge = smoothstep(march, march * mix(0.88, 0.66, uLight), length(frag - H.xy));
+    float edge = 1.0 - smoothstep(march * mix(0.88, 0.66, uLight), march, length(frag - H.xy));
     // outside the march the weak-field sky already stands; inside, the horizon
     // decides how much sky is left and the disk adds on top
     sky = mix(sky, skyColour(hit.xy) * mask, edge);

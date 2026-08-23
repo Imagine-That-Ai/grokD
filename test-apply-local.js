@@ -58,7 +58,7 @@ function seedStore() {
   write(path.join(ROOT, "profile-data", "local-d", "model-config.json"), {
     proxyTarget: "cliproxy",
     model: "grok-4.6",
-    apiKey: "local-cliproxy",
+    apiKey: "",
   });
   write(path.join(ROOT, "profile-data", "cursor-a", "secrets", "sand-secrets.json"), {
     "cursor-access-token": "scoped:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:x",
