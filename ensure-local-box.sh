@@ -37,6 +37,19 @@ if [ -x "$DURABLE/install-runtime.sh" ]; then
   fi
 fi
 
+STORE_HELPER="$DURABLE/agent-store-db.js"
+STORE_REPAIR_LOG="$DURABLE/runtime/agent-store-repair.log"
+mkdir -p "$DURABLE/runtime"
+if [ ! -f "$STORE_HELPER" ]; then
+  echo "ERROR: agent-store-db.js is missing; reinstall Grok D before starting the local host" >&2
+  exit 1
+fi
+if ! "$NODE" "$STORE_HELPER" --agents-root "$HACK/box-data/agents" >"$STORE_REPAIR_LOG" 2>&1; then
+  echo "ERROR: a local bot database could not be repaired safely; see $STORE_REPAIR_LOG" >&2
+  tail -n 40 "$STORE_REPAIR_LOG" >&2 2>/dev/null || true
+  exit 1
+fi
+
 # Old scripts hardcode /tmp/grokbot-hack. Recreate that path if reboot wiped /tmp.
 if [ ! -e /tmp/grokbot-hack ]; then
   ln -s "$HACK" /tmp/grokbot-hack
@@ -46,7 +59,7 @@ fi
 
 # Prefer durable scripts; keep a copy under /tmp for anything still pointed there.
 if [ -d "$DURABLE" ]; then
-  for f in proxy2.js runbox.js fakebox.js protoutil.js local-mcp.js bridge-lib.js gateway-shim.js routine-guard.js openburnbar-proxy.mjs node-deps.js sqlite-ro.js clone-bot.js paths.js; do
+  for f in proxy2.js runbox.js fakebox.js protoutil.js local-mcp.js bridge-lib.js gateway-shim.js agent-store-db.js routine-guard.js openburnbar-proxy.mjs node-deps.js sqlite-ro.js clone-bot.js paths.js; do
     if [ -f "$DURABLE/$f" ]; then
       cp "$DURABLE/$f" "$HACK/$f" 2>/dev/null || true
       if [ -d /tmp/grokbot-hack ] && [ ! -L /tmp/grokbot-hack ]; then

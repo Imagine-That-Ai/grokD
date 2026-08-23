@@ -2,6 +2,7 @@
 // Fast, no-network unit tests for gateway-shim helpers.
 const path = require("path");
 const secGuard = require("./security-guard");
+const { inspectAgentStoreDb } = require("./agent-store-db");
 const assert = (c, m) => { if (!c) throw new Error(m); };
 const {
   isIdle, resolveTargets, broadcastOk, distinctiveToken, hayHasMessage,
@@ -23,13 +24,21 @@ assert(isIdle({ isRunning: true, isComposingMessage: true }) === false, "both bu
 ok("isIdle");
 
 // resolveTargets
-assert(JSON.stringify(resolveTargets("sendPrompt", { agentId: "aaa" })) === '["aaa"]', "sp id");
+const uuid = "9b916ddb-76be-4d38-a62d-abf785a0e49d";
+const uuid2 = "11111111-1111-4111-8111-111111111111";
+assert(JSON.stringify(resolveTargets("sendPrompt", { agentId: uuid })) === JSON.stringify([uuid]), "sp id");
 assert(resolveTargets("sendPrompt", {}).length === 0, "sp empty");
 assert(resolveTargets("sendPrompt", null).length === 0, "sp null");
-assert(JSON.stringify(resolveTargets("broadcastToAgents", { targets: ["a", "b"] })) === '["a","b"]', "bc ids");
+assert(
+  JSON.stringify(resolveTargets("broadcastToAgents", { targets: [uuid, uuid2] })) === JSON.stringify([uuid, uuid2]),
+  "bc ids"
+);
 assert(resolveTargets("broadcastToAgents", { targets: [] }).length === 0, "bc empty");
 assert(resolveTargets("broadcastToAgents", {}).length === 0, "bc missing");
-assert(JSON.stringify(resolveTargets("broadcastToAgents", { targets: ["a", "", null] })) === '["a"]', "bc filter");
+assert(
+  JSON.stringify(resolveTargets("broadcastToAgents", { targets: [uuid, "", null, uuid] })) === JSON.stringify([uuid]),
+  "bc filter"
+);
 assert(resolveTargets("listAgents", { agentId: "x" }).length === 0, "other");
 ok("resolveTargets");
 
@@ -43,7 +52,6 @@ assert(!hayHasMessage("nothing here", "Broadcast token BCAST-abc12345"), "miss")
 ok("token-match");
 
 // path jail
-const uuid = "9b916ddb-76be-4d38-a62d-abf785a0e49d";
 const db = agentDbPath(uuid);
 assert(db === path.join(AGENTS_ROOT, uuid, "store.db"), db);
 assert(db.startsWith(path.resolve(AGENTS_ROOT) + path.sep), "under root");
@@ -98,6 +106,11 @@ ok("parse-broadcast");
   const prof = JSON.parse(fs.readFileSync(path.join(tmp, created.id, "profile.json"), "utf8"));
   assert(prof.name === "Suite Newbie" && prof.origin === "user", JSON.stringify(prof));
   assert(fs.existsSync(path.join(tmp, created.id, "store.db")), "store.db");
+  const store = inspectAgentStoreDb(path.join(tmp, created.id, "store.db"));
+  assert(store.canonical, JSON.stringify(store));
+  assert(store.kv.canonical && store.blobs.canonical && store.transcript.canonical, "host schema");
+  assert((fs.statSync(path.join(tmp, created.id)).mode & 0o777) === 0o700, "agent dir permissions");
+  assert(!fs.readdirSync(tmp).some((name) => name.startsWith(".grokd-agent-")), "agent staging leaked");
   const blank = createLocalAgent({ name: "   " }, tmp);
   assert(blank.name === "New Bot", "empty name defaults");
   const gone = deleteLocalAgents([created.id], tmp);
@@ -151,7 +164,7 @@ ok("parse-broadcast");
   // handleSpecial: sendPrompt waits then forwards original raw
   {
     const calls = [];
-    const raw = JSON.stringify({ agentId: "aaa", prompt: "hello", awaitTurn: false });
+    const raw = JSON.stringify({ agentId: uuid, prompt: "hello", awaitTurn: false });
     const body = JSON.parse(raw);
     const waits = [];
     const out = await handleSpecial("sendPrompt", raw, body, {
@@ -163,7 +176,7 @@ ok("parse-broadcast");
       waitTx: async () => { throw new Error("sendPrompt should not poll transcript"); },
     });
     assert(out.json.accepted === true, "sp res");
-    assert(waits.join() === "aaa", "sp wait");
+    assert(waits.join() === uuid, "sp wait");
     assert(calls.length === 1 && calls[0].method === "sendPrompt", JSON.stringify(calls));
     assert(calls[0].body === raw, "raw unchanged");
   }
@@ -184,73 +197,80 @@ ok("parse-broadcast");
 
   // broadcast delivers first try: no retry
   {
-    const methods = [];
-    const raw = JSON.stringify({ targets: ["aaa"], message: "Broadcast token BCAST-zzzz1111" });
+    const calls = [];
+    const raw = JSON.stringify({ targets: [uuid], message: "Broadcast token BCAST-zzzz1111" });
     await handleSpecial("broadcastToAgents", raw, JSON.parse(raw), {
       post: async (method, b) => {
-        methods.push(method);
+        calls.push({ method, body: JSON.parse(b) });
         return { status: 200, json: { scheduled: 1 }, text: '{"scheduled":1}', raw: b };
       },
       waitIdle: async () => {},
       waitTx: async () => [],
     });
-    assert(methods.filter((m) => m === "broadcastToAgents").length === 1, methods.join());
+    assert(calls.length === 1 && calls[0].method === "broadcastToAgents", JSON.stringify(calls));
+    assert(JSON.stringify(calls[0].body.targets) === JSON.stringify([uuid]), JSON.stringify(calls[0].body));
+    assert(/^gd-tx-[0-9a-f]{16}$/.test(calls[0].body.dispatchId), JSON.stringify(calls[0].body));
   }
   ok("handle-broadcast-hit");
 
-  // miss → retry once → then hit
+  // miss → retry once with a fresh dispatch ID
   {
-    const methods = [];
-    const raw = JSON.stringify({ targets: ["aaa"], message: "Broadcast token BCAST-yyyy2222" });
-    let round = 0;
+    const calls = [];
+    const raw = JSON.stringify({ targets: [uuid], message: "Broadcast token BCAST-yyyy2222" });
     await handleSpecial("broadcastToAgents", raw, JSON.parse(raw), {
       post: async (method, b) => {
-        methods.push({ method, same: b === raw });
+        calls.push({ method, body: JSON.parse(b) });
         return { status: 200, json: { scheduled: 1 }, text: '{"scheduled":1}' };
       },
       waitIdle: async () => {},
-      waitTx: async () => { round++; return round === 1 ? ["aaa"] : []; },
+      waitTx: async () => [uuid],
     });
-    const bcs = methods.filter((m) => m.method === "broadcastToAgents");
+    const bcs = calls.filter((call) => call.method === "broadcastToAgents");
     assert(bcs.length === 2, `retries ${bcs.length}`);
-    assert(bcs.every((m) => m.same), "retry uses original body");
-    assert(!methods.some((m) => m.method === "sendPrompt"), "no fallback");
+    assert(bcs.every((call) => JSON.stringify(call.body.targets) === JSON.stringify([uuid])), JSON.stringify(bcs));
+    assert(bcs[0].body.dispatchId !== bcs[1].body.dispatchId, JSON.stringify(bcs));
+    assert(!calls.some((call) => call.method === "sendPrompt"), "no fallback");
   }
   ok("handle-broadcast-retry");
 
-  // still missing → fallback sendPrompt per target
+  // partial delivery retries only the missing targets and never changes method.
   {
     const calls = [];
-    const raw = JSON.stringify({ targets: ["aaa", "bbb"], message: "Broadcast token BCAST-xxxx3333" });
+    const raw = JSON.stringify({ targets: [uuid, uuid2], message: "Broadcast token BCAST-xxxx3333" });
     const body = JSON.parse(raw);
     await handleSpecial("broadcastToAgents", raw, body, {
       post: async (method, b) => {
-        calls.push({ method, b });
+        calls.push({ method, body: JSON.parse(b) });
         return { status: 200, json: { scheduled: 1, total: 2 }, text: '{"scheduled":1}' };
       },
       waitIdle: async () => {},
-      waitTx: async (ids) => ids.slice(),
+      waitTx: async () => [uuid2],
     });
-    const falls = calls.filter((c) => c.method === "sendPrompt");
-    assert(falls.length === 2, `fallback ${falls.length}`);
-    assert(falls[0].b.agentId === "aaa" && falls[0].b.awaitTurn === false, JSON.stringify(falls[0].b));
-    assert(falls[0].b.prompt === body.message, falls[0].b.prompt);
-    assert(falls[1].b.agentId === "bbb", falls[1].b.agentId);
-    assert(calls.filter((c) => c.method === "broadcastToAgents").length === 2, "one retry");
+    const broadcasts = calls.filter((call) => call.method === "broadcastToAgents");
+    assert(broadcasts.length === 2, `broadcasts ${broadcasts.length}`);
+    assert(
+      JSON.stringify(broadcasts[0].body.targets) === JSON.stringify([uuid, uuid2]),
+      JSON.stringify(broadcasts[0].body)
+    );
+    assert(
+      JSON.stringify(broadcasts[1].body.targets) === JSON.stringify([uuid2]),
+      JSON.stringify(broadcasts[1].body)
+    );
+    assert(!calls.some((call) => call.method === "sendPrompt"), "must not change dispatch method");
   }
-  ok("handle-broadcast-fallback");
+  ok("handle-broadcast-partial");
 
   // scheduled:0 → no retry / no fallback
   {
     const methods = [];
-    const raw = JSON.stringify({ targets: ["aaa"], message: "Broadcast token BCAST-nope4444" });
+    const raw = JSON.stringify({ targets: [uuid], message: "Broadcast token BCAST-nope4444" });
     await handleSpecial("broadcastToAgents", raw, JSON.parse(raw), {
       post: async (method) => {
         methods.push(method);
         return { status: 200, json: { scheduled: 0 }, text: '{"scheduled":0}' };
       },
       waitIdle: async () => {},
-      waitTx: async () => ["aaa"],
+      waitTx: async () => [uuid],
     });
     assert(methods.join() === "broadcastToAgents", methods.join());
   }
@@ -270,7 +290,7 @@ ok("parse-broadcast");
   ok("offline-sendPrompt-honest");
 
   {
-    const bc = offlineFallback("broadcastToAgents", { targets: ["aaa"] }, new Error("ECONNREFUSED"));
+    const bc = offlineFallback("broadcastToAgents", { targets: [uuid] }, new Error("ECONNREFUSED"));
     assert(bc.status === 502, `bc status ${bc.status}`);
     assert(bc.json && bc.json.ok === false, JSON.stringify(bc.json));
     assert(bc.json.scheduled == null, "broadcast must not schedule");
