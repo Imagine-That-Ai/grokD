@@ -6,9 +6,25 @@ try {
   const path = require("path");
   const { app, shell, safeStorage } = require("electron");
   const home = os.homedir();
-  const ROOT = path.join(home, ".grok", "grokbot-d");
+  const ROOT = process.env.GROK_PROFILE_ROOT || path.join(home, ".grok", "grokbot-d");
+  const SEAT4 = process.env.GROK_SEAT4 || path.join(home, "Library/Application Support/GrokBotSeat4");
   const login = require(path.join(ROOT, "browser-login.js"));
   const box = require(path.join(ROOT, "box-state.js"));
+  const authPolicy = require(path.join(ROOT, "profile-auth-preload.js"));
+
+  function log(msg) {
+    try { fs.appendFileSync("/tmp/grokbot-hack/auth-policy.log", "[main-seed] " + msg + "\n"); } catch {}
+  }
+
+  if (authPolicy.isLocalMode()) {
+    if (!authPolicy.installLocalSafeStorage(safeStorage)) {
+      const error = new Error("could not install local safeStorage");
+      log("local-safe-storage-failed " + error);
+      try { app.exit(1); } catch {}
+      throw error;
+    }
+    log("local-safe-storage-installed");
+  }
 
   try {
     const DISPLAY = 'grok"D"';
@@ -65,33 +81,25 @@ try {
     shell.__grokDCleanBrowser = true;
   }
 
-  function log(msg) {
-    try { fs.appendFileSync("/tmp/grokbot-hack/auth-policy.log", "[main-seed] " + msg + "\n"); } catch {}
-  }
-
   function seedComputer() {
     try {
+      if (authPolicy.isLocalMode()) {
+        // This Mac reads sand-data/local-exec-daemon-connection.json directly.
+        // Encrypting that same descriptor through safeStorage is redundant and
+        // can show a Keychain approval dialog after every locally signed build.
+        log("local-descriptor-plaintext");
+        return;
+      }
       if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
         log("enc-unavailable");
         return;
       }
-      const seat4 = path.join(home, "Library/Application Support/GrokBotSeat4");
-      if (box.isRemoteConnection(box.connectionPath(seat4))) {
+      if (box.isRemoteConnection(box.connectionPath(SEAT4))) {
         log("already-remote");
         return;
       }
       let env = {};
       try { env = JSON.parse(fs.readFileSync(path.join(ROOT, "active-env.json"), "utf8")); } catch {}
-      if (env.mode === "local") {
-        try {
-          const auth = require(path.join(ROOT, "profile-auth-preload.js"));
-          auth.seedEncryptedDescriptor({ allowLocal: true });
-          log("seeded-local-descriptor");
-        } catch (e) {
-          log("seed-local-err " + e);
-        }
-        return;
-      }
       const extras = [];
       const store = (() => { try { return require(path.join(ROOT, "profile-store.js")); } catch { return null; } })();
       const active = store && store.getActive && store.getActive();
@@ -99,7 +107,7 @@ try {
       const identity = active && (active.identitySource || active.sourceUserData);
       if (id) extras.push(path.join(ROOT, "profile-data", id, "secrets", "gateway-descriptor.json"));
       if (identity) extras.push(path.join(identity, "gateway-descriptor.json"));
-      const url = box.installFromDescriptor(seat4, safeStorage, extras);
+      const url = box.installFromDescriptor(SEAT4, safeStorage, extras);
       log(url ? ("seeded " + url.slice(0, 64)) : "no-decrypt");
     } catch (e) {
       log("seed-err " + e);
@@ -108,16 +116,16 @@ try {
 
   async function harvestIdentity() {
     try {
+      if (authPolicy.isLocalMode()) return;
       if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
         log("ident-enc-unavailable");
         return;
       }
       let env = {};
       try { env = JSON.parse(fs.readFileSync(path.join(ROOT, "active-env.json"), "utf8")); } catch {}
-      if (env.mode === "local") return;
       const acc = require(path.join(ROOT, "account-identity.js"));
       const r = await acc.harvestWithSafeStorage(safeStorage, {
-        seat4: path.join(home, "Library/Application Support/GrokBotSeat4"),
+        seat4: SEAT4,
         profileId: env.profileId || acc.activeProfileId(),
       });
       log("ident " + JSON.stringify({

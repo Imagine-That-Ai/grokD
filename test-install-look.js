@@ -197,6 +197,23 @@ ok("install-sh-ships-look");
   assert(ident.includes("Local bots on this Mac"), "chip does not ask local-d to sign in");
   const preload = read("profile-auth-preload.js");
   assert(preload.includes("local-login-noop"), "official Sign in is a no-op on local");
+  assert(!preload.includes("seedEncryptedDescriptor({ allowLocal: true })"),
+    "local preload must not invoke Keychain-backed safeStorage");
+  const mainHook = read("patch-open-external.js");
+  assert(mainHook.includes("installLocalSafeStorage"),
+    "main hook must install local safeStorage before stock bootstrap");
+  assert(mainHook.includes("local-descriptor-plaintext"),
+    "main hook must short-circuit local descriptor seeding");
+  assert(mainHook.includes("app.exit(1)"),
+    "main hook must stop instead of falling through to Keychain");
+  const localModeIndex = mainHook.indexOf("authPolicy.isLocalMode()");
+  const safeStorageIndex = mainHook.indexOf("safeStorage.isEncryptionAvailable()");
+  assert(
+    localModeIndex >= 0 &&
+      safeStorageIndex >= 0 &&
+      localModeIndex < safeStorageIndex,
+    "local mode must be detected before any safeStorage call"
+  );
 }
 ok("drop-and-landing");
 

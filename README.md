@@ -22,6 +22,8 @@ That writes `~/Applications/Grok Bot D.app` and opens it. If this Mac has Imagin
 
 First launch is offline-safe after installation: it extracts the local host directly from the bundled `app.asar`, verifies every required host file, and waits for the host and gateway to pass readiness checks before opening the UI. A bootstrap failure exits with a macOS alert and diagnostics under `~/.grok/grokbot-d/runtime/`; it never leaves “Setting up your Grok Bot…” spinning forever.
 
+This Mac mode never constructs the official Cursor auth service or opens its Keychain storage. Local secrets use a random per-seat 256-bit key with owner-only permissions, so a fresh clone and locally signed app cannot inherit another user’s account lock. Cursor mode keeps the official sign-in and Keychain behavior.
+
 If you were given a notarized drop (`./pack-drop.sh` on a signing Mac), drag that icon into Applications. First open finds official Grok Bot, builds D, and relaunches. GitHub does not host that `.app`.
 
 First launch is Seat in. Pick This Mac (local box), Cursor (import or sign in), or add another Cursor after the first one. Skip anytime. Tokens stay on your Mac.
@@ -30,7 +32,7 @@ First launch is Seat in. Pick This Mac (local box), Cursor (import or sign in), 
 
 Guides: [`splash/onboarding-apple.html`](splash/onboarding-apple.html), [`welcome_guide_source.html`](welcome_guide_source.html).
 
-Dock name is grok"D". Folder is `Grok Bot D.app`. Apple menu and keychain stay `Grok Bot` so renderer secrets stay on the official keychain. Do not rename the folder to `grok"D".app` — quotes in the path crash Electron.
+Dock name is grok"D". The canonical folder is `Grok Bot D.app`; the installer leaves `grok"D".app` only as a compatibility symlink. Cursor mode keeps the `Grok Bot` Apple-menu and Keychain identity. Do not replace the canonical folder with the quoted legacy name — quotes in the real bundle path crash Electron.
 
 You start on Local D. Grok A is an optional import of official Grok Bot on this Mac. Official Grok B and C are not seats.
 
