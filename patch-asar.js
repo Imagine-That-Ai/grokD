@@ -47,6 +47,34 @@ function tryReplace(text, from, to, label) {
   return { text, status: "skipped", label, reason: "ambiguous:" + n };
 }
 
+function fuzzyWrapEnsureAuth(text) {
+  if (text.includes("wrapEnsureMainAuth")) {
+    return { text, status: "already", label: "wrap-ensure-main-auth" };
+  }
+  const re = /\{ensureCursorAuthService:([A-Za-z_$][\w$]*)\}=([A-Za-z_$][\w$]*),(?=[A-Za-z_$][\w$]*=)/g;
+  const matches = [...text.matchAll(re)];
+  if (matches.length !== 1) {
+    return {
+      text,
+      status: "skipped",
+      label: "wrap-ensure-main-auth",
+      reason: matches.length ? `ambiguous:${matches.length}` : "no-match",
+    };
+  }
+  const [whole, ensure, owner] = matches[0];
+  const wrapped = [
+    `{ensureCursorAuthService:${ensure}}=${owner};`,
+    `try{const os=require("os"),path=require("path"),root=process.env.GROK_PROFILE_ROOT||path.join(os.homedir(),".grok","grokbot-d");`,
+    `${ensure}=require(path.join(root,"profile-auth-preload.js")).wrapEnsureMainAuth(${ensure})||${ensure}`,
+    `}catch{}var `,
+  ].join("");
+  return {
+    text: text.replace(whole, wrapped),
+    status: "patched",
+    label: "wrap-ensure-main-auth",
+  };
+}
+
 function fuzzyWrapAuth(text) {
   if (text.includes("wrapMainAuth")) {
     return { text, status: "already", label: "wrap-main-auth-fuzzy" };
@@ -106,6 +134,32 @@ function fuzzyDescriptorRead(text) {
   return { text, status: "skipped", label: "descriptor-read-fuzzy", reason: "no-match" };
 }
 
+function wrapPreloadAuth(text) {
+  const marker = "__grokdPreExposeDesktop";
+  if (text.includes(marker)) {
+    return { text, status: "already", label: "preload-auth" };
+  }
+  const re = /([A-Za-z_$][\w$]*)\.contextBridge\.exposeInMainWorld\((["'])desktop\2,\s*([A-Za-z_$][\w$]*)\)/g;
+  const matches = [...text.matchAll(re)];
+  if (matches.length !== 1) {
+    return {
+      text,
+      status: "skipped",
+      label: "preload-auth",
+      reason: matches.length ? `ambiguous:${matches.length}` : "no-match",
+    };
+  }
+  const [whole, electron, quote, desktop] = matches[0];
+  const wrapped = [
+    `let ${marker}=${desktop};`,
+    `try{const os=require("os"),path=require("path"),root=process.env.GROK_PROFILE_ROOT||path.join(os.homedir(),".grok","grokbot-d");`,
+    `${marker}=require(path.join(root,"profile-auth-preload.js")).applyAuthPolicy(${desktop})||${desktop}`,
+    `}catch(e){try{require("fs").appendFileSync("/tmp/grokbot-renderer.log","[preload-auth] "+e+"\\n")}catch(_){}}`,
+    `${electron}.contextBridge.exposeInMainWorld(${quote}desktop${quote},${marker})`,
+  ].join("");
+  return { text: text.replace(whole, wrapped), status: "patched", label: "preload-auth" };
+}
+
 function ensurePreloadHook(file) {
   if (!fs.existsSync(file)) return "missing-preload";
   let pre = fs.readFileSync(file, "utf8");
@@ -119,7 +173,10 @@ function applyPatches(opts) {
   const mainFile = opts.mainPath || mainPath;
   const preFile = opts.preloadPath || preloadPath;
   if (!fs.existsSync(mainFile)) throw new Error("missing " + mainFile);
+  if (!fs.existsSync(preFile)) throw new Error("missing " + preFile);
   let main = fs.readFileSync(mainFile, "utf8");
+  const ensureAuth = fuzzyWrapEnsureAuth(main);
+  main = ensureAuth.text;
   const ipn = tryReplace(main, IPN_OFFICIAL, IPN_PATCH, "IPn");
   main = ipn.text;
   let ipnFuzzy = { status: "skipped", label: "IPn-fuzzy" };
@@ -168,17 +225,30 @@ function applyPatches(opts) {
   }
 
   fs.writeFileSync(mainFile, main);
+  const preloadAuth = wrapPreloadAuth(fs.readFileSync(preFile, "utf8"));
+  fs.writeFileSync(preFile, preloadAuth.text);
   const hook = ensurePreloadHook(preFile);
   const report = {
     main: mainFile,
+    ensureMainAuth: ensureAuth.status,
     IPn: ipn.status === "skipped" ? ipnFuzzy.status : ipn.status,
     descriptorRead: rd.status === "skipped" ? rdFuzzy.status : rd.status,
     wrapMainAuth: auth.status === "skipped" ? authFuzzy.status : auth.status,
     openExternal: openExt,
+    preloadAuth: preloadAuth.status,
     preloadHook: hook,
     minVersionBypass: "patched",
   };
-  report.ok = hook === "patched" || hook === "already";
+  const required = [
+    "ensureMainAuth",
+    "IPn",
+    "descriptorRead",
+    "wrapMainAuth",
+    "preloadAuth",
+    "preloadHook",
+  ];
+  report.missing = required.filter((key) => !["patched", "already"].includes(report[key]));
+  report.ok = report.missing.length === 0;
   return report;
 }
 
@@ -198,5 +268,6 @@ if (require.main === module) {
 
 module.exports = {
   IPN_OFFICIAL, IPN_PATCH, READ_OFFICIAL, READ_PATCH, AUTH_OFFICIAL, AUTH_PATCH,
-  tryReplace, fuzzyIpn, fuzzyWrapAuth, ensurePreloadHook, applyPatches, HOOK, MAIN_HOOK,
+  tryReplace, fuzzyIpn, fuzzyWrapEnsureAuth, fuzzyWrapAuth, wrapPreloadAuth, ensurePreloadHook,
+  applyPatches, HOOK, MAIN_HOOK,
 };

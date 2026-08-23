@@ -16,10 +16,10 @@ usage() {
 Install grok"D" from official Grok Bot already on this Mac.
 
   ./install.sh
-  ./install.sh --src "/Applications/Grok Bot.app" --dest "$HOME/Applications/grok\"D\".app"
+  ./install.sh --src "/Applications/Grok Bot.app" --dest "$HOME/Applications/Grok Bot D.app"
 
   --src PATH     official Grok Bot.app (auto-detected if omitted)
-  --dest PATH    where to write grok"D" (default grok"D".app)
+  --dest PATH    where to write grok"D" (default Grok Bot D.app)
   --root PATH    overlay home (default ~/.grok/grokbot-d)
   --replace      overwrite dest if it already exists
   --no-open      do not launch D when done
@@ -214,21 +214,6 @@ echo "extract asar…"
 bash "$HERE/asar-cli.sh" extract "$DEST/Contents/Resources/app.asar" "$ASAR_SRC"
 node "$HERE/patch-asar.js" "$ASAR_SRC"
 
-PRELOAD="$ASAR_SRC/dist/electron-preload/preload.cjs"
-if [ -f "$PRELOAD" ] && ! grep -q 'profile-ui-inject.js' "$PRELOAD"; then
-  cat >> "$PRELOAD" <<'EOF'
-
-try {
-  const os = require("os");
-  const path = require("path");
-  const root = process.env.GROK_PROFILE_ROOT || path.join(os.homedir(), ".grok", "grokbot-d");
-  require(path.join(root, "profile-ui-inject.js"));
-} catch (e) {
-  try { require("fs").appendFileSync("/tmp/grokbot-renderer.log", "[profile-ui-inject] " + e + "\n"); } catch (_) {}
-}
-EOF
-fi
-
 echo "pack asar…"
 bash "$HERE/asar-cli.sh" pack "$ASAR_SRC" "$WORK/app.asar"
 cp "$WORK/app.asar" "$DEST/Contents/Resources/app.asar"
@@ -262,8 +247,14 @@ bash "$HERE/install-runtime.sh" "$RT"
 python3 - "$DEST/Contents/Resources/app.asar" "$DEST/Contents/Resources/icon.icns" "$HERE/assets/grokd-icon.icns" <<'PY'
 import pathlib, sys
 data = pathlib.Path(sys.argv[1]).read_bytes()
-if b"profile-ui-inject.js" not in data:
-    raise SystemExit("install: overlay hook missing from app.asar")
+for marker in (
+    b"profile-ui-inject.js",
+    b"__grokdPreExposeDesktop",
+    b"wrapEnsureMainAuth",
+    b"wrapMainAuth",
+):
+    if marker not in data:
+        raise SystemExit("install: required ASAR hook missing: " + marker.decode())
 print("hook ok")
 got = pathlib.Path(sys.argv[2]).read_bytes()
 want = pathlib.Path(sys.argv[3]).read_bytes()
@@ -318,10 +309,15 @@ xattr -cr "$DEST" 2>/dev/null || true
 
 echo "packed $DEST"
 echo "overlay $ROOT"
-ALIAS="$HOME/Applications/Grok Bot D.app"
-if [ "$DEST" != "$ALIAS" ] && [ "$(dirname "$DEST")" = "$(dirname "$ALIAS")" ]; then
-  rm -rf "$ALIAS"
-  ln -s "$(basename "$DEST")" "$ALIAS"
+LEGACY_APP=""
+case "$(basename "$DEST")" in
+  "Grok Bot D.app") LEGACY_APP="$(dirname "$DEST")/grok\"D\".app" ;;
+  "grok\"D\".app") LEGACY_APP="$(dirname "$DEST")/Grok Bot D.app" ;;
+esac
+if [ -n "$LEGACY_APP" ] && [ "$LEGACY_APP" != "$DEST" ]; then
+  rm -rf "$LEGACY_APP"
+  ln -s "$(basename "$DEST")" "$LEGACY_APP"
+  echo "alias  $LEGACY_APP -> $(basename "$DEST")"
 fi
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f -r -u "$DEST" 2>/dev/null || true
 chmod +x "$ROOT"/*.sh 2>/dev/null || true

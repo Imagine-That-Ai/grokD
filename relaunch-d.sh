@@ -4,12 +4,12 @@
 set -u
 trap '' HUP INT TERM
 if [ -z "${GROK_D_APP:-}" ]; then
-  for c in "$HOME/Applications/grok\"D\".app" "/Applications/grok\"D\".app" \
-           "$HOME/Applications/Grok Bot D.app" "/Applications/Grok Bot D.app"; do
+  for c in "$HOME/Applications/Grok Bot D.app" "/Applications/Grok Bot D.app" \
+           "$HOME/Applications/grok\"D\".app" "/Applications/grok\"D\".app"; do
     if [ -e "$c" ]; then GROK_D_APP="$c"; break; fi
   done
 fi
-APP="${GROK_D_APP:-$HOME/Applications/grok\"D\".app}"
+APP="${GROK_D_APP:-$HOME/Applications/Grok Bot D.app}"
 if command -v python3 >/dev/null 2>&1; then
   APP=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$APP" 2>/dev/null || echo "$APP")
 fi
@@ -68,7 +68,19 @@ fi
 # Must go through LaunchServices (`open`). Starting the binary from this
 # helper has no Aqua session, so Electron exits at once — D stays dead.
 d_up() {
-  pgrep -f "Grok Bot.real --user-data-dir" >/dev/null 2>&1 && pgrep -f "GrokBotSeat4" >/dev/null 2>&1
+  for pid in $(pgrep -f "Grok Bot.real --user-data-dir" 2>/dev/null); do
+    cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
+    is_d_main "$cmd" || continue
+    case "$cmd" in
+      "$APP/Contents/MacOS/Grok Bot.real --user-data-dir="*) ;;
+      *) continue ;;
+    esac
+    if ps ax -o ppid=,command= | awk -v p="$pid" \
+      '$1 == p && /--type=renderer/ { found=1 } END { exit(found ? 0 : 1) }'; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 start_d() {
@@ -77,14 +89,20 @@ start_d() {
 }
 
 start_d
-for _ in 1 2 3 4 5 6 7 8 9 10; do
+for ((i = 0; i < 30; i++)); do
   d_up && { echo "$(date +%s) d is up" >>"$LOG"; exit 0; }
-  sleep 0.4
+  sleep 0.5
 done
 
+kill_d TERM
+sleep 0.5
+kill_d KILL
 echo "$(date +%s) retry open" >>"$LOG"
 start_d
-sleep 1
+for ((i = 0; i < 20; i++)); do
+  d_up && { echo "$(date +%s) d is up" >>"$LOG"; exit 0; }
+  sleep 0.5
+done
 if ! d_up; then
   echo "$(date +%s) osascript activate" >>"$LOG"
   osascript -e 'tell application id "com.imaginethat.grokbot.seatd" to activate' >>"$LOG" 2>&1 || true
@@ -93,5 +111,6 @@ if d_up; then
   echo "$(date +%s) d is up" >>"$LOG"
 else
   echo "$(date +%s) FAILED to restart D" >>"$LOG"
+  osascript -e 'display alert "grok\"D\" could not open" message "The renderer did not start. Run the one-line installer again, then see ~/.grok/grokbot-d/runtime/relaunch.log." as critical' >>"$LOG" 2>&1 || true
 fi
 echo "$(date +%s) helper done" >>"$LOG"
