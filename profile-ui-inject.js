@@ -83,40 +83,192 @@
       stdio: "ignore",
       env: nodeEnv(),
     });
+    child.once("error", (error) => {
+      logRendererError("profile-switch-start", error);
+      toast("Could not start the profile switch");
+    });
+    child.once("exit", (code) => {
+      if (code == null || code === 0) return;
+      logRendererError("profile-switch-exit", new Error(`switch exited ${code}`));
+      toast(opts && opts.takeover
+        ? "Local copy failed. The official bot is still open."
+        : "Profile switch failed. Please retry.");
+    });
     child.unref();
   }
 
-  function captureChatHandoff() {
-    const excerpts = [];
-    const seen = new Set();
-    const nodes = document.querySelectorAll("p, li, [class*='message'], [class*='bubble']");
-    for (const n of nodes) {
-      if (n.querySelector && n.querySelector("p, li, [class*='message']")) continue;
-      const t = String(n.innerText || "").replace(/\s+/g, " ").trim();
-      if (t.length < 12 || t.length > 600) continue;
-      if (seen.has(t)) continue;
-      if (/^(Search|Today |Message from|Grok Bot can|Allow Grok)/i.test(t)) continue;
-      seen.add(t);
-      excerpts.push(t);
-      if (excerpts.length >= 16) break;
-    }
+  function mountedTranscriptTurns() {
+    return [...document.querySelectorAll(".sand-transcript-row[data-row-key]")]
+      .sort((a, b) => Number(a.dataset.index || 0) - Number(b.dataset.index || 0))
+      .map((row) => {
+        const text = String(row.innerText || row.textContent || "")
+          .replace(/\u00a0/g, " ")
+          .replace(/[ \t]+\n/g, "\n")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+        return {
+          id: row.dataset.entryId || row.dataset.rowKey || "",
+          role: row.dataset.role || (row.querySelector("[data-role]") || {}).dataset?.role || "message",
+          text,
+        };
+      })
+      .filter((turn) => turn.text && turn.text.length >= 2)
+      .slice(-32);
+  }
+
+  function visibleBotName() {
+    const header = document.querySelector("header");
+    const first = header && String(header.innerText || header.textContent || "").split("\n")[0].trim();
+    if (first && !/^grok[ "\u201c\u201d]*d?$/i.test(first)) return first;
+    return "";
+  }
+
+  async function persistedOfficialBot(opts) {
+    const includeTranscript = !(opts && opts.metadataOnly);
+    const result = await pageCall(`
+      const includeTranscript = ${includeTranscript ? "true" : "false"};
+      const unwrap = (raw) => {
+        if (typeof raw !== "string") return raw;
+        try {
+          const parsed = JSON.parse(raw);
+          return parsed && typeof parsed === "object" && "value" in parsed ? parsed.value : parsed;
+        } catch (_) {
+          return null;
+        }
+      };
+      const persistence = window.desktop && window.desktop.agent
+        && window.desktop.agent.clientPersistence;
+      if (!persistence || typeof persistence.read !== "function") return null;
+      const rootKey = "sand.client.slice.client-meta.account-slot";
+      let accountSlot = unwrap(await persistence.read(rootKey));
+      let prefix = accountSlot
+        ? "sand.client.slice.account." + encodeURIComponent(String(accountSlot)) + "."
+        : "";
+      let selection = prefix
+        ? unwrap(await persistence.read(prefix + "selection.last-agent"))
+        : null;
+      if ((!selection || typeof selection.agentId !== "string")
+          && typeof persistence.listKeys === "function") {
+        const keys = await persistence.listKeys("sand.client.slice.account.");
+        const selectionKeys = (Array.isArray(keys) ? keys : [])
+          .filter((key) => typeof key === "string" && key.endsWith(".selection.last-agent"));
+        const matches = [];
+        for (const key of selectionKeys) {
+          const candidate = unwrap(await persistence.read(key));
+          if (!candidate || typeof candidate.agentId !== "string") continue;
+          const candidatePrefix = key.slice(0, -("selection.last-agent".length));
+          const roster = unwrap(await persistence.read(candidatePrefix + "roster.last-roster"));
+          const rows = roster && Array.isArray(roster.rows) ? roster.rows : [];
+          const row = rows.find((item) => item && item.id === candidate.agentId);
+          if (!row) continue;
+          const encoded = candidatePrefix.slice("sand.client.slice.account.".length, -1);
+          let candidateSlot = encoded;
+          try { candidateSlot = decodeURIComponent(encoded); } catch (_) {}
+          matches.push({ selection: candidate, prefix: candidatePrefix, accountSlot: candidateSlot });
+        }
+        if (matches.length !== 1) return null;
+        selection = matches[0].selection;
+        prefix = matches[0].prefix;
+        accountSlot = matches[0].accountSlot;
+      }
+      const agentId = selection && typeof selection.agentId === "string"
+        ? selection.agentId
+        : null;
+      if (!agentId || !prefix) return null;
+      const roster = unwrap(await persistence.read(prefix + "roster.last-roster"));
+      const rows = roster && Array.isArray(roster.rows) ? roster.rows : [];
+      const agent = rows.find((item) => item && item.id === agentId) || null;
+      const transcript = includeTranscript
+        ? unwrap(await persistence.read(prefix + "transcript.replicas." + agentId))
+        : null;
+      const entries = transcript && Array.isArray(transcript.entries)
+        ? transcript.entries.slice(-160)
+        : [];
+      return {
+        accountSlot: typeof accountSlot === "string" ? accountSlot : null,
+        agentId,
+        agent: agent ? {
+          name: agent.name || "",
+          description: agent.description || "",
+          title: agent.title || "",
+          avatarDataUrl: agent.avatarDataUrl || null,
+          avatarVersion: agent.avatarVersion || null,
+          avatarShape: agent.avatarShape || null,
+          avatarColor: agent.avatarColor || null,
+        } : null,
+        entries,
+      };
+    `, 5000);
+    return result && result.ok && result.value ? result.value : null;
+  }
+
+  async function captureChatHandoff() {
     const id = activeId();
     const prof = (load().profiles || []).find((p) => p.id === id);
-    const payload = {
-      from: id,
-      fromName: prof ? prof.name : id,
-      model: currentModelId(),
-      lastUser: "",
-      excerpts: excerpts.slice(-12),
-      at: Date.now(),
-    };
-    try { payload.lastUser = composerText(); } catch {}
-    try {
-      require(path.join(ROOT, "takeover-local.js")).writePayload(payload);
-    } catch (e) {
-      try { fs.writeFileSync(path.join(ROOT, "runtime", "takeover.json"), JSON.stringify(payload) + "\n"); } catch {}
+    const persisted = await persistedOfficialBot();
+    if (!persisted || !persisted.agentId) {
+      throw new Error("could not identify the exact selected official bot");
     }
+    const mod = continuationMod();
+    const persistedTurns = mod && mod.turnsFromTranscriptEntries
+      ? mod.turnsFromTranscriptEntries(persisted.entries || [])
+      : [];
+    const turns = persistedTurns.length ? persistedTurns : mountedTranscriptTurns();
+    const sourceAgentId = persisted.agentId;
+    const agent = persisted.agent || {};
+    const sourceAgentName = agent.name || visibleBotName() || (prof && prof.name) || id;
+    const lastTurn = [...turns].reverse().find((turn) => turn.role === "user");
+    const payload = {
+      sourceProfileId: id,
+      sourceProfileName: prof ? prof.name : id,
+      sourceAccountSlot: persisted && persisted.accountSlot,
+      sourceAgentId,
+      sourceAgentName,
+      sourceAgentDescription: agent.description || "",
+      sourceAgentTitle: agent.title || "",
+      sourceAgentAvatarDataUrl: agent.avatarDataUrl || null,
+      sourceAgentAvatarVersion: agent.avatarVersion || null,
+      sourceAgentAvatarShape: agent.avatarShape || null,
+      sourceAgentAvatarColor: agent.avatarColor || null,
+      sourceThreadId: sourceAgentId,
+      sourceHref: String(location.href || ""),
+      model: currentModelId(),
+      lastUser: (lastTurn && lastTurn.text) || "",
+      turns,
+      capturedAt: Date.now(),
+    };
+    try { payload.lastUser = composerText() || payload.lastUser; } catch {}
+    const takeover = require(path.join(ROOT, "takeover-local.js"));
+    if (!takeover || typeof takeover.writePayload !== "function") {
+      throw new Error("local continuation writer is unavailable");
+    }
+    takeover.writePayload(payload);
     return payload;
+  }
+
+  let _continueLocalBusy = false;
+  async function continueOfficialLocally() {
+    if (_continueLocalBusy) return false;
+    const profile = (load().profiles || []).find((item) => item.id === activeId());
+    if (!profile || profile.kind !== "cursor") {
+      toast("Open an official Cursor bot first");
+      return false;
+    }
+    _continueLocalBusy = true;
+    try {
+      toast("Taking a local snapshot of this bot…");
+      const snapshot = await captureChatHandoff();
+      const label = snapshot.sourceAgentName || profile.name || "this bot";
+      toast("Continuing " + label + " on Local D…");
+      switchTo("local-d", { takeover: true });
+      return true;
+    } catch (error) {
+      logRendererError("continue-local", error);
+      toast("Could not create the local copy. Please retry.");
+      return false;
+    } finally {
+      setTimeout(() => { _continueLocalBusy = false; }, 1200);
+    }
   }
 
   // A silent catch here is why a broken Stop looked like a working one for so
@@ -186,6 +338,67 @@
   function sanitizeImageUrl(u) {
     const g = secGuardMod();
     return g && g.sanitizeImageUrl ? g.sanitizeImageUrl(u) : null;
+  }
+
+  function continuationMod() {
+    try { return require(path.join(ROOT, "continuation.js")); }
+    catch { return null; }
+  }
+
+  function activeContinuation() {
+    if (mode() !== "local") return null;
+    const agentId = readActiveAgent();
+    const mod = continuationMod();
+    if (!agentId || !mod || !mod.getByAgent) return null;
+    try { return mod.getByAgent(agentId); } catch { return null; }
+  }
+
+  function continuationQuotaState(record) {
+    const profileId = record && record.source && record.source.profileId;
+    if (!profileId) return { ready: false, known: false, text: "Official quota unknown" };
+    let q = null;
+    try { q = require(path.join(ROOT, "seat-quota.js")).cachedQuota(profileId); } catch {}
+    const fo = foMod();
+    const cfg = fo && fo.loadConfig ? fo.loadConfig() : { threshold: 98, cacheMaxAgeMs: 10 * 60 * 1000 };
+    const age = Number(cfg.cacheMaxAgeMs) || 10 * 60 * 1000;
+    const fresh = !!(q && q.at && Date.now() - Number(q.at) <= age);
+    const known = fresh && Number.isFinite(Number(q && q.percentUsed));
+    if (!known) return { ready: false, known: false, text: "Official quota needs refresh" };
+    const spent = fo && fo.isExhausted
+      ? fo.isExhausted(q, cfg.threshold, Date.now(), age)
+      : Number(q.percentUsed) >= Number(cfg.threshold || 98);
+    return {
+      ready: !spent,
+      known: true,
+      text: spent
+        ? `${Math.round(Number(q.percentUsed))}% used · local copy active`
+        : "Official quota available",
+    };
+  }
+
+  function continuationBlock() {
+    const record = activeContinuation();
+    if (!record) return "";
+    const source = record.source || {};
+    const quota = continuationQuotaState(record);
+    const kept = record.status === "kept";
+    const sourceName = source.agentName || source.profileName || source.profileId || "Official bot";
+    return `
+      <div class="gd-cont-card" data-continuation-agent="${escAttr(record.localAgentId)}">
+        <div class="gd-cont-head">
+          <span>
+            <strong>${kept ? "Kept local copy" : "Temporary local copy"}</strong>
+            <small>${escHtml(sourceName)}</small>
+          </span>
+          <span class="gd-cont-state${quota.ready ? " is-ready" : ""}">${escHtml(quota.text)}</span>
+        </div>
+        <div class="gd-cont-actions">
+          <button type="button" id="gd-cont-keep">${kept ? "Make temporary" : "Keep"}</button>
+          <button type="button" id="gd-cont-return" class="is-primary">Back to official</button>
+          <button type="button" id="gd-cont-discard" class="is-danger">Discard & return</button>
+        </div>
+        <p>The official bot is unchanged. Returning prepares context for you to review and send.</p>
+      </div>`;
   }
 
   // Small, durable UI choices. localStorage would do, but it lives in the seat's
@@ -2814,6 +3027,39 @@
         color:#0a0a12; border-color:rgba(255,255,255,0.65);
         box-shadow:inset 0 1px 0 rgba(255,255,255,0.9), 0 4px 12px rgba(0,0,0,0.5);
       }
+      .gd-cont-card {
+        margin:0 0 10px; padding:11px; border-radius:12px;
+        background:linear-gradient(150deg, rgba(139,92,246,0.16), rgba(56,189,248,0.08));
+        border:1px solid rgba(196,181,253,0.24);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,0.08);
+      }
+      .gd-cont-head { display:flex; align-items:flex-start; gap:8px; justify-content:space-between; }
+      .gd-cont-head strong { display:block; font:750 11.5px/1.25 -apple-system,BlinkMacSystemFont,sans-serif; }
+      .gd-cont-head small {
+        display:block; max-width:156px; margin-top:3px; overflow:hidden; text-overflow:ellipsis;
+        white-space:nowrap; color:rgba(255,255,255,0.58); font:550 10px/1.2 -apple-system,BlinkMacSystemFont,sans-serif;
+      }
+      .gd-cont-state {
+        flex:0 0 auto; max-width:122px; padding:4px 6px; border-radius:999px;
+        border:1px solid rgba(251,191,36,0.25); background:rgba(245,158,11,0.1);
+        color:#fcd34d; text-align:center; font:700 8.5px/1.2 -apple-system,BlinkMacSystemFont,sans-serif;
+      }
+      .gd-cont-state.is-ready {
+        border-color:rgba(52,211,153,0.32); background:rgba(16,185,129,0.12); color:#6ee7b7;
+      }
+      .gd-cont-actions { display:flex; gap:6px; margin-top:10px; }
+      .gd-cont-actions button {
+        flex:1 1 auto; min-width:0; border-radius:9px; padding:7px 6px; cursor:pointer;
+        border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06);
+        color:var(--gd-text); font:700 9.5px/1 -apple-system,BlinkMacSystemFont,sans-serif;
+      }
+      .gd-cont-actions button:hover { background:rgba(255,255,255,0.12); }
+      .gd-cont-actions button.is-primary { background:#f4f4f5; color:#111118; border-color:#fff; }
+      .gd-cont-actions button.is-danger { color:#fca5a5; border-color:rgba(248,113,113,0.28); }
+      .gd-cont-card > p {
+        margin:8px 1px 0; color:rgba(255,255,255,0.46);
+        font:500 9.5px/1.35 -apple-system,BlinkMacSystemFont,sans-serif;
+      }
 
       @media (prefers-color-scheme: light) {
         .gd-idcard {
@@ -2852,6 +3098,16 @@
           box-shadow:inset 0 1px 0 rgba(255,255,255,0.22), 0 3px 10px rgba(0,0,0,0.24);
         }
         .gd-quota-track { background:rgba(0,0,0,0.1); }
+        .gd-cont-card {
+          background:linear-gradient(150deg, rgba(124,58,237,0.1), rgba(14,165,233,0.06));
+          border-color:rgba(109,40,217,0.16);
+        }
+        .gd-cont-head small, .gd-cont-card > p { color:rgba(0,0,0,0.52); }
+        .gd-cont-actions button {
+          background:rgba(255,255,255,0.72); border-color:rgba(0,0,0,0.12); color:#18181b;
+        }
+        .gd-cont-actions button.is-primary { background:#18181b; color:#fff; border-color:#18181b; }
+        .gd-cont-actions button.is-danger { color:#b91c1c; border-color:rgba(185,28,28,0.22); }
       }
     `;
     document.head.appendChild(st);
@@ -3081,6 +3337,7 @@
           ${swapButtonsHtml}
         </div>
         <div id="grok-seat-more-body">
+          ${continuationBlock()}
           ${(profile && profile.kind === "cursor") ? `
           <button type="button" id="grok-continue-local" class="whimsical-model-item" title="Keep this chat and settings. Local models pick up here.">
             <span style="font-size:11px;font-weight:650">Continue on Local D</span>
@@ -3294,14 +3551,81 @@
     });
     const cont = menu.querySelector("#grok-continue-local");
     if (cont) {
-      cont.addEventListener("click", (e) => {
+      cont.addEventListener("click", async (e) => {
+        e.preventDefault();
         e.stopPropagation();
         closeSeatActionMenu();
-        toast("Continuing this chat on Local D…");
-        captureChatHandoff();
-        switchTo("local-d", { takeover: true });
+        await continueOfficialLocally();
       });
     }
+    const keepContinuation = menu.querySelector("#gd-cont-keep");
+    if (keepContinuation) {
+      keepContinuation.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const record = activeContinuation();
+        const mod = continuationMod();
+        if (!record || !mod) {
+          toast("Local continuation metadata is unavailable");
+          return;
+        }
+        try {
+          const kept = record.status !== "kept";
+          mod.setKept(record.localAgentId, kept);
+          toast(kept ? "Local copy kept" : "Local copy is temporary again");
+          openSeatActionMenu(st, fmt, profile, id);
+        } catch (error) {
+          logRendererError("continuation-keep", error);
+          toast("Could not update the local copy");
+        }
+      });
+    }
+    const returnContinuation = async (discardAfter) => {
+      const record = activeContinuation();
+      const mod = continuationMod();
+      if (!record || !mod) {
+        toast("Local continuation metadata is unavailable");
+        return;
+      }
+      const sourceProfileId = record.source && record.source.profileId;
+      const sourceProfile = (load().profiles || []).find((item) => item.id === sourceProfileId);
+      if (!sourceProfile || sourceProfile.kind !== "cursor") {
+        toast("The official source seat no longer exists");
+        return;
+      }
+      if (discardAfter) {
+        const ok = window.confirm(
+          "Discard this local copy after preparing its context for the official bot?\n\n"
+            + "The local transcript will be permanently deleted. The official bot is unchanged."
+        );
+        if (!ok) return;
+      }
+      try {
+        toast("Preparing local context for the official bot…");
+        const prepared = mod.prepareReturn(record.localAgentId);
+        if (discardAfter) mod.discard(record.localAgentId);
+        closeSeatActionMenu();
+        toast(discardAfter
+          ? "Context prepared. Discarding local copy and returning…"
+          : "Context prepared. Returning to the official bot…");
+        switchTo(prepared.profileId);
+      } catch (error) {
+        logRendererError("continuation-return", error);
+        toast("Could not prepare the return context");
+      }
+    };
+    const returnBtn = menu.querySelector("#gd-cont-return");
+    if (returnBtn) returnBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      returnContinuation(false);
+    });
+    const discardBtn = menu.querySelector("#gd-cont-discard");
+    if (discardBtn) discardBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      returnContinuation(true);
+    });
     const resetEl = menu.querySelector("#grok-menu-reset-login");
     if (resetEl) resetEl.addEventListener("click", () => {
       closeSeatActionMenu();
@@ -3454,6 +3778,18 @@
         border-color: rgba(16, 185, 129, 0.3);
         color: #10b981;
       }
+      #grok-d-login-chip .gd-continue-btn {
+        min-height:30px;border-radius:10px;border:1px solid rgba(196,181,253,0.34);
+        background:rgba(124,58,237,0.14);color:#ddd6fe;display:inline-flex;
+        align-items:center;justify-content:center;gap:5px;padding:0 8px;cursor:pointer;
+        font:750 9.5px/1 -apple-system,BlinkMacSystemFont,sans-serif;white-space:nowrap;
+      }
+      #grok-d-login-chip .gd-continue-btn svg { width:13px;height:13px; }
+      #grok-d-login-chip .gd-continue-btn:hover { background:rgba(124,58,237,0.24); }
+      #grok-d-login-chip .gd-continue-btn.is-urgent {
+        border-color:rgba(251,191,36,0.48);background:rgba(245,158,11,0.16);color:#fde68a;
+        box-shadow:0 0 0 1px rgba(245,158,11,0.08),0 0 18px rgba(245,158,11,0.16);
+      }
     `;
     document.head.appendChild(st);
   }
@@ -3518,7 +3854,8 @@
     ensureChipCss();
 
     const stopOk = chip.querySelector("#gd-chip-stop");
-    if (!chip.querySelector("span.gd-acc-photo") || !stopOk || stopOk.tagName !== "BUTTON") {
+    const continueOk = chip.querySelector("#gd-chip-continue-local");
+    if (!chip.querySelector("span.gd-acc-photo") || !stopOk || stopOk.tagName !== "BUTTON" || !continueOk) {
       chip.innerHTML = `
         <span class='gd-acc-photo' aria-hidden='true' style='width:32px;height:32px;border-radius:50%;flex:0 0 32px;overflow:visible;display:inline-flex;align-items:center;justify-content:center;background:var(--gd-btn-sec-bg);border:1.5px solid var(--gd-border);color:var(--gd-text);font:700 13px/32px -apple-system,BlinkMacSystemFont,sans-serif'>
           D
@@ -3529,6 +3866,9 @@
           <div class='gd-acc-detail' style='color:var(--gd-text-muted);font-weight:500;font-size:10px;margin-top:1.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'></div>
           <div class='gd-acc-hint' style='color:var(--gd-text-dim);font-weight:600;margin-top:2px;font-size:9px'>Click to swap or configure</div>
         </span>
+        <button type="button" class="gd-continue-btn" id="gd-chip-continue-local" title="Clone this official bot to Local D">
+          ${ICONS.local}<span>Local copy</span>
+        </button>
         <button type="button" class="gd-stop-btn" id="gd-chip-stop" title="Stop this seat">${ICONS.stop}</button>
         <button type="button" id="grok-d-chip-toggle" title="Collapse to the avatar" aria-label="Collapse account chip">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 6 9 12 15 18"/></svg>
@@ -3610,6 +3950,32 @@
       chip.setAttribute("aria-label", (fmt.title + " " + hover).trim());
       if (tip) tip.textContent = hover;
 
+      const continueEl = chip.querySelector("#gd-chip-continue-local");
+      if (continueEl) {
+        const isOfficial = !!(curProfile && curProfile.kind === "cursor" && mode() !== "local");
+        let quota = null;
+        try { quota = require(path.join(ROOT, "seat-quota.js")).cachedQuota(id); } catch {}
+        const cfg = fallOverCfg();
+        const spent = isOfficial && Number.isFinite(Number(quota && quota.percentUsed))
+          && Number(quota.percentUsed) >= Number(cfg.threshold || 98);
+        continueEl.style.display = isOfficial ? "inline-flex" : "none";
+        continueEl.classList.toggle("is-urgent", spent);
+        const copy = continueEl.querySelector("span");
+        if (copy) copy.textContent = spent ? "Continue locally" : "Local copy";
+        continueEl.title = spent
+          ? "Quota is spent. Clone this bot and continue on Local D."
+          : "Clone this official bot to Local D";
+        if (!continueEl._gdWired) {
+          continueEl._gdWired = true;
+          continueEl.addEventListener("click", async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            await continueOfficialLocally();
+          }, true);
+        }
+      }
+
       const stopEl = chip.querySelector("#gd-chip-stop");
       if (stopEl) {
         const pausedNow = botsPaused(id);
@@ -3645,7 +4011,7 @@
       if (!chip._hasMenuListener) {
         chip._hasMenuListener = true;
         chip.addEventListener("click", (e) => {
-          if (e.target && e.target.closest && e.target.closest("#gd-chip-stop")) return;
+          if (e.target && e.target.closest && e.target.closest("#gd-chip-stop,#gd-chip-continue-local")) return;
           e.stopPropagation();
           const existing = document.getElementById("grok-seat-action-menu");
           if (existing) closeSeatActionMenu();
@@ -3767,8 +4133,7 @@
     return cut || captureComposer() || window.__grokdLastPrompt || "";
   }
 
-  function sendLocal(text) {
-    const agentId = readActiveAgent();
+  function sendLocalTo(agentId, text) {
     if (!agentId) return Promise.reject(new Error("no active local agent"));
     const payload = JSON.stringify({ agentId, prompt: text, awaitTurn: false });
     return new Promise((resolve, reject) => {
@@ -3796,7 +4161,11 @@
     });
   }
 
-  function typeComposer(text) {
+  function sendLocal(text) {
+    return sendLocalTo(readActiveAgent(), text);
+  }
+
+  function setComposerText(text) {
     const el = findComposer();
     if (!el) throw new Error("composer not found");
     el.focus();
@@ -3812,10 +4181,316 @@
       }
       el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
     }
-    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }));
+    return true;
+  }
+
+  function typeComposer(text) {
+    setComposerText(text);
+    const el = findComposer();
     const sendBtn = document.querySelector('button[aria-label*="Send" i], button[data-testid*="send" i]');
     if (sendBtn) sendBtn.click();
+    else if (el) {
+      el.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Enter",
+        code: "Enter",
+        keyCode: 13,
+        which: 13,
+        bubbles: true,
+      }));
+    }
     return true;
+  }
+
+  let _continuationJobBusy = false;
+  async function processContinuationJobs() {
+    if (mode() !== "local" || _continuationJobBusy) return false;
+    const mod = continuationMod();
+    const agentId = readActiveAgent();
+    if (!mod || !agentId || !mod.pendingContinueJobs) return false;
+    let jobs = [];
+    try { jobs = mod.pendingContinueJobs(); } catch { return false; }
+    const job = jobs.find((item) => item && item.agentId === agentId);
+    if (!job) return false;
+    try {
+      if (mod.continueJobLanded && mod.continueJobLanded(job)) {
+        mod.ackContinueJob(job.agentId, job.id);
+        toast("Local copy is ready");
+        return true;
+      }
+    } catch {}
+    const attempts = Math.max(0, Number(job.attempts || 0));
+    const retryMs = Math.min(60000, 2500 * Math.pow(2, Math.min(attempts, 5)));
+    if (job.lastAttemptAt && Date.now() - Number(job.lastAttemptAt) < retryMs) return false;
+    _continuationJobBusy = true;
+    try {
+      if (!job.text) throw new Error("continuation prompt is empty");
+      if (mod.bumpContinueJob) mod.bumpContinueJob(job.agentId, job.id);
+      const result = await sendLocalTo(job.agentId, String(job.text));
+      if (!result || !result.ok) {
+        throw new Error(`sendPrompt returned ${result && result.status || "no status"}`);
+      }
+      let landed = false;
+      try {
+        landed = !!(mod.continueJobLanded && mod.continueJobLanded(job));
+      } catch {}
+      if (landed) {
+        mod.ackContinueJob(job.agentId, job.id);
+        toast("Local copy is ready");
+      } else {
+        toast("Local copy is starting…");
+      }
+      return true;
+    } catch (error) {
+      logRendererError("continuation-start", error);
+      return false;
+    } finally {
+      _continuationJobBusy = false;
+    }
+  }
+
+  let _legacyContinueJobBusy = false;
+  async function processLegacyContinueJob() {
+    if (mode() !== "local" || _legacyContinueJobBusy) return false;
+    const file = path.join(RUNTIME, "continue-job.json");
+    let job = null;
+    try { job = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return false; }
+    if (!job || !job.agentId || !job.text) return false;
+    const key = `${job.agentId}:${job.at || ""}`;
+    const retry = window.__gdLegacyContinueRetry || {};
+    if (retry.key === key && Date.now() < Number(retry.after || 0)) return false;
+    _legacyContinueJobBusy = true;
+    try {
+      const result = await sendLocalTo(job.agentId, String(job.text));
+      if (!result || !result.ok) {
+        throw new Error(`sendPrompt returned ${result && result.status || "no status"}`);
+      }
+      let current = null;
+      try { current = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+      if (current && current.agentId === job.agentId && current.at === job.at) {
+        fs.unlinkSync(file);
+      }
+      window.__gdLegacyContinueRetry = null;
+      return true;
+    } catch (error) {
+      logRendererError("continue-job", error);
+      window.__gdLegacyContinueRetry = { key, after: Date.now() + 10000 };
+      return false;
+    } finally {
+      _legacyContinueJobBusy = false;
+    }
+  }
+
+  function ensureReturnReviewCss() {
+    if (document.getElementById("gd-return-review-css")) return;
+    const style = document.createElement("style");
+    style.id = "gd-return-review-css";
+    style.textContent = `
+      #gd-return-review {
+        position:fixed; right:20px; bottom:20px; z-index:2147483645;
+        width:min(520px, calc(100vw - 40px)); max-height:calc(100vh - 40px);
+        display:flex; flex-direction:column; gap:10px; padding:16px;
+        color:#f8fafc; border:1px solid rgba(196,181,253,0.34); border-radius:18px;
+        background:rgba(17,17,27,0.96); box-shadow:0 24px 70px rgba(0,0,0,0.48);
+        backdrop-filter:blur(24px) saturate(1.25);
+        font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+      }
+      #gd-return-review h2 { margin:0; font-size:16px; line-height:1.2; }
+      #gd-return-review p { margin:0; color:rgba(248,250,252,0.66); font-size:12px; line-height:1.45; }
+      #gd-return-review .gd-return-source { color:#c4b5fd; font-weight:750; }
+      #gd-return-review textarea {
+        width:100%; min-height:190px; max-height:42vh; resize:vertical; box-sizing:border-box;
+        padding:12px; border:1px solid rgba(255,255,255,0.13); border-radius:12px;
+        background:rgba(255,255,255,0.055); color:#f8fafc; outline:none;
+        font:500 11.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;
+      }
+      #gd-return-review textarea:focus { border-color:rgba(196,181,253,0.58); }
+      #gd-return-review .gd-return-warning {
+        padding:8px 10px; border-radius:10px; color:#fde68a;
+        background:rgba(245,158,11,0.12); border:1px solid rgba(251,191,36,0.24);
+      }
+      #gd-return-review .gd-return-actions { display:flex; flex-wrap:wrap; gap:8px; }
+      #gd-return-review button {
+        min-height:34px; padding:0 12px; border-radius:10px; cursor:pointer;
+        border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.07);
+        color:#f8fafc; font:750 11px/1 -apple-system,BlinkMacSystemFont,sans-serif;
+      }
+      #gd-return-review button:hover { background:rgba(255,255,255,0.12); }
+      #gd-return-review button.is-primary { background:#f4f4f5; border-color:#fff; color:#111118; }
+      #gd-return-review button:disabled { cursor:not-allowed; opacity:0.42; }
+      @media (prefers-color-scheme: light) {
+        #gd-return-review {
+          color:#18181b; background:rgba(250,250,252,0.97);
+          border-color:rgba(109,40,217,0.2); box-shadow:0 24px 70px rgba(15,23,42,0.2);
+        }
+        #gd-return-review p { color:rgba(24,24,27,0.65); }
+        #gd-return-review textarea {
+          color:#18181b; background:rgba(255,255,255,0.84); border-color:rgba(0,0,0,0.13);
+        }
+        #gd-return-review button { color:#18181b; background:rgba(255,255,255,0.86); border-color:rgba(0,0,0,0.12); }
+        #gd-return-review button.is-primary { color:#fff; background:#18181b; border-color:#18181b; }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  async function copyReturnPacket(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {}
+    }
+    const { clipboard } = require("electron");
+    clipboard.writeText(text);
+    return true;
+  }
+
+  function showReturnReview(job, sourceReady, currentName) {
+    ensureReturnReviewCss();
+    const existing = document.getElementById("gd-return-review");
+    if (existing
+        && existing.dataset.jobId === job.id
+        && existing.dataset.sourceReady === String(!!sourceReady)) return existing;
+    const editedText = existing && existing.dataset.jobId === job.id
+      ? String((existing.querySelector("textarea") || {}).value ?? "")
+      : null;
+    if (existing) existing.remove();
+    const sourceName = job.sourceAgentName || "the official bot";
+    const dialog = document.createElement("section");
+    dialog.id = "gd-return-review";
+    dialog.dataset.jobId = job.id;
+    dialog.dataset.sourceReady = String(!!sourceReady);
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-labelledby", "gd-return-review-title");
+    dialog.innerHTML = `
+      <h2 id="gd-return-review-title">Local work is ready to return</h2>
+      <p>Review the handoff for <span class="gd-return-source">${escHtml(sourceName)}</span>.
+        Nothing is sent until you choose to send it in the official bot.</p>
+      ${sourceReady ? "" : `
+        <p class="gd-return-warning">The exact source bot is not open yet${currentName ? `; current bot is ${escHtml(currentName)}` : ""}.
+          Open ${escHtml(sourceName)} to add this safely, or copy the packet.</p>`}
+      <textarea aria-label="Local continuation context"></textarea>
+      <p>Anything already typed is kept; this packet is added underneath it.</p>
+      <div class="gd-return-actions">
+        <button type="button" id="gd-return-add" class="is-primary"${sourceReady ? "" : " disabled"}>Add to composer</button>
+        <button type="button" id="gd-return-copy">Copy packet</button>
+        <button type="button" id="gd-return-later">Later</button>
+      </div>
+    `;
+    const editor = dialog.querySelector("textarea");
+    editor.value = editedText == null ? String(job.text || "") : editedText;
+    const finish = () => {
+      const mod = continuationMod();
+      if (!mod || !mod.ackReturnJob || !mod.ackReturnJob(job.sourceProfileId, job.id)) {
+        throw new Error("return packet acknowledgement failed");
+      }
+      dialog.remove();
+      window.__gdReturnDismissedJob = null;
+      window.__gdReturnOpenState = null;
+    };
+    const add = dialog.querySelector("#gd-return-add");
+    if (add) add.addEventListener("click", () => {
+      try {
+        const packet = String(editor.value || "").trim();
+        if (!packet) throw new Error("return packet is empty");
+        const draft = composerText();
+        const next = draft && !draft.includes(packet)
+          ? `${draft}\n\n---\n\n${packet}`
+          : (draft || packet);
+        setComposerText(next);
+        finish();
+        toast("Context added. Review it, then send.");
+      } catch (error) {
+        logRendererError("continuation-return-insert", error);
+        toast("Could not add the context to the composer");
+      }
+    });
+    const copy = dialog.querySelector("#gd-return-copy");
+    if (copy) copy.addEventListener("click", async () => {
+      try {
+        const packet = String(editor.value || "").trim();
+        if (!packet) throw new Error("return packet is empty");
+        await copyReturnPacket(packet);
+        finish();
+        toast("Context packet copied");
+      } catch (error) {
+        logRendererError("continuation-return-copy", error);
+        toast("Could not copy the context packet");
+      }
+    });
+    const later = dialog.querySelector("#gd-return-later");
+    if (later) later.addEventListener("click", () => {
+      window.__gdReturnDismissedJob = job.id;
+      dialog.remove();
+      toast("Context packet kept for later");
+    });
+    document.body.appendChild(dialog);
+    setTimeout(() => editor.focus(), 0);
+    return dialog;
+  }
+
+  let _returnJobBusy = false;
+  async function processReturnJob() {
+    const openDialog = document.getElementById("gd-return-review");
+    if (mode() !== "cursor") {
+      if (openDialog) openDialog.remove();
+      return false;
+    }
+    const mod = continuationMod();
+    const profileId = activeId();
+    if (!mod || !mod.getReturnJob) return false;
+    let job = null;
+    try { job = mod.getReturnJob(profileId); } catch { return false; }
+    if (!job) {
+      if (openDialog) openDialog.remove();
+      return false;
+    }
+    if (window.__gdReturnDismissedJob === job.id) return false;
+    if (openDialog
+        && openDialog.dataset.jobId === job.id
+        && openDialog.dataset.sourceReady === "true") return true;
+    if (_returnJobBusy) return false;
+    _returnJobBusy = true;
+    try {
+      let current = await persistedOfficialBot({ metadataOnly: true });
+      let sourceReady = !job.sourceAgentId || (current && current.agentId === job.sourceAgentId);
+      let state = window.__gdReturnOpenState;
+      if (!state || state.jobId !== job.id) {
+        state = { jobId: job.id, firstAt: Date.now(), lastOpenAt: 0 };
+        window.__gdReturnOpenState = state;
+      }
+      if (!sourceReady && job.sourceAgentId && Date.now() - state.lastOpenAt > 2500) {
+        state.lastOpenAt = Date.now();
+        await pageCall(`
+          if (!window.desktop || typeof window.desktop.openCloudAgent !== "function") return false;
+          await window.desktop.openCloudAgent(${JSON.stringify(job.sourceAgentId)});
+          return true;
+        `, 5000);
+        current = await persistedOfficialBot({ metadataOnly: true });
+        sourceReady = !!(current && current.agentId === job.sourceAgentId);
+      }
+      const composer = findComposer();
+      const marker = String(job.marker || "").trim();
+      if (sourceReady && composer && marker && composerText().includes(marker)) {
+        mod.ackReturnJob(profileId, job.id);
+        toast("Return context is already in the composer");
+        return true;
+      }
+      if (sourceReady && composer) {
+        showReturnReview(job, true, current && current.agent && current.agent.name);
+        return true;
+      }
+      if (Date.now() - state.firstAt >= 10000) {
+        showReturnReview(job, false, current && current.agent && current.agent.name);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      logRendererError("continuation-return-review", error);
+      return false;
+    } finally {
+      _returnJobBusy = false;
+    }
   }
 
   async function waitForReply(token, timeoutMs) {
@@ -4264,42 +4939,11 @@
     injectSplash();
     inject();
     writeReady();
-    try {
-      const jobFile = path.join(RUNTIME, "continue-job.json");
-      if (fs.existsSync(jobFile) && mode() === "local") {
-        const job = JSON.parse(fs.readFileSync(jobFile, "utf8"));
-        const text = String((job && job.text) || "");
-        const id = job && job.agentId;
-        if (text && id) {
-          setTimeout(() => {
-            try {
-              const payload = JSON.stringify({ agentId: id, prompt: text, awaitTurn: false });
-              const req = http.request({
-                hostname: "127.0.0.1",
-                port: 1337,
-                path: "/api/sendPrompt",
-                method: "POST",
-                headers: {
-                  "content-type": "application/json",
-                  authorization: AUTH,
-                  "content-length": Buffer.byteLength(payload),
-                },
-                timeout: 8000,
-              }, (res) => {
-                if (res.statusCode >= 200 && res.statusCode < 300) {
-                  try { fs.unlinkSync(jobFile); } catch (_) {}
-                }
-              });
-              req.on("error", () => {});
-              req.write(payload);
-              req.end();
-            } catch (e) {
-              try { fs.appendFileSync(path.join(ROOT, "runtime", "renderer.log"), "[continue-job] " + e + "\n"); } catch (_) {}
-            }
-          }, 2500);
-        }
-      }
-    } catch (_) {}
+    setTimeout(() => {
+      processContinuationJobs().catch(() => {});
+      processLegacyContinueJob().catch(() => {});
+      processReturnJob().catch(() => {});
+    }, 2500);
     window.__grokd = {
       send: (text) => handleCommand({ id: "api", op: "send", text }),
       setModel: applyModel,
@@ -4325,6 +4969,9 @@
     try { writeReady(); } catch {}
     try { pollCommand(); } catch {}
     try { flushQueued(); } catch {}
+    try { processContinuationJobs().catch(() => {}); } catch {}
+    try { processLegacyContinueJob().catch(() => {}); } catch {}
+    try { processReturnJob().catch(() => {}); } catch {}
     try { keepCursorComputer().catch(() => {}); } catch {}
     if (document.getElementById("grok-profile-veil")) {
       identity().then((s) => { if (s && s.kind === "logged-in") unveil(); }).catch(() => {});

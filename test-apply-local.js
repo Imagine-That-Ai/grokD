@@ -128,17 +128,24 @@ write(path.join(ROOT, "profiles.json"), {
   ],
 });
 write(path.join(ROOT, "runtime", "takeover.json"), {
-  from: "cursor-a",
-  fromName: "Grok A",
+  sourceProfileId: "cursor-a",
+  sourceProfileName: "Grok A",
+  sourceAgentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  sourceAgentName: "Official release bot",
+  sourceAgentDescription: "Finish releases carefully.",
   model: "grok-4.6",
   lastUser: "finish the hover tip",
-  excerpts: ["Factory Commander said ok"],
-  at: Date.now(),
+  turns: [
+    { id: "official-user", role: "user", text: "finish the hover tip" },
+    { id: "official-assistant", role: "assistant", text: "Factory Commander said ok" },
+  ],
+  capturedAt: Date.now(),
 });
 
 const out2 = run(["switch", "local-d", "--takeover", "--no-relaunch"]);
 const r2 = JSON.parse(out2);
 assert(r2.ok && r2.takeover === true, out2);
+assert(r2.continuation && r2.continuation.id, out2);
 const conn2 = JSON.parse(fs.readFileSync(path.join(SEAT4, "sand-data", "local-exec-daemon-connection.json"), "utf8"));
 assert(conn2.baseUrl === "http://127.0.0.1:1337", conn2.baseUrl);
 assert(!fs.existsSync(path.join(SEAT4, "gateway-descriptor.json")), "gd leftover after takeover");
@@ -151,7 +158,13 @@ const agentsDir = path.join(HACK, "box-data", "agents");
 const names = fs.readdirSync(agentsDir)
   .filter((id) => fs.existsSync(path.join(agentsDir, id, "profile.json")))
   .map((id) => JSON.parse(fs.readFileSync(path.join(agentsDir, id, "profile.json"), "utf8")).name);
-assert(names.some((nm) => /From Grok A|Local Bench|Continued|clone/i.test(nm)), names.join(","));
+assert(names.includes("Official release bot · Local"), names.join(","));
+const continuationMeta = JSON.parse(
+  fs.readFileSync(path.join(agentsDir, r2.continuation.id, "continuation.json"), "utf8")
+);
+assert(continuationMeta.source.agentId === "cccccccc-cccc-4ccc-8ccc-cccccccccccc", JSON.stringify(continuationMeta));
+assert(r2.continuation.continueJob && fs.existsSync(r2.continuation.continueJob), JSON.stringify(r2.continuation));
+assert(!fs.existsSync(path.join(ROOT, "runtime", "takeover.json")), "takeover payload was not consumed");
 ok("continue-keeps-thread");
 
 fs.rmSync(ROOT, { recursive: true, force: true });

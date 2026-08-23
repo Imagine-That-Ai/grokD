@@ -32,11 +32,11 @@ for f in \
   bubble-rim.js provider-logos.js glass-theme.js \
   account-identity.js browser-login.js patch-open-external.js \
   model-lib.js security-guard.js command-client.js cdp-eval.js \
-  runbox.js gateway-shim.js proxy2.js fakebox.js protoutil.js \
+  runbox.js gateway-shim.js agent-store-db.js proxy2.js fakebox.js protoutil.js \
   bridge-lib.js local-mcp.js routine-guard.js \
   onboard-accounts.js bot-pause.js failover.js failover-act.js \
   failover-watch.js fallover-ui.js clone-bot.js handoff-pack.js \
-  seat-quota.js create-bot-hook.js takeover-local.js bot-chatter.js \
+  seat-quota.js create-bot-hook.js takeover-local.js continuation.js bot-chatter.js \
   space-kernel.js space-field-gl.js liquid-metal-mark.js cursor-model-bubble.js \
   plasma-selectors.js plasma-selectors.css \
   node-deps.js sqlite-ro.js \
@@ -105,7 +105,10 @@ if [ -f "$RT/model-config.json" ]; then
   exit 1
 fi
 
-for required in asar-file.js asar-cli.sh install-runtime.sh ensure-local-box.sh launch-d.sh; do
+for required in \
+  asar-file.js asar-cli.sh install-runtime.sh ensure-local-box.sh launch-d.sh \
+  agent-store-db.js continuation.js takeover-local.js
+do
   if [ ! -f "$RT/$required" ]; then
     echo "ERROR: packaged runtime is missing $required" >&2
     exit 1

@@ -135,6 +135,8 @@ ok("tracked-face-tat-icon");
     "glass-theme.js",
     "liquid-glass-btn.js",
     "enter-chat.js",
+    "agent-store-db.js",
+    "continuation.js",
     "profile-ui-inject.js",
     "assets/lobe/openai.svg",
     "assets/lobe/anthropic.svg",
@@ -148,6 +150,14 @@ ok("tracked-face-tat-icon");
   assert(inject.includes("gd-scheme-toggle"), "light/dark toggle");
   assert(inject.includes("space-kernel.js"), "kernel start");
   assert(inject.includes("punchCoverSky"), "cover punch-through");
+  assert(inject.includes("gd-chip-continue-local"), "one-click local copy button");
+  assert(inject.includes("sand.client.slice.client-meta.account-slot"), "exact official account selection");
+  assert(inject.includes("selection.last-agent"), "exact official bot selection");
+  assert(inject.includes("transcript.replicas."), "persisted official transcript capture");
+  assert(inject.includes("processContinuationJobs"), "retryable continuation delivery");
+  assert(inject.includes("processReturnJob"), "official return delivery");
+  assert(inject.includes("Local work is ready to return"), "return review panel");
+  assert(inject.includes("Context added. Review it, then send."), "return never claims auto-send");
 }
 ok("tracked-kernel-and-logos");
 
@@ -210,6 +220,12 @@ ok("drop-and-landing");
   assert(pack.includes('/assets/"'), "shareable .app includes assets");
   assert(pack.includes("grokd-icon.icns"), "shareable .app stamps the mascot");
   assert(pack.includes("asar-file.js"), "shareable .app includes offline ASAR recovery");
+  assert(pack.includes("agent-store-db.js"), "shareable .app includes canonical local bot stores");
+  assert(pack.includes("continuation.js"), "shareable .app includes official-to-local continuations");
+  assert(
+    /for required in[\s\S]*agent-store-db\.js continuation\.js takeover-local\.js[\s\S]*do/.test(pack),
+    "packaging does not fail closed when continuation runtime files are absent"
+  );
   assert(pack.includes("verified packaged ASAR host recovery"), "packaging verifies recoverable host entries");
   assert(pack.includes('cp "$RT/launch-d.sh" "$BIN"'), "shareable .app installs the fail-closed launcher");
   const dock = read("patch-open-external.js");
@@ -355,6 +371,9 @@ ok("untrusted-app-asar-path-rejected");
 {
   const launch = read("launch-d.sh");
   const ensure = read("ensure-local-box.sh");
+  const shim = read("gateway-shim.js");
+  const continuation = read("continuation.js");
+  const inject = read("profile-ui-inject.js");
   assert(launch.includes("startup_fail"), "launcher has no actionable startup failure");
   assert(!/install-runtime\.sh[^\n]*\|\| true/.test(launch), "launcher swallows runtime install failure");
   assert(!/ensure-local-box\.sh[^\n]*\|\| true/.test(launch), "launcher swallows local-box failure");
@@ -362,6 +381,56 @@ ok("untrusted-app-asar-path-rejected");
   assert(ensure.includes("local host :1338 did not become API-ready"), "host API readiness is not enforced");
   assert(ensure.includes("gateway shim :1337 did not become healthy"), "shim health is not enforced");
   assert(ensure.includes("grok-d-gateway-shim"), "shim readiness cannot reject stale gateway code");
+  assert(shim.includes('u.pathname === "/health"'), "gateway has no health endpoint");
+  assert(shim.includes("contract: 2"), "gateway health contract is not versioned");
+  assert(ensure.includes("agent-store-db.js"), "gateway store helper is not synced to the local runtime");
+  assert(
+    ensure.includes('--agents-root "$HACK/box-data/agents"'),
+    "startup does not repair every existing local agent store"
+  );
+  assert(
+    ensure.includes("a local bot database could not be repaired safely"),
+    "startup store repair does not fail closed with diagnostics"
+  );
+  assert(shim.includes("ensureAgentStoreDb"), "new local bots bypass the canonical store helper");
+  assert(
+    inject.includes("if (!persisted || !persisted.agentId)"),
+    "official clone can fall back to an approximate bot identity"
+  );
+  assert(
+    !inject.includes('fs.writeFileSync(path.join(ROOT, "runtime", "takeover.json")'),
+    "renderer still has a parallel unsafe takeover writer"
+  );
+  assert(
+    inject.includes("if (landed) {") && inject.includes("Local copy is starting…"),
+    "continuation delivery is acknowledged before its transcript marker lands"
+  );
+  assert(
+    inject.includes("const editedText = existing && existing.dataset.jobId === job.id"),
+    "return review loses user edits while reopening the source bot"
+  );
+  assert(
+    inject.includes("composerText().includes(marker)")
+      && !inject.includes("trim().slice(0, 160)"),
+    "repeat return packets can be falsely acknowledged by a shared text prefix"
+  );
+  assert(
+    inject.includes('const { clipboard } = require("electron")'),
+    "return packet has no Electron clipboard fallback"
+  );
+  assert(
+    continuation.includes('audience: "agent-control"')
+      && continuation.includes("/api/deleteLocalAgents"),
+    "managed-copy discard does not use the scoped agent-control API"
+  );
+  assert(!continuation.includes("fake-gateway-token"), "managed-copy discard uses a rejected static token");
+  const queueAt = continuation.indexOf("job = queueContinue(record, snapshot, opts)");
+  const registryAt = continuation.indexOf("saveRegistry(registry, opts)", queueAt);
+  const activeAt = continuation.indexOf("setActiveAgent(record.localAgentId, opts)", registryAt);
+  assert(
+    queueAt >= 0 && registryAt > queueAt && activeAt > registryAt,
+    "active agent changes before continuation job and registry are durable"
+  );
 }
 ok("startup-contract-fails-closed");
 

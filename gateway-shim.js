@@ -7,8 +7,8 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { execFileSync } = require("child_process");
-const { newId } = require("./clone-bot");
+const { newId, createAgentAtomically } = require("./clone-bot");
+const { ensureAgentStoreDb } = require("./agent-store-db");
 
 const paths = require("./paths");
 const secGuard = require("./security-guard");
@@ -154,8 +154,6 @@ function createLocalAgent(body, root = AGENTS_ROOT) {
   }
   const name = String(body && body.name || "").trim().slice(0, 64) || "New Bot";
   const id = newId();
-  const dir = path.join(root, id);
-  fs.mkdirSync(dir, { recursive: true });
   const prof = {
     name,
     description: String((body && body.description) || "").slice(0, 1024),
@@ -163,9 +161,14 @@ function createLocalAgent(body, root = AGENTS_ROOT) {
     origin: String((body && body.origin) || "user").slice(0, 32),
     createdAt: Date.now(),
   };
-  fs.writeFileSync(path.join(dir, "profile.json"), JSON.stringify(prof, null, 2) + "\n");
-  const dbFile = path.join(dir, "store.db");
-  execFileSync("sqlite3", [dbFile, "CREATE TABLE IF NOT EXISTS transcript_entries (id TEXT, entry TEXT);"], { timeout: 4000 });
+  createAgentAtomically(root, id, (staging) => {
+    ensureAgentStoreDb(path.join(staging, "store.db"));
+    fs.writeFileSync(
+      path.join(staging, "profile.json"),
+      JSON.stringify(prof, null, 2) + "\n",
+      { mode: 0o600 }
+    );
+  });
   const agent = { id, ...prof, isRunning: false, isComposingMessage: false };
   return { id, name, agent };
 }

@@ -14,6 +14,7 @@ jobs:
       - name: unit door
         run: |
           node test-unit.js
+          node test-shim-unit.js
           node test-profiles.js
           node test-box-state.js
           node test-computer-cover.js
@@ -25,6 +26,10 @@ jobs:
           node test-failover-act.js
           node test-onboarding.js
           node test-clone-handoff.js
+          node test-agent-store-db.js
+          node test-continuation.js
+          node test-switch-continuation.js
+          node test-apply-local.js
           node test-space-holes.js
           node test-install-look.js
           node test-liquid-glass-btn.js

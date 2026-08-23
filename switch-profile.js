@@ -524,18 +524,20 @@ function switchTo(id, opts) {
     }
     const currentSeq = ++_switchSequence;
     if (prev && prev.id !== next.id) snapshot(prev);
+    let continuation = null;
     try {
       if (next.kind === "local") {
         applyLocal(next, { takeover });
         ensureLocalBox();
         if (takeover) {
-          try {
-            require("./takeover-local").seed({
-              from: prev && prev.id,
-              fromName: prev && prev.name,
-            });
-          } catch (e) {
-            console.error("takeover:", e.message);
+          const seedContinuation = opts.seedContinuation
+            || ((payload) => require("./takeover-local").seed(payload));
+          continuation = seedContinuation({
+            from: prev && prev.id,
+            fromName: prev && prev.name,
+          });
+          if (!continuation || continuation.ok !== true || !continuation.id) {
+            throw new Error("continuation seed returned no local agent");
           }
         }
       } else {
@@ -558,9 +560,20 @@ function switchTo(id, opts) {
       if (relaunch && !isolatedRoot()) {
         relaunchD();
       }
-      return { ok: true, from: prev && prev.id, to: next.id, kind: next.kind, takeover };
-    } catch (err) {
-      // Rollback to previous active profile environment if switch failed
+      return {
+        ok: true,
+        from: prev && prev.id,
+        to: next.id,
+        kind: next.kind,
+        takeover,
+        continuation: continuation && {
+          id: continuation.id,
+          reused: continuation.reused,
+          status: continuation.status,
+          continueJob: continuation.continueJob || null,
+        },
+      };
+    } catch (error) {
       if (prev) {
         try {
           if (prev.kind === "local") applyLocal(prev);
@@ -569,9 +582,14 @@ function switchTo(id, opts) {
           store.writeActiveEnv(prev);
           markOrbActive(prev);
           rebindLocalMcp(prev.id);
-        } catch (_) {}
+          try { require("./repair-active-box").repair(); } catch {}
+        } catch (rollbackError) {
+          throw new Error(
+            `profile switch failed: ${error.message}; previous-seat restore failed: ${rollbackError.message}`
+          );
+        }
       }
-      throw err;
+      throw error;
     }
   });
 }
